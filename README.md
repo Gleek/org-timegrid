@@ -107,18 +107,17 @@ after redraws.
 
 | Key | Action |
 |---|---|
-| `C-n` / `C-p`, arrows | Move to the next or previous time stop |
+| `C-n` / `C-p`, up/down | Move the cursor by 15 minutes |
 | `C-f` / `C-b`, left/right | Move through overlapping lanes, then days |
-| `M-down` / `M-up` | Move the cursor by 15 minutes |
 | `C-v` / `M-v`, `SPC` | Move by one screen |
 | `C-a` / `C-e` | Go to the first or last slot of the day |
 | `C-l` | Center the view on the cursor |
 | `n` / `p` | Select the next or previous block |
 | `RET` | Visit the selected block, or create one at the cursor |
 | `C-g` | Hide the cursor |
-| `M-S-down` / `M-S-up` | Move the selected block by 15 minutes |
-| `M-S-right` / `M-S-left` | Move the block by one day |
-| `M-S-s-right` / `M-S-s-left` | Copy the block by one day |
+| `M-down` / `M-up` | Move the selected block by 15 minutes |
+| `M-right` / `M-left` | Move the block by one day |
+| `M-s-right` / `M-s-left` | Copy the block by one day |
 | `S-down` / `S-up` | Move the end time |
 | `C-S-up` / `C-S-down` | Move the start time |
 | `t` | Enter a new time or range |
@@ -130,6 +129,9 @@ after redraws.
 | `j` / `.` | Jump to a date or today |
 | `g` | Reload the week from the backend |
 | `q` | Quit |
+
+Held movement and resize keys update the visible tiles immediately. The final
+range is written to the backend once keyboard input pauses.
 
 Horizontal motion, including `n` and `p`, crosses week boundaries. If the next
 week has no block to select, the calendar still opens it and leaves the cursor
@@ -205,7 +207,8 @@ priority, property, or file.
 | `org-timegrid-start-hour` / `org-timegrid-end-hour` | `0` / `24` | Hours drawn |
 | `org-timegrid-pixels-per-minute` | `0.9` | Week-view scale |
 | `org-timegrid-slot-minutes` | `15` | Cursor and edit granularity |
-| `org-timegrid-cursor-step-minutes` | `30` | Normal keyboard step |
+| `org-timegrid-cursor-step-minutes` | `15` | Normal keyboard step |
+| `org-timegrid-keyboard-commit-delay` | `0.25` | Idle delay before a moved block is saved |
 | `org-timegrid-default-duration-minutes` | `30` | Length used when no end is present |
 | `org-timegrid-block-gap` | `3` | Gap between blocks, in pixels |
 | `org-timegrid-corner-radius` | `0` | Block corner radius |

@@ -128,11 +128,9 @@ Keyboard creation offers it, and a backend event that has a start but no
 end is shown this long."
   :type 'integer)
 
-(defcustom org-timegrid-cursor-step-minutes 30
+(defcustom org-timegrid-cursor-step-minutes 15
   "Minutes the keyboard cursor moves per ordinary step.
-Fifteen minutes is too fine to cross a day with, so the ordinary step is
-half an hour and `org-timegrid-cursor-forward-slot' keeps the fine
-grain."
+The default matches `org-timegrid-slot-minutes'."
   :type 'integer)
 
 (defcustom org-timegrid-compact-font-size 11
@@ -164,6 +162,10 @@ half-hour block room for two lines of title."
   "Seconds between visible backend data refreshes."
   :type 'number)
 
+(defcustom org-timegrid-keyboard-commit-delay 0.25
+  "Idle seconds before a keyboard block movement is written to its backend."
+  :type 'number)
+
 (defcustom org-timegrid-buffer-name "*Org Time Grid*"
   "Name of the calendar buffer."
   :type 'string)
@@ -177,11 +179,24 @@ half-hour block room for two lines of title."
 (defvar-local org-timegrid--resize-timer nil)
 (defvar-local org-timegrid--clock-timer nil)
 (defvar-local org-timegrid--data-timer nil)
-(defvar-local org-timegrid--cursor-timer nil)
 (defvar-local org-timegrid--scroll-restore-timer nil)
+(defvar-local org-timegrid--keyboard-edit-timer nil)
+(defvar-local org-timegrid--keyboard-edit nil)
 (defvar-local org-timegrid--stale nil)
 (defvar-local org-timegrid--saved-vscroll 0
   "Pixel scroll position restored when this calendar is shown again.")
+(defvar-local org-timegrid--tile-height nil)
+(defvar-local org-timegrid--tile-count nil)
+(defvar-local org-timegrid--tile-width nil)
+(defvar-local org-timegrid--tile-markers nil)
+(defvar-local org-timegrid--static-inner nil)
+(defvar-local org-timegrid--static-images nil)
+(defvar-local org-timegrid--dynamic-tiles nil)
+(defvar-local org-timegrid--clock-fragment nil)
+(defvar-local org-timegrid--clock-tiles nil)
+(defvar-local org-timegrid--base-excluded-id nil)
+(defvar org-timegrid--static-render nil)
+(defvar org-timegrid--render-excluded-id nil)
 (defvar org-timegrid--theme-timer nil)
 (defvar-local org-timegrid--backend nil)
 (defvar-local org-timegrid--state nil)
@@ -344,7 +359,8 @@ after the reload is dropped."
       (setq-local org-timegrid--state
                   (plist-put org-timegrid--state :cursor cursor))
       (setq-local org-timegrid--state
-                  (plist-put org-timegrid--state :cursor-visible visible)))))
+                  (plist-put org-timegrid--state :cursor-visible visible)))
+    (setq-local org-timegrid--static-inner nil)))
 
 (defun org-timegrid--block (id)
   "Return the current renderer block identified by ID."
@@ -900,14 +916,21 @@ own."
          (blocks (plist-get org-timegrid--state :blocks)))
     (mapcan
      #'org-timegrid--display-segments
-     (if (null preview)
-         blocks
-       (append (if replace-id
-                   (cl-remove replace-id blocks
-                              :key (lambda (block) (plist-get block :id))
-                              :test #'equal)
-                 blocks)
-               (list (plist-get preview :block)))))))
+     (let ((display-blocks
+            (if (null preview)
+                blocks
+              (append (if replace-id
+                          (cl-remove replace-id blocks
+                                     :key (lambda (block)
+                                            (plist-get block :id))
+                                     :test #'equal)
+                        blocks)
+                      (list (plist-get preview :block))))))
+       (if org-timegrid--render-excluded-id
+           (cl-remove org-timegrid--render-excluded-id display-blocks
+                      :key (lambda (block) (plist-get block :id))
+                      :test #'equal)
+         display-blocks)))))
 
 (defun org-timegrid--window-width ()
   "Return the prototype window's body width in pixels."
@@ -927,6 +950,124 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                       (org-timegrid-week-start))
          (org-timegrid--load-state (org-timegrid-week-start)))))
     org-timegrid--state))
+
+(defun org-timegrid--draw-block
+    (svg block canvas-height start-minute scale column-width palette font-family)
+  "Draw BLOCK on SVG and return its hit-test geometry."
+  (let* ((day (plist-get block :day))
+         (day-x (+ org-timegrid--label-width (* day column-width)))
+         (horizontal (org-timegrid--layout-frame block day-x column-width))
+         (x (car horizontal))
+         (boundary-edge (plist-get block :boundary-edge))
+         (raw-y (cond ((eq boundary-edge 'top)
+                       (- canvas-height org-timegrid-midnight-grip-pixels))
+                      ((eq boundary-edge 'bottom) 0)
+                      (t (* (- (plist-get block :start) start-minute) scale))))
+         (raw-height
+          (if boundary-edge
+              (+ org-timegrid-midnight-grip-pixels org-timegrid-block-gap)
+            (* (- (plist-get block :end) (plist-get block :start)) scale)))
+         (gap org-timegrid-block-gap)
+         (y (+ raw-y (/ gap 2.0)))
+         (block-height (max 4 (- raw-height gap)))
+         (block-width (max 4 (- (cdr horizontal) 1)))
+         (selected (and (not org-timegrid--static-render)
+                        (not (plist-get block :preview))
+                        (equal (plist-get block :id)
+                               (org-timegrid--selected-id))))
+         (fill (org-timegrid--color block palette))
+         (accent (org-timegrid--accent block palette))
+         (font-size (if (< block-height 13) 8 10))
+         (line-height (if (= font-size 8) 10 13))
+         (characters (max 1 (floor (/ (- block-width 12)
+                                      (* font-size 0.62)))))
+         (max-lines (max 1 (floor (/ (max 1 (- block-height 3))
+                                     line-height))))
+         (title-lines (org-timegrid--wrap-title
+                       (plist-get block :title) characters max-lines))
+         (clip-id (format "occs-block-%s-%x" day
+                          (sxhash (plist-get block :id))))
+         (clip (svg-clip-path svg :id clip-id))
+         (radius (max 0 org-timegrid-corner-radius))
+         (accent-radius (min 1.5 (/ radius 2.0))))
+    (svg-rectangle clip x y block-width block-height :rx radius :ry radius)
+    (svg-rectangle svg x y block-width block-height
+                   :rx radius :ry radius :fill fill
+                   :fill-opacity (if (plist-get block :preview) 0.72 1)
+                   :stroke (if selected
+                               (plist-get palette :blue)
+                             (plist-get palette :background))
+                   :stroke-width (if selected 2 1))
+    (svg-rectangle svg (+ x 2) (+ y 2) 3 (max 1 (- block-height 4))
+                   :rx accent-radius :ry accent-radius :fill accent)
+    (cl-loop for line in (unless boundary-edge title-lines)
+             for index from 0 do
+             (svg-text svg line :x (+ x 9)
+                       :y (+ y (min (- block-height 1)
+                                    (+ (if (= font-size 8) 8 10)
+                                       (* index line-height))))
+                       :font-size font-size :font-weight "600"
+                       :font-family font-family
+                       :clip-path (format "url(#%s)" clip-id)
+                       :fill (if (plist-get block :done)
+                                 (plist-get palette :muted)
+                               (plist-get palette :foreground))))
+    (when (and (not boundary-edge) (< (length title-lines) max-lines))
+      (svg-text svg
+                (org-timegrid--format-range
+                 (or (plist-get block :source-start) (plist-get block :start))
+                 (or (plist-get block :source-end) (plist-get block :end)))
+                :x (+ x 9)
+                :y (+ y 10 (* (length title-lines) line-height))
+                :font-size 9 :font-family font-family
+                :clip-path (format "url(#%s)" clip-id)
+                :fill (plist-get palette :secondary-text)))
+    (list :id (plist-get block :id) :day day
+          :start (plist-get block :start) :end (plist-get block :end)
+          :x x :y y :width block-width :height block-height
+          :preview (plist-get block :preview)
+          :allow-top (plist-get block :allow-top)
+          :allow-bottom (plist-get block :allow-bottom)
+          :boundary-edge boundary-edge)))
+
+(defun org-timegrid--draw-current-time
+    (svg width height column-width palette font-family start-minute scale)
+  "Draw the current-time marker on SVG and return its Y coordinate."
+  (let* ((now (decode-time))
+         (today (calendar-absolute-from-gregorian (calendar-current-date)))
+         (today-day (- today (plist-get org-timegrid--state :week-start)))
+         (now-minute (+ (* 60 (decoded-time-hour now))
+                        (decoded-time-minute now))))
+    (when (and (<= 0 today-day 6)
+               (<= start-minute now-minute
+                   (* 60 org-timegrid-end-hour)))
+      (let* ((y (* (- now-minute start-minute) scale))
+             (today-x (+ org-timegrid--label-width
+                         (* today-day column-width)))
+             (label (format "%02d:%02d"
+                            (decoded-time-hour now)
+                            (decoded-time-minute now)))
+             (bubble-width 36)
+             (bubble-height 14)
+             (bubble-x (/ (- org-timegrid--label-width bubble-width) 2.0))
+             (bubble-right (+ bubble-x bubble-width))
+             (today-line-x (if (= today-day 0) bubble-right today-x))
+             (bubble-y (max 1 (min (- height bubble-height 1)
+                                   (- y (/ bubble-height 2.0))))))
+        (svg-line svg bubble-right y width y
+                  :stroke (plist-get palette :red) :stroke-width 2
+                  :stroke-opacity 0.16)
+        (svg-line svg today-line-x y (+ today-x column-width) y
+                  :stroke (plist-get palette :red) :stroke-width 2)
+        (when (> today-day 0)
+          (svg-circle svg today-x y 4 :fill (plist-get palette :red)))
+        (svg-rectangle svg bubble-x bubble-y bubble-width bubble-height
+                       :rx 7 :ry 7 :fill (plist-get palette :red))
+        (svg-text svg label :x (/ org-timegrid--label-width 2.0)
+                  :y (+ bubble-y 10) :font-size 8 :font-weight "600"
+                  :font-family font-family :text-anchor "middle"
+                  :fill "#ffffff")
+        y))))
 
 (defun org-timegrid--svg ()
   "Build the calendar SVG and update hit-test geometry."
@@ -981,101 +1122,15 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                            :fill (plist-get palette :time-label)))))
     (dotimes (day 7)
       (dolist (block (aref day-blocks day))
-        (let* ((day-x (+ org-timegrid--label-width
-                         (* day column-width)))
-               (horizontal
-                (org-timegrid--layout-frame
-                 block day-x column-width))
-               (x (car horizontal))
-               (boundary-edge (plist-get block :boundary-edge))
-               (raw-y
-                (cond ((eq boundary-edge 'top)
-                       (- height
-                          org-timegrid-midnight-grip-pixels))
-                      ((eq boundary-edge 'bottom) 0)
-                      (t (* (- (plist-get block :start) start-minute) scale))))
-               (raw-height
-                (if boundary-edge
-                    (+ org-timegrid-midnight-grip-pixels
-                       org-timegrid-block-gap)
-                  (* (- (plist-get block :end)
-                        (plist-get block :start)) scale)))
-               (gap org-timegrid-block-gap)
-               (y (+ raw-y (/ gap 2.0)))
-               (block-height (max 4 (- raw-height gap)))
-               (block-width
-                (max 4
-                     (- (cdr horizontal) 1)))
-               (selected (and (not (plist-get block :preview))
-                              (equal (plist-get block :id)
-                                     (org-timegrid--selected-id))))
-               (fill (org-timegrid--color block palette))
-               (accent (org-timegrid--accent block palette))
-               (title (plist-get block :title))
-               (font-size (if (< block-height 13) 8 10))
-               (line-height (if (= font-size 8) 10 13))
-               (characters
-                (max 1 (floor (/ (- block-width 12)
-                                 (* font-size 0.62)))))
-               (max-lines
-                (max 1 (floor (/ (max 1 (- block-height 3)) line-height))))
-               (title-lines
-                (org-timegrid--wrap-title
-                 title characters max-lines))
-               (clip-id (format "occs-block-%s-%x"
-                                day (sxhash (plist-get block :id))))
-               (clip (svg-clip-path svg :id clip-id))
-               (radius (max 0 org-timegrid-corner-radius))
-               (accent-radius (min 1.5 (/ radius 2.0))))
-          (svg-rectangle clip x y block-width block-height
-                         :rx radius :ry radius)
-          (push (list :id (plist-get block :id) :day day
-                      :start (plist-get block :start) :end (plist-get block :end)
-                      :x x :y y :width block-width :height block-height
-                      :preview (plist-get block :preview)
-                      :allow-top (plist-get block :allow-top)
-                      :allow-bottom (plist-get block :allow-bottom)
-                      :boundary-edge boundary-edge)
-                geometry)
-          (svg-rectangle svg x y block-width block-height
-                         :rx radius :ry radius :fill fill
-                         :fill-opacity (if (plist-get block :preview) 0.72 1)
-                         :stroke (if selected
-                                     (plist-get palette :blue)
-                                   (plist-get palette :background))
-                         :stroke-width (if selected 2 1))
-          (svg-rectangle svg (+ x 2) (+ y 2) 3 (max 1 (- block-height 4))
-                         :rx accent-radius :ry accent-radius :fill accent)
-          (cl-loop for line in (unless boundary-edge title-lines)
-                   for index from 0 do
-                   (svg-text svg line :x (+ x 9)
-                             :y (+ y (min (- block-height 1)
-                                          (+ (if (= font-size 8) 8 10)
-                                             (* index line-height))))
-                             :font-size font-size :font-weight "600"
-                             :font-family font-family
-                             :clip-path (format "url(#%s)" clip-id)
-                             :fill (if (plist-get block :done)
-                                       (plist-get palette :muted)
-                                     (plist-get palette :foreground))))
-          (when (and (not boundary-edge)
-                     (< (length title-lines) max-lines))
-            (svg-text svg
-                      (org-timegrid--format-range
-                       (or (plist-get block :source-start)
-                           (plist-get block :start))
-                       (or (plist-get block :source-end)
-                           (plist-get block :end)))
-                      :x (+ x 9)
-                      :y (+ y 10 (* (length title-lines) line-height))
-                      :font-size 9
-                      :font-family font-family
-                      :clip-path (format "url(#%s)" clip-id)
-                      :fill (plist-get palette :secondary-text))))))
+        (push (org-timegrid--draw-block
+               svg block height start-minute scale column-width
+               palette font-family)
+              geometry)))
     ;; The keyboard cursor is one fifteen-minute slot drawn over the blocks.
     ;; Its fill is translucent so a block underneath stays readable, and it
     ;; is drawn only while visible.
-    (when-let* (((org-timegrid--cursor-visible-p))
+    (when-let* (((not org-timegrid--static-render))
+                ((org-timegrid--cursor-visible-p))
                 ;; A selected block already draws its own outline, and two
                 ;; borders around one slot read as a bug.
                 ((null (org-timegrid--selected-id)))
@@ -1097,47 +1152,226 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                          :stroke (plist-get palette :cursor)
                          :stroke-width 1
                          :rx org-timegrid-corner-radius))))
-    (let* ((now (decode-time))
-           (today (calendar-absolute-from-gregorian (calendar-current-date)))
-           (today-day (- today (plist-get org-timegrid--state :week-start)))
-           (now-minute (+ (* 60 (decoded-time-hour now))
-                          (decoded-time-minute now))))
-      (when (and (<= 0 today-day 6)
-                 (<= start-minute now-minute end-minute))
-        (let* ((y (* (- now-minute start-minute) scale))
-               (today-x (+ org-timegrid--label-width
-                            (* today-day column-width)))
-               (label (format "%02d:%02d"
-                              (decoded-time-hour now)
-                              (decoded-time-minute now)))
-               (bubble-width 34)
-               (bubble-height 12)
-               (bubble-x (/ (- org-timegrid--label-width bubble-width) 2.0))
-               (bubble-right (+ bubble-x bubble-width))
-               (today-line-x (if (= today-day 0) bubble-right today-x))
-               (bubble-y (max 1 (min (- height bubble-height 1)
-                                     (- y (/ bubble-height 2.0))))))
-          ;; Keep the line as quiet context in the other day columns.  The
-          ;; opaque segment and dot make today's column unambiguous.
-          (svg-line svg bubble-right y width y
-                    :stroke (plist-get palette :red) :stroke-width 2
-                    :stroke-opacity 0.16)
-          (svg-line svg today-line-x y (+ today-x column-width) y
-                    :stroke (plist-get palette :red) :stroke-width 2)
-          ;; On the first day the pill meets today's line, so a dot at the
-          ;; same join only makes the marker look swollen.
-          (when (> today-day 0)
-            (svg-circle svg today-x y 4
-                        :fill (plist-get palette :red)))
-          (svg-rectangle svg bubble-x bubble-y bubble-width
-                         bubble-height :rx 6 :ry 6
-                         :fill (plist-get palette :red))
-          (svg-text svg label :x (/ org-timegrid--label-width 2.0)
-                    :y (+ bubble-y 9) :font-size 7 :font-weight "600"
-                    :font-family font-family :text-anchor "middle"
-                    :fill "#ffffff"))))
+    (unless org-timegrid--static-render
+      (org-timegrid--draw-current-time
+       svg width height column-width palette font-family start-minute scale))
     (setq-local org-timegrid--geometry geometry)
     svg))
+
+(defun org-timegrid--svg-inner-xml (svg)
+  "Return SVG's serialized child elements."
+  (with-temp-buffer
+    (svg-print svg)
+    (let* ((xml (buffer-string))
+           (start (1+ (string-match ">" xml)))
+           (end (string-match "</svg>\\'" xml)))
+      (substring xml start end))))
+
+(defun org-timegrid--update-clock-fragment ()
+  "Rebuild the current-time fragment and remember its overlapping tiles."
+  (let* ((svg (svg-create org-timegrid--tile-width org-timegrid--image-height
+                          :stroke-width 0))
+         (palette (org-timegrid--palette))
+         (font-family (let ((family (face-attribute 'default :family nil t)))
+                        (if (stringp family) family "monospace")))
+         (start-minute (* 60 org-timegrid-start-hour))
+         (column-width (/ (- org-timegrid--tile-width
+                             org-timegrid--label-width)
+                          7.0))
+         (y (org-timegrid--draw-current-time
+             svg org-timegrid--tile-width org-timegrid--image-height
+             column-width palette font-family start-minute
+             org-timegrid-pixels-per-minute)))
+    (setq-local org-timegrid--clock-fragment
+                (and y (org-timegrid--svg-inner-xml svg))
+                org-timegrid--clock-tiles
+                (and y
+                     (let ((first
+                            (max 0 (floor (- y 7)
+                                          org-timegrid--tile-height)))
+                           (last
+                            (min (1- org-timegrid--tile-count)
+                                 (floor (min (1- org-timegrid--image-height)
+                                             (+ y 7))
+                                        org-timegrid--tile-height))))
+                       (number-sequence first last))))))
+
+(defun org-timegrid--tile-xml (tile &optional fragment)
+  "Return the complete SVG document for TILE and dynamic FRAGMENT."
+  (let* ((y (* tile org-timegrid--tile-height))
+         (height (min org-timegrid--tile-height
+                      (- org-timegrid--image-height y))))
+    (format
+     (concat "<svg width=\"%s\" height=\"%s\" viewBox=\"0 %s %s %s\" "
+             "version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" "
+             "xmlns:xlink=\"http://www.w3.org/1999/xlink\">%s%s</svg>")
+     org-timegrid--tile-width height y org-timegrid--tile-width height
+     org-timegrid--static-inner (or fragment ""))))
+
+(defun org-timegrid--tile-image-map (tile)
+  "Return the production image map clipped and translated for TILE."
+  (let* ((top (* tile org-timegrid--tile-height))
+         (bottom (min org-timegrid--image-height
+                      (+ top org-timegrid--tile-height)))
+         translated)
+    (dolist (entry (org-timegrid--image-map))
+      (pcase-let* ((`(,shape ,id ,properties) entry)
+                   (`(rect . ((,left . ,y) . (,right . ,end))) shape))
+        (when (and (< y bottom) (> end top))
+          (push (list `(rect . ((,left . ,(max 0 (- y top)))
+                                . (,right . ,(- (min end bottom) top))))
+                      id properties)
+                translated))))
+    (nreverse translated)))
+
+(defun org-timegrid--make-tile-image (tile &optional fragment)
+  "Create TILE's image, adding optional dynamic SVG FRAGMENT."
+  (let ((map (org-timegrid--tile-image-map tile))
+        (fragment (concat (and (memq tile org-timegrid--clock-tiles)
+                               org-timegrid--clock-fragment)
+                          fragment)))
+    (if map
+        (create-image (org-timegrid--tile-xml tile fragment) 'svg t
+                      :ascent 90 :map map :original-map map)
+      (create-image (org-timegrid--tile-xml tile fragment) 'svg t
+                    :ascent 90))))
+
+(defun org-timegrid--cache-static-tiles (&optional excluded-id)
+  "Cache hour tiles, omitting EXCLUDED-ID from their static layer."
+  (let ((org-timegrid--static-render t)
+        (org-timegrid--render-excluded-id excluded-id)
+        (org-timegrid--state (copy-tree org-timegrid--state)))
+    (setq org-timegrid--state (plist-put org-timegrid--state :preview nil))
+    (setq org-timegrid--state
+          (plist-put org-timegrid--state :cursor-visible nil))
+    (let ((svg (org-timegrid--svg)))
+      (setq-local org-timegrid--static-inner (org-timegrid--svg-inner-xml svg)
+                  org-timegrid--tile-width (dom-attr svg 'width)
+                  org-timegrid--tile-height
+                  (ceiling (* 60 org-timegrid-pixels-per-minute))
+                  org-timegrid--tile-count
+                  (ceiling (/ (float org-timegrid--image-height)
+                              (ceiling (* 60 org-timegrid-pixels-per-minute))))
+                  org-timegrid--base-excluded-id excluded-id)))
+  (org-timegrid--update-clock-fragment)
+  (setq-local org-timegrid--static-images
+              (make-vector org-timegrid--tile-count nil))
+  (dotimes (tile org-timegrid--tile-count)
+    (aset org-timegrid--static-images tile
+          (org-timegrid--make-tile-image tile))))
+
+(defun org-timegrid--dynamic-blocks ()
+  "Return laid-out blocks belonging to the current dynamic layer."
+  (let* ((preview (plist-get org-timegrid--state :preview))
+         (selected (and (null preview) (org-timegrid--selected-id)))
+         (blocks (org-timegrid--effective-blocks)))
+    (when (or preview selected)
+      (cl-loop for day from 0 below 7
+               append
+               (cl-remove-if-not
+                (lambda (block)
+                  (and (not (plist-get block :boundary-edge))
+                       (if preview
+                           (plist-get block :preview)
+                         (equal (plist-get block :id) selected))))
+                (org-timegrid--layout-day blocks day))))))
+
+(defun org-timegrid--geometry-tiles (geometry)
+  "Return the tile indices intersected by GEOMETRY."
+  (let* ((first (max 0 (floor (plist-get geometry :y)
+                              org-timegrid--tile-height)))
+         (last (min (1- org-timegrid--tile-count)
+                    (floor (+ (plist-get geometry :y)
+                              (plist-get geometry :height) -0.001)
+                           org-timegrid--tile-height))))
+    (number-sequence first last)))
+
+(defun org-timegrid--dynamic-fragment ()
+  "Return dynamic SVG XML followed by the tiles it intersects."
+  (let* ((svg (svg-create org-timegrid--tile-width org-timegrid--image-height
+                          :stroke-width 0))
+         (palette (org-timegrid--palette))
+         (font-family (let ((family (face-attribute 'default :family nil t)))
+                        (if (stringp family) family "monospace")))
+         (start-minute (* 60 org-timegrid-start-hour))
+         (column-width (/ (- org-timegrid--tile-width
+                             org-timegrid--label-width)
+                          7.0))
+         (preview (plist-get org-timegrid--state :preview))
+         (selected (and (null preview) (org-timegrid--selected-id)))
+         geometry tiles)
+    (dolist (block (org-timegrid--dynamic-blocks))
+      (let ((item (org-timegrid--draw-block
+                   svg block org-timegrid--image-height start-minute
+                   org-timegrid-pixels-per-minute column-width
+                   palette font-family)))
+        (push item geometry)
+        (dolist (tile (org-timegrid--geometry-tiles item))
+          (cl-pushnew tile tiles))))
+    (when (and (null preview) (org-timegrid--cursor-visible-p)
+               (null selected))
+      (when-let ((rectangle (org-timegrid--cursor-rectangle
+                             org-timegrid--geometry)))
+        (svg-rectangle svg
+                       (plist-get rectangle :x) (plist-get rectangle :y)
+                       (plist-get rectangle :width) (plist-get rectangle :height)
+                       :fill (plist-get palette :cursor)
+                       :fill-opacity org-timegrid-cursor-opacity
+                       :stroke (plist-get palette :cursor) :stroke-width 1
+                       :rx org-timegrid-corner-radius)
+        (dolist (tile (org-timegrid--geometry-tiles rectangle))
+          (cl-pushnew tile tiles))))
+    (cons (org-timegrid--svg-inner-xml svg) (sort tiles #'<))))
+
+(defun org-timegrid--set-tile-image (tile image)
+  "Display IMAGE at TILE's buffer marker."
+  (let ((marker (aref org-timegrid--tile-markers tile))
+        (inhibit-read-only t))
+    (put-text-property marker (1+ marker) 'display image)))
+
+(defun org-timegrid--render-dynamic (&optional redisplay-now)
+  "Redraw only tiles touched by cursor selection or a drag preview."
+  (let* ((preview (plist-get org-timegrid--state :preview))
+         (excluded (and preview (plist-get preview :replace-id))))
+    (when (and (vectorp org-timegrid--tile-markers)
+               (not (equal excluded org-timegrid--base-excluded-id)))
+      (let* ((window (get-buffer-window (current-buffer) t))
+             (scroll (and window
+                          (org-timegrid--window-scroll-pixels window))))
+        (org-timegrid--cache-static-tiles excluded)
+        (org-timegrid--insert-tiles)
+        (when window (org-timegrid--set-vscroll window scroll)))))
+  (pcase-let* ((`(,fragment . ,new-tiles) (org-timegrid--dynamic-fragment))
+               (changed (delete-dups
+                         (append new-tiles org-timegrid--dynamic-tiles))))
+    (dolist (tile changed)
+      (org-timegrid--set-tile-image
+       tile
+       (if (memq tile new-tiles)
+           (org-timegrid--make-tile-image tile fragment)
+         (aref org-timegrid--static-images tile))))
+    (setq-local org-timegrid--dynamic-tiles new-tiles)
+    (set-buffer-modified-p nil)
+    (when redisplay-now (redisplay t))))
+
+(defun org-timegrid--insert-tiles ()
+  "Replace the buffer with the cached hour tiles."
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+    (setq-local org-timegrid--tile-markers
+                (make-vector org-timegrid--tile-count nil))
+    (dotimes (tile org-timegrid--tile-count)
+      (let ((start (point)))
+        (aset org-timegrid--tile-markers tile start)
+        (insert (propertize " "
+                            'org-timegrid-tile tile
+                            'occs-svg-image t
+                            'help-echo
+                            "Drag empty time to create; drag blocks to move or resize"
+                            'display (aref org-timegrid--static-images tile)))
+        (insert "\n")))
+    (setq-local org-timegrid--dynamic-tiles nil)
+    (set-buffer-modified-p nil)))
 
 (defun org-timegrid--header ()
   "Return a pixel-aligned SVG header for the calendar."
@@ -1255,33 +1489,24 @@ leave no central move target."
     (append edges bodies)))
 
 (defun org-timegrid--refresh (&optional preserve-scroll)
-  "Redraw the SVG, preserving pixel scroll when PRESERVE-SCROLL is non-nil."
+  "Rebuild cached tiles, preserving pixel scroll when requested."
   (org-timegrid--ensure-state)
   (let* ((window (get-buffer-window (current-buffer) t))
-         (window-vscroll (and window (window-vscroll window t)))
          (vscroll (and preserve-scroll window
-                       (if (and (zerop window-vscroll)
+                       (let ((current (org-timegrid--window-scroll-pixels
+                                       window)))
+                         (if (and (zerop current)
                                 (> org-timegrid--saved-vscroll 0))
-                           org-timegrid--saved-vscroll
-                         window-vscroll)))
-         (inhibit-read-only t)
-         (previewp (plist-get org-timegrid--state :preview))
-         (svg (org-timegrid--svg))
-         (image-map (and (not previewp)
-                         (org-timegrid--image-map)))
-         (image (if image-map
-                    (svg-image svg :ascent 0
-                               :map image-map :original-map image-map)
-                  (svg-image svg :ascent 0))))
+                             org-timegrid--saved-vscroll
+                           current))))
+         (previewp (plist-get org-timegrid--state :preview)))
     (when (overlayp org-timegrid--pointer-overlay)
       (delete-overlay org-timegrid--pointer-overlay)
       (setq-local org-timegrid--pointer-overlay nil))
-    (erase-buffer)
-    (let ((start (point)))
-      (insert-image image " ")
-      (add-text-properties start (point)
-                           '(occs-svg-image t
-                             help-echo "Drag empty time to create; drag blocks to move or resize")))
+    (org-timegrid--cache-static-tiles
+     (and previewp (plist-get previewp :replace-id)))
+    (org-timegrid--insert-tiles)
+    (org-timegrid--render-dynamic)
     (unless (and previewp header-line-format)
       (setq-local header-line-format
                   (org-timegrid--header)))
@@ -1294,9 +1519,30 @@ leave no central move target."
       (when vscroll
         (org-timegrid--set-vscroll window vscroll)))))
 
+(defun org-timegrid--window-scroll-pixels (window)
+  "Return WINDOW's absolute pixel offset in the tiled calendar."
+  (let* ((start (window-start window))
+         (tile (or (get-text-property start 'org-timegrid-tile) 0)))
+    (+ (* tile (or org-timegrid--tile-height 0))
+       (window-vscroll window t))))
+
 (defun org-timegrid--set-vscroll (window pixels)
   "Set WINDOW's pixel scroll to PIXELS and remember it."
-  (set-window-vscroll window pixels t)
+  (let* ((pixels (max 0 (round pixels)))
+         (height (max 1 (or org-timegrid--tile-height 1)))
+         (tile (min (max 0 (1- (or org-timegrid--tile-count 1)))
+                    (floor pixels height)))
+         (within (% pixels height)))
+    (when (and (vectorp org-timegrid--tile-markers)
+               (< tile (length org-timegrid--tile-markers)))
+      (let ((marker (aref org-timegrid--tile-markers tile)))
+        (set-window-start window marker t)
+        (set-window-point
+         window
+         (aref org-timegrid--tile-markers
+               (min (1- (length org-timegrid--tile-markers))
+                    (1+ tile))))))
+    (set-window-vscroll window within t))
   (setq-local org-timegrid--saved-vscroll pixels))
 
 (defun org-timegrid--restore-scroll (window)
@@ -1314,7 +1560,7 @@ leave no central move target."
     (setq-local
      org-timegrid--scroll-restore-timer
      (run-at-time
-      0 nil
+      0.01 nil
       (lambda ()
         (when (buffer-live-p buffer)
           (with-current-buffer buffer
@@ -1326,7 +1572,6 @@ leave no central move target."
   (dolist (window (window-list frame 'no-minibuffer))
     (with-current-buffer (window-buffer window)
       (when (and (derived-mode-p 'org-timegrid-mode)
-                 (zerop (window-vscroll window t))
                  (> org-timegrid--saved-vscroll 0))
         (org-timegrid--schedule-scroll-restore window)))))
 
@@ -1371,7 +1616,7 @@ leave no central move target."
   (dolist (timer (list org-timegrid--resize-timer
                        org-timegrid--clock-timer
                        org-timegrid--data-timer
-                       org-timegrid--cursor-timer
+                       org-timegrid--keyboard-edit-timer
                        org-timegrid--scroll-restore-timer))
     (when (timerp timer) (cancel-timer timer))))
 
@@ -1381,7 +1626,18 @@ leave no central move target."
     (with-current-buffer buffer
       (when (and (derived-mode-p 'org-timegrid-mode)
                  (null (plist-get org-timegrid--state :preview)))
-        (org-timegrid--refresh t)))))
+        (let ((old-tiles org-timegrid--clock-tiles))
+          (org-timegrid--update-clock-fragment)
+          (dolist (tile (delete-dups
+                         (append old-tiles org-timegrid--clock-tiles)))
+            (aset org-timegrid--static-images tile
+                  (org-timegrid--make-tile-image tile))
+            (unless (memq tile org-timegrid--dynamic-tiles)
+              (org-timegrid--set-tile-image
+               tile (aref org-timegrid--static-images tile))))
+          (when org-timegrid--dynamic-tiles
+            (org-timegrid--render-dynamic))
+          (redisplay t))))))
 
 (defun org-timegrid--data-tick (buffer)
   "Reload visible calendar BUFFER, or mark it stale while hidden."
@@ -1389,19 +1645,25 @@ leave no central move target."
     (with-current-buffer buffer
       (when (derived-mode-p 'org-timegrid-mode)
         (if (get-buffer-window buffer t)
-            (org-timegrid-refresh)
+            (org-timegrid--refresh-data)
           (setq-local org-timegrid--stale t))))))
 
 (defun org-timegrid--position-image-xy (position)
-  "Return stable full-SVG pixel coordinates for mouse POSITION.
+  "Return stable full-calendar pixel coordinates for mouse POSITION.
 Use window-relative X so crossing image-map hotspots and day columns cannot
-reset the horizontal origin.  Glyph-relative Y retains the position within the
-tall, pixel-scrolled SVG."
-  (let ((window-xy (posn-x-y position))
-        (object-xy (posn-object-x-y position)))
+reset the horizontal origin.  Add the tile offset to glyph-relative Y."
+  (let* ((window-xy (posn-x-y position))
+         (object-xy (posn-object-x-y position))
+         (point (posn-point position))
+         (tile (and (integer-or-marker-p point)
+                    (or (get-text-property point 'org-timegrid-tile)
+                        (and (> point (point-min))
+                             (get-text-property (1- point)
+                                                'org-timegrid-tile))))))
     (when (or window-xy object-xy)
       (cons (or (car-safe window-xy) (car-safe object-xy))
-            (or (cdr-safe object-xy) (cdr-safe window-xy))))))
+            (+ (* (or tile 0) (or org-timegrid--tile-height 0))
+               (or (cdr-safe object-xy) (cdr-safe window-xy)))))))
 
 (defun org-timegrid--target (position)
   "Return calendar metadata at mouse POSITION in the SVG image."
@@ -1445,7 +1707,7 @@ tall, pixel-scrolled SVG."
   (let ((preview (and proposal (not (plist-get proposal :error)) proposal)))
     (unless (equal preview (plist-get org-timegrid--state :preview))
       (setq-local org-timegrid--state (plist-put org-timegrid--state :preview preview))
-      (org-timegrid--refresh t))))
+      (org-timegrid--render-dynamic t))))
 
 (defun org-timegrid--clear-preview ()
   "Remove a pending SVG preview."
@@ -1464,8 +1726,7 @@ undoing the undo, which is what `undo' does at a keyboard."
     (funcall undoer
              (and (memq last-command '(org-timegrid-undo org-timegrid-redo)) t)
              redo)
-    ;; Not interactively: a reload must not forget the cursor.
-    (org-timegrid-refresh)))
+    (org-timegrid--refresh-data)))
 
 (defun org-timegrid-undo ()
   "Undo the calendar's most recent edit, in the file it touched."
@@ -1488,7 +1749,7 @@ requiring a trip to the file.  Declining keeps the timestamp removed."
               ((y-or-n-p (format "Delete entry \"%s\" too? "
                                  (org-timegrid-event-title event)))))
     (funcall deleter event)
-    (org-timegrid-refresh)))
+    (org-timegrid--refresh-data)))
 
 (defun org-timegrid-remove-selected (&optional keep-entry)
   "Remove the selected block from its calendar source.
@@ -1504,7 +1765,7 @@ cut wants: the entry has to survive for the yank to copy it."
         (unless (and event (functionp deleter))
           (user-error "This backend cannot remove calendar entries"))
         (funcall deleter event)
-        (org-timegrid-refresh)
+        (org-timegrid--refresh-data)
         (unless keep-entry
           (org-timegrid--offer-entry-deletion event))))))
 
@@ -1526,7 +1787,7 @@ cut wants: the entry has to survive for the yank to copy it."
                      (org-timegrid-event-start event)
                      (org-timegrid-event-end event)
                      title)
-            (org-timegrid-refresh)))))))
+            (org-timegrid--refresh-data)))))))
 
 (defun org-timegrid--read-title (&optional initial)
   "Read a block title in the echo area, prefilled with INITIAL."
@@ -1551,7 +1812,7 @@ cut wants: the entry has to survive for the yank to copy it."
     (if target
         (funcall creator title (car range) (cdr range) source-event target)
       (funcall creator title (car range) (cdr range) source-event))
-    (org-timegrid-refresh)))
+    (org-timegrid--refresh-data)))
 
 (defun org-timegrid--read-entry ()
   "Read a title and optional existing record for a new block."
@@ -1574,9 +1835,9 @@ cut wants: the entry has to survive for the yank to copy it."
     (condition-case error-data
         (progn
           (funcall updater event (car range) (cdr range))
-          (org-timegrid-refresh))
+          (org-timegrid--refresh-data))
       (error
-       (org-timegrid-refresh)
+       (org-timegrid--refresh-data)
        (signal (car error-data) (cdr error-data))))))
 
 (defun org-timegrid--apply (proposal)
@@ -1625,7 +1886,7 @@ selects nothing.  The mouse and the keyboard drive one shared cursor."
       (when (and (plist-get target :day) (plist-get target :minute))
         (org-timegrid--set-cursor (plist-get target :day)
                                   (plist-get target :minute))
-        (org-timegrid--refresh t)))))
+        (org-timegrid--render-dynamic t)))))
 
 (defun org-timegrid-visit (event)
   "Visit the source event under double-click mouse EVENT."
@@ -1747,7 +2008,8 @@ Leave the first non-motion event for the gesture loop to process."
                             (window-body-height window t))))
                  (next
                   (max 0 (min maximum
-                              (+ (window-vscroll window t) pixels)))))
+                              (+ (org-timegrid--window-scroll-pixels window)
+                                 pixels)))))
             (org-timegrid--set-vscroll window next)))))))
 
 (defun org-timegrid--event-window (event)
@@ -1759,35 +2021,13 @@ Leave the first non-motion event for the gesture loop to process."
          window)))
 
 ;;; Keyboard cursor
-;;
-;; A full redraw of a realistic week costs about fifteen milliseconds, which
-;; keeps up with a single keypress comfortably.  Held auto-repeat can outrun
-;; it, so a burst updates the cursor in state and paints once when input
-;; stops, mirroring how `org-timegrid--latest-motion-event' collapses queued
-;; mouse motion.
-
-(defun org-timegrid--cursor-flush (buffer)
-  "Draw BUFFER's pending cursor movement."
-  (when (buffer-live-p buffer)
-    (with-current-buffer buffer
-      (setq-local org-timegrid--cursor-timer nil)
-      (when (derived-mode-p 'org-timegrid-mode)
-        (org-timegrid--refresh t)
-        (org-timegrid--scroll-cursor-into-view)))))
 
 (defun org-timegrid--cursor-moved ()
-  "Redraw after a cursor move, coalescing a burst of held keys."
-  (if (input-pending-p)
-      (let ((buffer (current-buffer)))
-        (unless (timerp org-timegrid--cursor-timer)
-          (setq-local org-timegrid--cursor-timer
-                      (run-with-idle-timer
-                       0 nil #'org-timegrid--cursor-flush buffer))))
-    (when (timerp org-timegrid--cursor-timer)
-      (cancel-timer org-timegrid--cursor-timer)
-      (setq-local org-timegrid--cursor-timer nil))
-    (org-timegrid--refresh t)
-    (org-timegrid--scroll-cursor-into-view)))
+  "Redraw the cursor's changed tiles and keep it visible."
+  (if org-timegrid--static-inner
+      (org-timegrid--render-dynamic)
+    (org-timegrid--refresh t))
+  (org-timegrid--scroll-cursor-into-view))
 
 (defun org-timegrid--scroll-cursor-into-view ()
   "Scroll the minimum amount that makes the whole cursor slot visible."
@@ -1798,7 +2038,7 @@ Leave the first non-motion event for the gesture loop to process."
            (top (* (- (plist-get cursor :minute) start-minute) scale))
            (bottom (+ top (* org-timegrid-slot-minutes scale)))
            (body (window-body-height window t))
-           (vscroll (window-vscroll window t))
+           (vscroll (org-timegrid--window-scroll-pixels window))
            (maximum (max 0 (- (or org-timegrid--image-height 0) body))))
       (cond
        ((< top vscroll)
@@ -1838,105 +2078,15 @@ the cursor never moves to satisfy the scroll."
                                 (+ (plist-get cursor :minute) minutes)))
     (org-timegrid--cursor-moved)))
 
-(defun org-timegrid--step-to-boundary (minute count)
-  "Return MINUTE moved COUNT steps onto absolute clock boundaries.
-From 02:15 one step forward is 03:00, not 03:15, so stepping always lands
-on the hour rather than carrying an arbitrary offset around."
-  (let* ((step (max 1 org-timegrid-cursor-step-minutes))
-         (direction (if (< count 0) -1 1))
-         (remaining (abs count))
-         (result minute))
-    (while (> remaining 0)
-      (setq result
-            (if (> direction 0)
-                (* step (1+ (floor result step)))
-              ;; Floor first so a mid-step position steps back to the
-              ;; boundary below it rather than a full step past it.
-              (let ((floored (* step (floor result step))))
-                (if (= floored result) (- result step) floored))))
-      (setq remaining (1- remaining)))
-    result))
-
-(defun org-timegrid--snap-toward (minute direction)
-  "Round MINUTE onto the slot grid, in DIRECTION.
-Org ranges need not be slot-aligned: a block ending at 14:10 has to
-become 14:15 going forward, or a stop would send the cursor backwards and
-so appear stuck."
-  (let ((slot org-timegrid-slot-minutes))
-    (if (> direction 0)
-        (* slot (ceiling minute slot))
-      (* slot (floor minute slot)))))
-
 (defun org-timegrid--lane-count (day minute)
   "Return how many blocks start in the slot at DAY and MINUTE."
   (length (org-timegrid--blocks-starting-at day minute)))
 
-(defun org-timegrid--next-stop (day minute direction)
-  "Return the next cursor stop from MINUTE on DAY going DIRECTION.
-One step at a time, unless a block edge falls in between.  Both starts
-and ends are stops, so a block can be neither stepped over nor have the
-gap after it skipped."
-  (let* ((boundary (org-timegrid--step-to-boundary minute direction))
-         (edges
-          (delete-dups
-           (mapcan
-            (lambda (block)
-              (append
-               ;; A start snaps down, onto the slot that contains it and so
-               ;; selects the block; an end snaps up, onto the first free
-               ;; slot after it.  Snapping by direction instead would make
-               ;; the two directions disagree about off-grid edges.
-               (list (org-timegrid--snap-toward (plist-get block :start) -1))
-               ;; An end at or past midnight is not a slot in this day.
-               (when (< (plist-get block :end) (* 60 24))
-                 (list (org-timegrid--snap-toward
-                        (plist-get block :end) 1)))))
-            (seq-filter (lambda (block)
-                          (and (not (plist-get block :preview))
-                               (= (plist-get block :day) day)))
-                        (plist-get org-timegrid--state :blocks)))))
-         (between (seq-filter
-                   (lambda (edge)
-                     (if (> direction 0)
-                         (and (> edge minute) (< edge boundary))
-                       (and (< edge minute) (> edge boundary))))
-                   edges)))
-    (cond
-     ((null between) boundary)
-     ((> direction 0) (apply #'min between))
-     (t (apply #'max between)))))
-
 (defun org-timegrid-cursor-forward (&optional count)
-  "Move the cursor COUNT stops later.
-A stop is the next step boundary, or a block edge when one comes first.
-Where several blocks share a start, each of their lanes is a stop as
-well, so vertical motion alone reaches both of two events beginning at
-the same minute rather than only the shortest."
+  "Move the cursor COUNT fifteen-minute slots later."
   (interactive "p")
-  (if (org-timegrid--reveal-cursor)
-      (org-timegrid--cursor-moved)
-    (let* ((count (or count 1))
-           (direction (if (< count 0) -1 1))
-           (cursor (org-timegrid--cursor))
-           (day (plist-get cursor :day))
-           (minute (plist-get cursor :minute))
-           (lane (or (plist-get cursor :lane) 0)))
-      (dotimes (_ (abs count))
-        (cond
-         ((and (> direction 0)
-               (< (1+ lane) (org-timegrid--lane-count day minute)))
-          (setq lane (1+ lane)))
-         ((and (< direction 0) (> lane 0))
-          (setq lane (1- lane)))
-         (t
-          (setq minute (org-timegrid--next-stop day minute direction))
-          ;; Arriving from below lands on the slot's last lane, so moving
-          ;; back up retraces exactly the lanes moving down visited.
-          (setq lane (if (> direction 0)
-                         0
-                       (max 0 (1- (org-timegrid--lane-count day minute))))))))
-      (org-timegrid--set-cursor day minute lane))
-    (org-timegrid--cursor-moved)))
+  (org-timegrid--move-cursor
+   (* (or count 1) org-timegrid-cursor-step-minutes) 0))
 
 (defun org-timegrid-cursor-backward (&optional count)
   "Move the cursor COUNT stops earlier."
@@ -2059,7 +2209,9 @@ co-starting entries stay individually reachable."
     (org-timegrid--set-cursor day start lane)
     (setq-local org-timegrid--state
                 (plist-put org-timegrid--state :cursor-visible t))
-    (org-timegrid--refresh t)
+    (if org-timegrid--static-inner
+        (org-timegrid--render-dynamic t)
+      (org-timegrid--refresh t))
     (org-timegrid--scroll-cursor-into-view)))
 
 (defun org-timegrid--move-selection (direction)
@@ -2170,35 +2322,97 @@ twice.  Following by id also picks up the block's new lane."
     (org-timegrid--set-cursor day minute 0)
     (setq-local org-timegrid--state
                 (plist-put org-timegrid--state :cursor-visible t))
-    (org-timegrid--refresh t)
+    (org-timegrid--render-dynamic t)
     (org-timegrid--scroll-cursor-into-view)))
+
+(defun org-timegrid--keyboard-proposal (block minutes days edge)
+  "Return a preview that moves BLOCK by MINUTES and DAYS at EDGE."
+  (let* ((copy (copy-sequence block))
+         (start (+ (* (plist-get block :day) 1440)
+                   (plist-get block :start)))
+         (end (+ (* (plist-get block :day) 1440)
+                 (plist-get block :end)))
+         (delta (+ minutes (* days 1440)))
+         (duration (- end start))
+         (week-end (* 7 1440)))
+    (pcase edge
+      ('top
+       (setq start (max 0 (min (+ start delta)
+                               (- end org-timegrid-slot-minutes)))))
+      ('bottom
+       (setq end (min week-end
+                      (max (+ start org-timegrid-slot-minutes)
+                           (+ end delta)))))
+      (_
+       (setq start (max 0 (min (+ start delta)
+                               (- week-end duration)))
+             end (+ start duration))))
+    (org-timegrid--set-absolute-range copy start end)
+    (plist-put copy :preview t)
+    (list :kind (if edge 'resize 'move)
+          :block copy :replace-id (plist-get block :id))))
+
+(defun org-timegrid--commit-keyboard-edit (&optional buffer)
+  "Commit BUFFER's pending keyboard block edit."
+  (let ((buffer (or buffer (current-buffer))))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (timerp org-timegrid--keyboard-edit-timer)
+          (cancel-timer org-timegrid--keyboard-edit-timer))
+        (setq-local org-timegrid--keyboard-edit-timer nil)
+        (when-let ((proposal org-timegrid--keyboard-edit))
+          (setq-local org-timegrid--keyboard-edit nil)
+          (let* ((block (plist-get proposal :block))
+                 (id (plist-get block :id))
+                 (day (plist-get block :day))
+                 (minute (plist-get block :start)))
+            (org-timegrid--apply proposal)
+            (org-timegrid--follow-block id day minute)))))))
+
+(defun org-timegrid--schedule-keyboard-commit ()
+  "Restart the idle timer that commits keyboard block movement."
+  (when (timerp org-timegrid--keyboard-edit-timer)
+    (cancel-timer org-timegrid--keyboard-edit-timer))
+  (setq-local
+   org-timegrid--keyboard-edit-timer
+   (run-with-idle-timer
+    (max 0 org-timegrid-keyboard-commit-delay) nil
+    #'org-timegrid--commit-keyboard-edit (current-buffer))))
+
+(defun org-timegrid--commit-before-unrelated-command ()
+  "Commit a keyboard edit before running a command outside its edit family."
+  (when (and org-timegrid--keyboard-edit
+             (not (memq this-command
+                        '(org-timegrid-move-later
+                          org-timegrid-move-earlier
+                          org-timegrid-move-next-day
+                          org-timegrid-move-previous-day
+                          org-timegrid-grow-end
+                          org-timegrid-shrink-end
+                          org-timegrid-grow-start
+                          org-timegrid-shrink-start))))
+    (org-timegrid--commit-keyboard-edit)))
 
 (defun org-timegrid--edit-selected (minutes days edge)
   "Shift the selected block by MINUTES and DAYS.
 EDGE nil moves the whole block, `top' changes its start, and `bottom'
 changes its end.  The cursor follows, so the key can be held down."
-  (let* ((block (org-timegrid--selected-block))
-         (anchor (if (eq edge 'bottom)
-                     (plist-get block :end)
-                   (plist-get block :start)))
-         (day (plist-get block :day))
-         ;; A bottom-edge proposal ends the block one slot *after* the
-         ;; targeted slot, which is what a mouse release should do.  A
-         ;; keyboard delta names the new end directly, so aim one slot
-         ;; earlier to avoid moving twice as far.
-         (bias (if (eq edge 'bottom) (- org-timegrid-slot-minutes) 0))
-         (absolute (+ (* day 1440) anchor (* days 1440) minutes bias))
-         (origin (list :block-id (plist-get block :id)
-                       :day day :minute anchor :edge edge))
-         (target (list :day (floor absolute 1440)
-                       :minute (% absolute 1440)))
-         (proposal (org-timegrid--proposal origin target nil)))
-    (org-timegrid--apply proposal)
-    (unless (plist-get proposal :error)
-      (let ((moved (plist-get proposal :block)))
-        (org-timegrid--follow-block (plist-get block :id)
-                                    (plist-get moved :day)
-                                    (plist-get moved :start))))))
+  (let* ((block (or (plist-get org-timegrid--keyboard-edit :block)
+                    (org-timegrid--selected-block)))
+         (updater (org-timegrid-backend-update-function org-timegrid--backend)))
+    (unless (and (plist-get block :event) (functionp updater))
+      (user-error "This backend cannot move or resize calendar entries"))
+    (let* ((proposal (org-timegrid--keyboard-proposal
+                      block minutes days edge))
+           (moved (plist-get proposal :block)))
+      (setq-local org-timegrid--keyboard-edit proposal)
+      (org-timegrid--set-cursor (plist-get moved :day)
+                                (plist-get moved :start) 0)
+      (setq-local org-timegrid--state
+                  (plist-put org-timegrid--state :cursor-visible t))
+      (org-timegrid--set-preview proposal)
+      (org-timegrid--scroll-cursor-into-view)
+      (org-timegrid--schedule-keyboard-commit))))
 
 (defun org-timegrid-copy-to-next-day (&optional count)
   "Copy the selected block COUNT days later, at the same time.
@@ -2225,7 +2439,7 @@ consecutive days instead of stacking every copy on the same one."
       (org-timegrid--set-cursor day start lane)
       (setq-local org-timegrid--state
                   (plist-put org-timegrid--state :cursor-visible t))
-      (org-timegrid--refresh t)
+      (org-timegrid--render-dynamic t)
       (org-timegrid--scroll-cursor-into-view))))
 
 (defun org-timegrid-copy-to-previous-day (&optional count)
@@ -2417,7 +2631,7 @@ the duration is asked for separately, prefilled with the current one."
     (unless (and (plist-get block :event) (functionp updater))
       (user-error "This backend cannot re-time calendar entries"))
     (funcall updater (plist-get block :event) start (+ start duration) nil)
-    (org-timegrid-refresh)))
+    (org-timegrid--refresh-data)))
 
 ;;; Dates
 
@@ -2473,7 +2687,7 @@ where it was left.  Only an explicit refresh forgets it."
               (plist-put org-timegrid--state :preview nil))
   (setq-local org-timegrid--state
               (plist-put org-timegrid--state :cursor-visible nil))
-  (org-timegrid--refresh t))
+  (org-timegrid--render-dynamic t))
 
 (defun org-timegrid-wheel-up (event)
   "Scroll the SVG upward."
@@ -2513,18 +2727,22 @@ where it was left.  Only an explicit refresh forgets it."
   (interactive)
   (org-timegrid-shift-week 1))
 
-(defun org-timegrid-refresh (&optional interactively)
-  "Reload the displayed week from the current backend and redraw it.
-Called INTERACTIVELY it also forgets the cursor, which is the one action
-that resets it.  Automatic reloads keep it, so the periodic data timer
-cannot quietly move the user's place."
-  (interactive (list t))
+(defun org-timegrid--refresh-data ()
+  "Reload the displayed week without moving the cursor or viewport."
   (org-timegrid--reload-state (plist-get org-timegrid--state :week-start))
-  (when interactively
-    (setq-local org-timegrid--state (plist-put org-timegrid--state :cursor nil))
-    (setq-local org-timegrid--state
-                (plist-put org-timegrid--state :cursor-visible nil)))
-  (org-timegrid--refresh))
+  (org-timegrid--refresh t))
+
+(defun org-timegrid-refresh ()
+  "Manually reload the displayed week and reset its cursor and viewport."
+  (interactive)
+  (org-timegrid--reload-state (plist-get org-timegrid--state :week-start))
+  (setq-local org-timegrid--state (plist-put org-timegrid--state :cursor nil))
+  (setq-local org-timegrid--state
+              (plist-put org-timegrid--state :cursor-visible nil))
+  (setq-local org-timegrid--saved-vscroll 0)
+  (org-timegrid--refresh)
+  (when-let ((window (get-buffer-window (current-buffer) t)))
+    (org-timegrid--set-vscroll window 0)))
 
 (defvar org-timegrid-mode-map
   (let ((map (make-sparse-keymap)))
@@ -2580,9 +2798,6 @@ cannot quietly move the user's place."
     (keymap-set map "C-p" #'org-timegrid-cursor-backward)
     (keymap-set map "<down>" #'org-timegrid-cursor-forward)
     (keymap-set map "<up>" #'org-timegrid-cursor-backward)
-    ;; Fine cursor motion, kept clear of the resize and move keys.
-    (keymap-set map "M-<down>" #'org-timegrid-cursor-forward-slot)
-    (keymap-set map "M-<up>" #'org-timegrid-cursor-backward-slot)
     (keymap-set map "C-f" #'org-timegrid-cursor-forward-day)
     (keymap-set map "C-b" #'org-timegrid-cursor-backward-day)
     (keymap-set map "<right>" #'org-timegrid-cursor-forward-day)
@@ -2601,14 +2816,14 @@ cannot quietly move the user's place."
     (keymap-set map "RET" #'org-timegrid-open-at-cursor)
     (keymap-set map "C-g" #'org-timegrid-dismiss)
     ;; Keyboard editing.
-    (keymap-set map "M-S-<down>" #'org-timegrid-move-later)
-    (keymap-set map "M-S-<up>" #'org-timegrid-move-earlier)
-    (keymap-set map "M-S-<right>" #'org-timegrid-move-next-day)
-    (keymap-set map "M-S-<left>" #'org-timegrid-move-previous-day)
+    (keymap-set map "M-<down>" #'org-timegrid-move-later)
+    (keymap-set map "M-<up>" #'org-timegrid-move-earlier)
+    (keymap-set map "M-<right>" #'org-timegrid-move-next-day)
+    (keymap-set map "M-<left>" #'org-timegrid-move-previous-day)
     ;; Super is Option under the usual macOS mapping, as it is for a
     ;; duplicating drag, so the copy gesture reads the same either way.
-    (keymap-set map "M-S-s-<right>" #'org-timegrid-copy-to-next-day)
-    (keymap-set map "M-S-s-<left>" #'org-timegrid-copy-to-previous-day)
+    (keymap-set map "M-s-<right>" #'org-timegrid-copy-to-next-day)
+    (keymap-set map "M-s-<left>" #'org-timegrid-copy-to-previous-day)
     (keymap-set map "S-<down>" #'org-timegrid-grow-end)
     (keymap-set map "S-<up>" #'org-timegrid-shrink-end)
     (keymap-set map "C-S-<up>" #'org-timegrid-grow-start)
@@ -2623,6 +2838,17 @@ cannot quietly move the user's place."
     (keymap-set map "q" #'quit-window)
     map))
 
+;; Keep reevaluation in a running Emacs from retaining the previous bindings.
+(dolist (key '("M-S-<down>" "M-S-<up>" "M-S-<right>" "M-S-<left>"
+               "M-S-s-<right>" "M-S-s-<left>"))
+  (keymap-unset org-timegrid-mode-map key t))
+(keymap-set org-timegrid-mode-map "M-<down>" #'org-timegrid-move-later)
+(keymap-set org-timegrid-mode-map "M-<up>" #'org-timegrid-move-earlier)
+(keymap-set org-timegrid-mode-map "M-<right>" #'org-timegrid-move-next-day)
+(keymap-set org-timegrid-mode-map "M-<left>" #'org-timegrid-move-previous-day)
+(keymap-set org-timegrid-mode-map "M-s-<right>" #'org-timegrid-copy-to-next-day)
+(keymap-set org-timegrid-mode-map "M-s-<left>" #'org-timegrid-copy-to-previous-day)
+
 (define-derived-mode org-timegrid-mode special-mode
   "Org Time Grid"
   "Major mode for an SVG week calendar.
@@ -2634,11 +2860,15 @@ the mouse and the keyboard drive the same state.
 \\{org-timegrid-mode-map}"
   (setq-local truncate-lines t)
   (setq-local cursor-type nil)
+  ;; Image rows otherwise gain one baseline pixel and visible hour seams.
+  (setq-local line-spacing -1)
   (setq-local track-mouse t)
   (setq-local mouse-fine-grained-tracking t)
   (setq-local auto-window-vscroll t)
   (add-hook 'window-size-change-functions
             #'org-timegrid--window-resized nil t)
+  (add-hook 'pre-command-hook
+            #'org-timegrid--commit-before-unrelated-command nil t)
   (add-hook 'kill-buffer-hook
             #'org-timegrid--cancel-timers nil t))
 
