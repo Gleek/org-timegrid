@@ -133,7 +133,8 @@ strips stack up, one per finalize."
   "Insert the compact day strip into the current Org Agenda buffer.
 Suitable for `org-agenda-finalize-hook'; `org-timegrid-agenda-mode' is
 the usual way to install it."
-  (when (derived-mode-p 'org-agenda-mode)
+  (when (and (derived-mode-p 'org-agenda-mode)
+             (not (buffer-narrowed-p)))
     (save-excursion
       (let* ((decoded (decode-time))
              (now (+ (* 60 (decoded-time-hour decoded))
