@@ -178,7 +178,10 @@ half-hour block room for two lines of title."
 (defvar-local org-timegrid--clock-timer nil)
 (defvar-local org-timegrid--data-timer nil)
 (defvar-local org-timegrid--cursor-timer nil)
+(defvar-local org-timegrid--scroll-restore-timer nil)
 (defvar-local org-timegrid--stale nil)
+(defvar-local org-timegrid--saved-vscroll 0
+  "Pixel scroll position restored when this calendar is shown again.")
 (defvar org-timegrid--theme-timer nil)
 (defvar-local org-timegrid--backend nil)
 (defvar-local org-timegrid--state nil)
@@ -849,9 +852,10 @@ own."
              (block-height (max 3 (- (* (- bottom top) scale)
                                      org-timegrid-block-gap)))
              (characters (max 1 (floor (/ (- lane-width 8) character-width))))
-             (lines (org-timegrid--wrap-title
-                     (plist-get block :title) characters
-                     (max 1 (floor (/ block-height line-height))))))
+             (lines (unless (< (plist-get block :start) start-minute)
+                      (org-timegrid--wrap-title
+                       (plist-get block :title) characters
+                       (max 1 (floor (/ block-height line-height)))))))
         (when (> bottom top)
           (svg-rectangle svg x y lane-width block-height
                          :rx org-timegrid-corner-radius
@@ -1226,7 +1230,12 @@ leave no central move target."
   "Redraw the SVG, preserving pixel scroll when PRESERVE-SCROLL is non-nil."
   (org-timegrid--ensure-state)
   (let* ((window (get-buffer-window (current-buffer) t))
-         (vscroll (and preserve-scroll window (window-vscroll window t)))
+         (window-vscroll (and window (window-vscroll window t)))
+         (vscroll (and preserve-scroll window
+                       (if (and (zerop window-vscroll)
+                                (> org-timegrid--saved-vscroll 0))
+                           org-timegrid--saved-vscroll
+                         window-vscroll)))
          (inhibit-read-only t)
          (previewp (plist-get org-timegrid--state :preview))
          (svg (org-timegrid--svg))
@@ -1255,7 +1264,48 @@ leave no central move target."
       (set-window-point window (point-min))
       (redisplay)
       (when vscroll
-        (set-window-vscroll window vscroll t)))))
+        (org-timegrid--set-vscroll window vscroll)))))
+
+(defun org-timegrid--set-vscroll (window pixels)
+  "Set WINDOW's pixel scroll to PIXELS and remember it."
+  (set-window-vscroll window pixels t)
+  (setq-local org-timegrid--saved-vscroll pixels))
+
+(defun org-timegrid--restore-scroll (window)
+  "Restore this calendar's saved pixel position in WINDOW."
+  (when (and (window-live-p window)
+             (eq (window-buffer window) (current-buffer)))
+    (set-window-point window (point-min))
+    (org-timegrid--set-vscroll window org-timegrid--saved-vscroll)))
+
+(defun org-timegrid--schedule-scroll-restore (window)
+  "Restore WINDOW after the buffer switch has finished redisplaying."
+  (when (timerp org-timegrid--scroll-restore-timer)
+    (cancel-timer org-timegrid--scroll-restore-timer))
+  (let ((buffer (current-buffer)))
+    (setq-local
+     org-timegrid--scroll-restore-timer
+     (run-at-time
+      0 nil
+      (lambda ()
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (setq-local org-timegrid--scroll-restore-timer nil)
+            (org-timegrid--restore-scroll window))))))))
+
+(defun org-timegrid--restore-visible-calendars ()
+  "Restore newly shown calendars that Emacs placed at the top."
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (when (derived-mode-p 'org-timegrid-mode)
+        (dolist (window (get-buffer-window-list buffer nil t))
+          (when (and (zerop (window-vscroll window t))
+                     (> org-timegrid--saved-vscroll 0))
+            (org-timegrid--schedule-scroll-restore window)))))))
+
+(defun org-timegrid--window-buffers-changed (_frame)
+  "Restore calendars after a window changes the buffer it displays."
+  (org-timegrid--restore-visible-calendars))
 
 (defun org-timegrid--theme-changed (&rest _ignored)
   "Redraw live SVG calendars after Emacs changes theme faces."
@@ -1298,7 +1348,8 @@ leave no central move target."
   (dolist (timer (list org-timegrid--resize-timer
                        org-timegrid--clock-timer
                        org-timegrid--data-timer
-                       org-timegrid--cursor-timer))
+                       org-timegrid--cursor-timer
+                       org-timegrid--scroll-restore-timer))
     (when (timerp timer) (cancel-timer timer))))
 
 (defun org-timegrid--clock-tick (buffer)
@@ -1661,7 +1712,7 @@ Leave the first non-motion event for the gesture loop to process."
                  (next
                   (max 0 (min maximum
                               (+ (window-vscroll window t) pixels)))))
-            (set-window-vscroll window next t)))))))
+            (org-timegrid--set-vscroll window next)))))))
 
 (defun org-timegrid--event-window (event)
   "Return the live calendar window associated with mouse EVENT."
@@ -1715,10 +1766,10 @@ Leave the first non-motion event for the gesture loop to process."
            (maximum (max 0 (- (or org-timegrid--image-height 0) body))))
       (cond
        ((< top vscroll)
-        (set-window-vscroll window (max 0 (min maximum top)) t))
+        (org-timegrid--set-vscroll window (max 0 (min maximum top))))
        ((> bottom (+ vscroll body))
-        (set-window-vscroll
-         window (max 0 (min maximum (- bottom body))) t))))))
+        (org-timegrid--set-vscroll
+         window (max 0 (min maximum (- bottom body)))))))))
 
 (defun org-timegrid-recenter ()
   "Scroll the cursor's slot to the middle of the window, leaving it put.
@@ -1735,13 +1786,12 @@ the cursor never moves to satisfy the scroll."
                      scale))
              (body (window-body-height window t))
              (maximum (max 0 (- (or org-timegrid--image-height 0) body))))
-        (set-window-vscroll
+        (org-timegrid--set-vscroll
          window
          (max 0 (min maximum
                      (round (- top (/ (- body (* org-timegrid-slot-minutes
                                                 scale))
-                                      2)))))
-         t)))))
+                                      2))))))))))
 
 (defun org-timegrid--move-cursor (minutes days)
   "Move the cursor by MINUTES and DAYS, revealing it first when hidden."
@@ -1887,9 +1937,16 @@ last lane, or where there is only one, it moves by a day."
         (if (and (< count 0) (> lane 0))
             (org-timegrid--set-cursor (plist-get cursor :day)
                                       (plist-get cursor :minute) (1- lane))
-          (org-timegrid--set-cursor (+ (plist-get cursor :day) count)
-                                    (plist-get cursor :minute) 0)))
-      (org-timegrid--cursor-moved))))
+          (let* ((target (+ (plist-get cursor :day) count))
+                 (week-offset (* 7 (floor target 7)))
+                 (day (mod target 7))
+                 (minute (plist-get cursor :minute)))
+            (when (/= week-offset 0)
+              (org-timegrid--reload-state
+               (+ (plist-get org-timegrid--state :week-start)
+                  week-offset)))
+            (org-timegrid--set-cursor day minute 0)))
+      (org-timegrid--cursor-moved)))))
 
 (defun org-timegrid-cursor-backward-day (&optional count)
   "Move the cursor one lane to the left, or COUNT day columns."
@@ -1984,10 +2041,10 @@ search starts from the cursor."
      ;; Walking the ordered list by index, rather than comparing start
      ;; times, is what keeps two blocks sharing a start reachable.
      (index
-      (let ((next (+ index direction)))
+     (let ((next (+ index direction)))
         (if (and (>= next 0) (< next (length blocks)))
             (org-timegrid--goto-block (nth next blocks))
-          (message "No further block"))))
+          (org-timegrid--move-selection-across-week direction))))
      ;; With nothing selected, land on the nearest block in that direction,
      ;; including one that starts exactly at the cursor.
      (t
@@ -2004,7 +2061,21 @@ search starts from the cursor."
                  blocks)))))
         (if candidates
             (org-timegrid--goto-block (car candidates))
-          (message "No further block")))))))
+          (org-timegrid--move-selection-across-week direction)))))))
+
+(defun org-timegrid--move-selection-across-week (direction)
+  "Move one week in DIRECTION and select its first or last block."
+  (let ((minute (plist-get (org-timegrid--ensure-cursor) :minute)))
+    (org-timegrid--reload-state
+     (+ (plist-get org-timegrid--state :week-start) (* direction 7)))
+    (if-let ((blocks (org-timegrid--ordered-blocks)))
+        (org-timegrid--goto-block
+         (if (> direction 0) (car blocks) (car (last blocks))))
+      (org-timegrid--set-cursor (if (> direction 0) 0 6) minute 0)
+      (setq-local org-timegrid--state
+                  (plist-put org-timegrid--state :cursor-visible t))
+      (org-timegrid--refresh t)
+      (message "No block in this week"))))
 
 (defun org-timegrid-next-block ()
   "Select the next block by start time, anywhere in the visible week."
@@ -2543,7 +2614,7 @@ the mouse and the keyboard drive the same state.
          (y (* (- minute start-minute)
                org-timegrid-pixels-per-minute))
          (target (max 0 (- y (/ (window-body-height window t) 2)))))
-    (set-window-vscroll window target t)))
+    (org-timegrid--set-vscroll window target)))
 
 ;;;###autoload
 (defun org-timegrid-open (backend &optional absolute-date)
@@ -2581,6 +2652,10 @@ the mouse and the keyboard drive the same state.
           #'org-timegrid--theme-changed)
 (add-hook 'disable-theme-functions
           #'org-timegrid--theme-changed)
+(add-hook 'buffer-list-update-hook
+          #'org-timegrid--restore-visible-calendars)
+(add-hook 'window-buffer-change-functions
+          #'org-timegrid--window-buffers-changed)
 
 (provide 'org-timegrid)
 ;;; org-timegrid.el ends here

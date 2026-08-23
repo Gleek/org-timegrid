@@ -1,392 +1,259 @@
 # org-timegrid
 
-A mouse- and keyboard-driven SVG week calendar for Emacs, backed by your Org
-files. Drag to create, drag to move, drag an edge to resize — every gesture
-writes a real timestamp into a real heading. A compact read-only strip of the
-current day can also be dropped into an existing Org Agenda.
+`org-timegrid` is an SVG week calendar for Org mode. It reads timed active
+timestamps from your Org files and writes edits back to their source headings.
 
-![Week view](screenshots/week-dark.png)
+Create, move, resize, copy, rename, and remove calendar blocks with the mouse
+or keyboard. The same renderer can add a compact, read-only day view to an
+existing Org Agenda.
 
-The renderer knows nothing about Org. It draws whatever a backend hands it, and
-the Org backend is one implementation of a small protocol.
 
-## Contents
 
-- [Screenshots](#screenshots)
-- [Install](#install)
-- [What it reads from Org](#what-it-reads-from-org)
-- [The Week view](#the-week-view)
-- [Inside Org Agenda](#inside-org-agenda)
-- [Colours](#colours)
-- [Configuration](#configuration)
-- [Extending it](#extending-it)
-- [Design notes](#design-notes)
-- [Status](#status)
+https://github.com/user-attachments/assets/fa93bdc9-91cb-4582-8d44-47a8461c2007
+
+
 
 ## Screenshots
 
-Nothing here ships its own colours: the palette comes from the faces of whatever
-theme is loaded, and is redrawn when the theme changes. Same week, same data,
-two themes:
+The palette comes from the theme, and is redrawn when the theme changes.
 
 | | |
 |---|---|
 | ![Week, light](screenshots/week-light.png) | ![Week, dark](screenshots/week-dark.png) |
 
-The agenda strip, with the day's untimed items listed underneath it:
+Agenda view:
 
 | | |
 |---|---|
 | ![Agenda, light](screenshots/agenda-light.png) | ![Agenda, dark](screenshots/agenda-dark.png) |
 
-## Install
 
-Emacs 29.1 or later, built with SVG support — `(image-type-available-p 'svg)`
-must be non-nil. Org 9.6 or later. No other dependencies.
+## Requirements and installation
+
+You need Emacs 29.1 or later with SVG support and Org 9.6 or later. Check SVG
+support with `(image-type-available-p 'svg)`. There are no other dependencies.
 
 With [Elpaca](https://github.com/progfolio/elpaca):
 
 ```elisp
 (use-package org-timegrid-org
-  :ensure (org-timegrid :host github :repo "gleek/org-timegrid")
+  :ensure (org-timegrid :host github :repo "Gleek/org-timegrid")
   :commands (org-timegrid-week)
   :bind ("C-c c" . org-timegrid-week)
   :config
-  ;; Where the calendar writes entries you create by dragging.  Nil resolves
-  ;; to the first agenda file; naming it means reordering `org-agenda-files'
-  ;; cannot silently move the target.
   (setq org-timegrid-org-capture-file "~/org/inbox.org"))
 ```
 
-With `straight.el`:
+The two names have different jobs. `org-timegrid` is the package and repository
+name. `org-timegrid-org` is the feature that connects the renderer to Org, so
+it is the feature that `use-package` configures.
 
-```elisp
-(straight-use-package
- '(org-timegrid :host github :repo "Gleek/org-timegrid"))
-(require 'org-timegrid-org)
-```
+For a manual install, put the `.el` files on `load-path`, evaluate `(require
+'org-timegrid-org)`, then run `M-x org-timegrid-week`.
 
-Manually: put the `.el` files on your `load-path`, then `(require
-'org-timegrid-org)` and `M-x org-timegrid-week`.
+## What appears on the calendar
 
-The package is four files. Requiring `org-timegrid-org` pulls in the two it
-needs; `org-timegrid-agenda` is separate and optional.
-
-```text
-org-timegrid-model.el     records, the backend protocol, date arithmetic
-          ↑
-org-timegrid.el           SVG, layout, cursor, commands, hit testing
-          ↑
-org-timegrid-org.el       Org extraction and source edits
-          ↑
-org-timegrid-agenda.el    the read-only day strip for Org Agenda
-```
-
-## What it reads from Org
-
-Active timestamps that carry a clock time, whether plain or after `SCHEDULED:`
-or `DEADLINE:`:
+The Org backend reads active timestamps with a start time. They may be plain
+timestamps or values attached to `SCHEDULED` and `DEADLINE`.
 
 ```org
-* TODO Design review            :work:
+* TODO Design review :work:
 <2026-08-24 Mon 14:00-15:30>
 
 * TODO Standup
 SCHEDULED: <2026-08-24 Mon 09:00-09:15>
 
-* TODO Vendor call
-<2026-08-24 Mon 15:00>          ← no end: drawn 30 minutes long
+* Call the vendor
+<2026-08-24 Mon 15:00>
 ```
 
-A timestamp with no end is drawn `org-timegrid-default-duration-minutes` long
-rather than hidden — an entry timed 09:00 is a real plan. Date-only values and
-inactive timestamps do not appear: the former have no position on a time grid,
-the latter are records rather than plans.
+The last heading appears even though it has no TODO keyword. A timed active
+timestamp is enough to put a heading on the calendar. A timestamp without an
+end uses `org-timegrid-default-duration-minutes`, which defaults to 30 minutes.
 
-Repeaters are expanded into concrete occurrences at the backend boundary, so the
-renderer only ever sees ordinary dated events. Moving or resizing an occurrence
-edits the series anchor and preserves the repeater and warning modifiers, so the
-series moves with it.
+Date-only and inactive timestamps do not appear on the time grid. A separate
+date-only rail is planned.
 
-Edits leave source buffers modified but unsaved, exactly as Org Agenda commands
-do. `u` inside the calendar undoes in the file the edit landed in.
+Repeaters are expanded into dated occurrences for display. Moving or resizing
+one occurrence edits the series anchor and preserves its repeater and warning
+modifiers. Edits leave source buffers modified but unsaved, like Org Agenda
+commands. Press `u` in the calendar to undo the edit in the Org buffer it
+changed.
 
-## The Week view
+## Week view
+
+Run `M-x org-timegrid-week` to open the week containing today.
 
 ### Mouse
 
 | Gesture | Action |
 |---|---|
-| Drag empty space | Create an entry over that range, asking for a title |
-| Drag a block | Move it, preserving duration and the grab offset |
-| Drag a top or bottom edge | Resize it, keeping the other edge |
-| **Option**-drag a block | Duplicate it at the drop point |
-| Click | Move the cursor there, selecting a block if one starts there |
-| Double-click | Visit the Org heading |
+| Drag empty space | Create an entry for that range |
+| Drag a block | Move it |
+| Drag a block's top or bottom edge | Resize it |
+| Option-drag a block | Copy it |
+| Click | Put the cursor there |
+| Double-click a block | Visit its Org heading |
 | Wheel | Scroll the day |
 
-Everything snaps to fifteen minutes and enforces a fifteen-minute minimum.
-Drags commit on release, and `C-g` during one cancels it.
+Mouse edits snap to 15 minutes and use a 15-minute minimum. Release commits a
+drag. Press `C-g` before releasing to cancel it.
 
 ### Keyboard
 
-There is **one cursor and no separate selection**. A block is selected exactly
-when the cursor sits on that block's own first slot, so the highlight and the
-cursor can never disagree, and the mouse and keyboard drive the same state.
-
-The cursor occupies one fifteen-minute slot, drawn in the `cursor` face colour
-with a translucent fill. While it selects a block it is not drawn at all: that
-block's outline is the feedback, and two borders around one slot read as a bug.
-It stays hidden until a movement key asks for it, and the first press reveals it
-where it was left rather than also moving it.
+The calendar has one cursor. A block is selected when the cursor sits on the
+slot where that block begins. This keeps keyboard and mouse selection in sync
+after redraws.
 
 | Key | Action |
 |---|---|
-| `C-n` / `C-p`, `<down>` / `<up>` | Next / previous stop: a half-hour boundary, a block edge, or a lane |
-| `C-f` / `C-b`, `<right>` / `<left>` | Next / previous lane, else ±1 day |
-| `M-<down>` / `M-<up>` | Cursor ±15 minutes |
-| `C-v` / `M-v`, `SPC` | Cursor ±1 screenful |
-| `C-a` / `C-e` | Midnight / last slot of the cursor's day |
-| `C-l` | Centre the view on the cursor, leaving it where it is |
-| `n` / `p` | Select the next / previous block by start time |
-| `RET` | Open the block under the cursor in its own file, or create one there |
-| `C-g` | Hide the cursor, keeping its place |
-| `M-S-<down>` / `M-S-<up>` | Move the selection ±15 minutes |
-| `M-S-<right>` / `M-S-<left>` | Move the selection ±1 day |
-| `M-S-s-<right>` / `M-S-s-<left>` | Copy the selection to the next / previous day, same time |
-| `S-<down>` / `S-<up>` | Move the end edge |
-| `C-S-<up>` / `C-S-<down>` | Move the start edge |
-| `t` | Re-time from a prefilled prompt |
-| `e` | Edit the title |
-| `d`, `<delete>` | Remove the time, then offer to delete the entry |
-| `DEL` | Remove the selected block, or page up when none is selected |
-| `M-w` / `C-w` / `C-y` | Copy / cut / yank a block |
-| `u`, `C-/`, `C-x u` | Undo the last calendar edit, in the file it touched |
-| `b` / `f`, `M-b` / `M-f` | Shift the visible range by a day / a week |
-| `j` / `.` | Jump to a date / to today |
-| `g` | Reload from the backend |
+| `C-n` / `C-p`, arrows | Move to the next or previous time stop |
+| `C-f` / `C-b`, left/right | Move through overlapping lanes, then days |
+| `M-down` / `M-up` | Move the cursor by 15 minutes |
+| `C-v` / `M-v`, `SPC` | Move by one screen |
+| `C-a` / `C-e` | Go to the first or last slot of the day |
+| `C-l` | Center the view on the cursor |
+| `n` / `p` | Select the next or previous block |
+| `RET` | Visit the selected block, or create one at the cursor |
+| `C-g` | Hide the cursor |
+| `M-S-down` / `M-S-up` | Move the selected block by 15 minutes |
+| `M-S-right` / `M-S-left` | Move the block by one day |
+| `M-S-s-right` / `M-S-s-left` | Copy the block by one day |
+| `S-down` / `S-up` | Move the end time |
+| `C-S-up` / `C-S-down` | Move the start time |
+| `t` | Enter a new time or range |
+| `e` | Rename the heading |
+| `d`, Delete | Remove its time, then optionally delete the heading |
+| `M-w` / `C-w` / `C-y` | Copy, cut, or paste a block |
+| `u`, `C-/`, `C-x u` | Undo the last calendar edit |
+| `b` / `f`, `M-b` / `M-f` | Shift by a day or week |
+| `j` / `.` | Jump to a date or today |
+| `g` | Reload the week from the backend |
 | `q` | Quit |
 
-Undo is also reached by remapping, so whatever key you have bound to `undo`,
-`undo-only` or `undo-redo` reaches it here too.
+Horizontal motion, including `n` and `p`, crosses week boundaries. If the next
+week has no block to select, the calendar still opens it and leaves the cursor
+at the near edge.
 
-Some deliberate details:
+Entries do not need to align to the grid. An entry from 13:50 to 14:10 remains
+reachable and editable. Snapping applies when you change it.
 
-**Editing carries the cursor with the block.** Selection is derived from the
-cursor, so an edit that left the cursor behind would deselect the very block it
-changed, and the key could only be pressed once. Holding `M-S-<up>` walks a
-block up the day. Copying follows the *copy*, so holding that key spreads one
-entry across consecutive days instead of stacking every copy on one.
+## Org Agenda strip
 
-**Ordinary motion is half an hour**, unless a block edge falls in between. Both
-starts and ends are stops, so `C-n` alone reaches every block in a column and
-the gap after each one. Where blocks share a start, each lane is a stop too, so
-vertical motion reaches both of two events beginning at the same minute rather
-than only the shortest.
+Enable the optional integration after loading `org-timegrid-agenda`:
 
-**Fine motion, moving and resizing have separate keys** on purpose. Sharing one
-key meant that nudging the cursor by fifteen minutes resized whatever it had
-selected.
-
-**Off-grid timestamps work.** A real entry may run 13:50 to 14:10. A block is
-selected when its start falls *within* the cursor's slot rather than exactly on
-it, a start is a stop at the slot containing it, and an end is a stop at the
-first free slot after it. Snapping by direction of travel instead would make
-forward and backward motion disagree, and could leave a block unreachable.
-
-## Inside Org Agenda
-
-`M-x org-timegrid-agenda-mode` inserts a read-only strip of the current day into
-Org Agenda buffers, showing the hours around now:
-
-```text
-existing Org Agenda
-        │
-        ├── existing blocks above
-        ├── inserted day strip
-        └── existing blocks below
+```elisp
+(require 'org-timegrid-agenda)
+(org-timegrid-agenda-mode 1)
 ```
 
-It does not rewrite or replace the agenda. Org builds its buffer as it always
-does, and the strip is added by `org-agenda-finalize-hook`, so `g` regenerates
-it along with everything else and there is nothing to keep in sync. Insertion
-replaces any strip already present, because not every agenda command rebuilds
-the buffer before finalizing.
-
-`org-timegrid-agenda-insert-after` names the block to sit below, matched as a
-regexp; nil, or a header this agenda does not have, puts the strip at the top.
-The strip goes below that block's separator, so it opens the section that
-follows. `org-timegrid-agenda-separator` nil then makes the next block read as
-part of the strip's own section, which is what you want when that block is the
-same day's untimed items:
+Org continues to build the agenda buffer. A finalize hook inserts a read-only
+SVG view of the hours around the current time. Press `RET` on the image to open
+the editable week view.
 
 ```elisp
 (setq org-timegrid-agenda-insert-after "To Refile"
       org-timegrid-agenda-separator nil)
 ```
 
-The strip is read-only by design, and `RET` on it opens the Week view. Editing
-an image inside a buffer that rebuilds itself on `g` would mean two things
-competing for the same keys.
+The first option matches the agenda block above the strip. A nil separator lets
+the following block read as the untimed part of the same day section. The strip
+shades an edge only when an event continues beyond the visible window.
 
-An edge is shaded only when the day holds something past it, so a shadow means
-"more this way" rather than merely marking where the window stops.
-
-Two library functions do the work and neither needs a calendar buffer, so a mode
-line or a dashboard can use them too: `org-timegrid-day-blocks` returns one
-day's blocks from a backend, clipped to that day and given side-by-side lanes,
-and `org-timegrid-day-image` renders a minute window of them as an image.
+`org-timegrid-day-blocks` gets and lays out one day's blocks.
+`org-timegrid-day-image` draws a chosen minute range as an SVG image. Neither
+function needs a calendar buffer.
 
 ## Colours
 
-`org-timegrid-colors` names thirteen colours after the macOS system palette —
-`blue` `cyan` `teal` `indigo` `purple` `pink` `red` `orange` `yellow` `lime`
-`green` `brown` `graphite` — so a calendar coloured to match one there needs no
-translation. A block is a translucent wash of its colour with a saturated bar
-down its left edge, which is why the values are saturated rather than pastel.
+The grid, text, cursor, and backgrounds use the current Emacs theme. Images
+redraw after a theme change and respect buffer-local face remapping.
 
-Map Org tags to them. A colour need not be a name; any string Emacs understands
-works, so nothing has to be registered in advance:
+Map Org tags to the built-in macOS-style palette or any colour string Emacs
+accepts:
 
 ```elisp
 (setq org-timegrid-org-tag-color-alist
-      '(("work"     . indigo)
+      '(("work" . indigo)
         ("business" . lime)
-        ("reading"  . green)
-        ("errand"   . cyan)
-        ("urgent"   . "#b4d74a")))
+        ("reading" . green)
+        ("errand" . cyan)
+        ("urgent" . "#b4d74a")))
 ```
 
-Tags are checked in the order they appear on the heading, so the first mapped
-tag wins and a heading may carry others freely. An unmapped heading uses
-`org-timegrid-default-color`: colour means something on a calendar, so a colour
-invented per tag name would be noise rather than information.
-
-To colour by anything else — TODO state, priority, a property, the file — set
-`org-timegrid-org-color-function`, which receives the `org-element` headline.
-
-Everything else on the grid comes from the current theme's faces, including
-buffer-local face remapping, so the drawing matches the buffer it sits in rather
-than the frame's idea of `default`. That is what keeps it flush under
-`solaire-mode` and anything else that dims one buffer.
+The named colours are `blue`, `cyan`, `teal`, `indigo`, `purple`, `pink`,
+`red`, `orange`, `yellow`, `lime`, `green`, `brown`, and `graphite`. The first
+mapped tag wins. Set `org-timegrid-org-color-function` to colour by TODO state,
+priority, property, or file.
 
 ## Configuration
 
-### Appearance
+| Variable | Default | Meaning |
+|---|---:|---|
+| `org-timegrid-start-hour` / `org-timegrid-end-hour` | `0` / `24` | Hours drawn |
+| `org-timegrid-pixels-per-minute` | `0.9` | Week-view scale |
+| `org-timegrid-slot-minutes` | `15` | Cursor and edit granularity |
+| `org-timegrid-cursor-step-minutes` | `30` | Normal keyboard step |
+| `org-timegrid-default-duration-minutes` | `30` | Length used when no end is present |
+| `org-timegrid-block-gap` | `3` | Gap between blocks, in pixels |
+| `org-timegrid-corner-radius` | `0` | Block corner radius |
+| `org-timegrid-nesting-indent` | `8` | Indent for contained events |
+| `org-timegrid-title-clearance` | `18` | Space a parent keeps for its title |
+| `org-timegrid-data-refresh-seconds` | `300` | Backend reload interval |
 
-| Variable | Default | |
-|---|---|---|
-| `org-timegrid-start-hour` / `-end-hour` | 0 / 24 | Hours the canvas covers |
-| `org-timegrid-pixels-per-minute` | 0.9 | Vertical scale of the Week view |
-| `org-timegrid-block-gap` | 3 | Pixels between consecutive blocks |
-| `org-timegrid-corner-radius` | 0 | Block corner radius |
-| `org-timegrid-nesting-indent` | 8 | Indent per level of containment |
-| `org-timegrid-title-clearance` | 18 | Pixels needed before one block nests inside another |
-| `org-timegrid-cursor-opacity` | 0.22 | Fill opacity of the keyboard cursor |
-| `org-timegrid-colors` | see above | Named colours |
-| `org-timegrid-default-color` | `blue` | Colour for an event given none |
+| Agenda variable | Default | Meaning |
+|---|---:|---|
+| `org-timegrid-agenda-minutes-before` / `-after` | `180` / `180` | Visible window around now |
+| `org-timegrid-agenda-insert-after` | `"To Refile"` | Block above the strip |
+| `org-timegrid-agenda-separator` | `t` | Separator after the strip |
+| `org-timegrid-compact-pixels-per-minute` | `0.95` | Strip scale |
+| `org-timegrid-compact-font-size` | `11` | Strip text size |
 
-### Behaviour
+| Org variable | Default | Meaning |
+|---|---:|---|
+| `org-timegrid-org-files` | `agenda` | Files to query; a list is literal |
+| `org-timegrid-org-extra-files` | `nil` | Extra files always queried |
+| `org-timegrid-org-capture-file` | `nil` | Target for new entries |
+| `org-timegrid-org-capture-todo-keyword` | `"TODO"` | Keyword for new headings |
+| `org-timegrid-org-tag-color-alist` | `nil` | Tag-to-colour mapping |
 
-| Variable | Default | |
-|---|---|---|
-| `org-timegrid-slot-minutes` | 15 | Snapping granularity, and the cursor's size |
-| `org-timegrid-cursor-step-minutes` | 30 | Ordinary cursor step |
-| `org-timegrid-default-duration-minutes` | 30 | Assumed wherever no end time is given |
-| `org-timegrid-data-refresh-seconds` | 300 | Backend re-query interval |
-| `org-timegrid-buffer-name` | `*Org Time Grid*` | |
-| `org-timegrid-edge-pixels` / `-edge-slop` | 8 / 3 | Size of the resize zones |
+## Hooks and custom backends
 
-### The agenda strip
-
-| Variable | Default | |
-|---|---|---|
-| `org-timegrid-agenda-minutes-before` / `-after` | 180 / 180 | The visible window |
-| `org-timegrid-agenda-insert-after` | `"To Refile"` | Block to sit below |
-| `org-timegrid-agenda-separator` | t | Close the strip with a separator |
-| `org-timegrid-compact-pixels-per-minute` | 0.95 | Vertical scale of the strip |
-| `org-timegrid-compact-font-size` | 11 | Text size; line height follows it |
-| `org-timegrid-compact-shadow-pixels` | 10 | Depth of the edge shadow |
-
-### Org
-
-| Variable | Default | |
-|---|---|---|
-| `org-timegrid-org-files` | `agenda` | Files to query; a list is used literally |
-| `org-timegrid-org-extra-files` | nil | Always queried as well |
-| `org-timegrid-org-capture-file` | nil | Where new entries go; nil is the first agenda file |
-| `org-timegrid-org-capture-todo-keyword` | `"TODO"` | |
-| `org-timegrid-org-tag-color-alist` | nil | Tag to colour |
-| `org-timegrid-org-color-function` | tag lookup | Headline to colour |
-
-## Extending it
-
-`org-timegrid-org-after-create-hook` runs on a heading the calendar has just
-created, with point on it, inside the change group that inserted it — so a
-property set there belongs to the entry's single undo step. This is how calendar
-entries come out looking like captured ones:
+`org-timegrid-org-after-create-hook` runs with point on a newly created Org
+heading. Hook edits join the same undo step.
 
 ```elisp
 (add-hook 'org-timegrid-org-after-create-hook
           (lambda ()
-            (org-set-property "CAPTURED"
-                              (format-time-string "[%F %a %R]"))))
+            (org-set-property
+             "CAPTURED" (format-time-string "[%F %a %R]"))))
 ```
 
-`org-timegrid-mode-hook` is available as usual.
+The renderer itself does not require Org. `org-timegrid-open` accepts an
+`org-timegrid-backend` with a listing function and optional callbacks for
+create, update, delete, undo, visit, and date input. A backend with only a
+listing function is read-only. See `org-timegrid-backend-create` for the full
+contract.
 
-### Writing a backend
+## Screenshots
 
-The renderer takes events in absolute minutes — Emacs absolute Gregorian days
-times 1440, plus the minute within the day — and calls back to mutate them. A
-backend with only `list-function` is read-only, and the commands that need the
-others say so rather than failing oddly.
+| Light | Dark |
+|---|---|
+| ![Week view using a light theme](screenshots/week-light.png) | ![Week view using a dark theme](screenshots/week-dark.png) |
+| ![Agenda strip using a light theme](screenshots/agenda-light.png) | ![Agenda strip using a dark theme](screenshots/agenda-dark.png) |
 
-```elisp
-(org-timegrid-open
- (org-timegrid-backend-create
-  :name "Example"
-  :list-function (lambda (start end) ...)   ; → org-timegrid-event records
-  :create-function (lambda (title start end &optional source) ...)
-  :update-function (lambda (event start end &optional title) ...)
-  :delete-function (lambda (event) ...)
-  :delete-entry-function (lambda (event) ...)
-  :undo-function (lambda (continue redo) ...)
-  :visit-function (lambda (event) ...)
-  :read-timestamp-function (lambda (start duration) ...)))
-```
+## Credits and status
 
-Undo is a backend callback for the same reason as the rest: the change lives in
-a buffer the renderer does not own, so only the backend knows where to undo it.
-It receives whether this call continues an unbroken run, which is what stops a
-repeated key from undoing its own undo.
+The visual design and interaction borrow from macOS Calendar. [`org-timeblock`](https://github.com/ichernyshovvv/org-timeblock)
+and [`timeblock`](https://github.com/ichernyshovvv/timeblock.el) supplied the idea of drawing an Emacs calendar with SVG, and
+[`calfw`](https://github.com/kiwanami/emacs-calfw) was the original push toward a calendar view for Org.
 
-## Design notes
+## AI usage
+Even though directed the UI, interaction design, package structure, public
+commands, and customization options. Opus 5 and GPT-5.6-Codex wrote all code
+in the current implementation. The SVG renderer was agent-written and then
+reworked through hands-on usability testing.
 
-**Why one cursor.** An earlier version had a cursor and a separate selection.
-They could disagree, and since every edit refreshes the view, every edit dropped
-the selection. Deriving selection from cursor position removed a state variable
-and a class of bug with it.
-
-**Why the renderer has no Org dependency.** It is enforced by a test that greps
-the source for `(require 'org...)` and for Org functions. The one place Org
-knowledge had leaked in — reading a date from the user — became a backend
-callback.
-
-**Redraw cost.** 4.3 ms to lay out and build the SVG DOM, 6.3 ms to serialize
-it, 15.5 ms for a full refresh including redisplay, on a thirty-block week. A
-synthetic 140-block week costs 55–85 ms, which is why held keys coalesce: a
-burst updates state and paints once when input stops.
-
-**What batch tests cannot check.** With no display, `default`'s background is
-`unspecified-bg`, so any assertion about a colour passes vacuously. Anything to
-do with the palette, the theme, or face remapping has to be checked in a real
-frame.
-
-## Status
-
-In daily use, and the interfaces above are settled enough to build on.
-
-Not yet done: all-day events, which want a rail above the grid as macOS Calendar
-has, and day or three-day spans. Only the Week view edits; the agenda strip is
-read-only by design.
+The package is in daily use. Date-only events and day or three-day views are
+not implemented yet. Only the week view edits Org data; the agenda strip is
+read-only.

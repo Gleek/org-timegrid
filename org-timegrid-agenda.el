@@ -169,7 +169,7 @@ the usual way to install it."
          (propertize
           (concat (format org-timegrid-agenda-heading-format
                           (format-time-string "%A %-d %B"))
-                  (format "  %s–%s  ↗\n"
+                  (format "  %s–%s\n"
                           (org-timegrid--format-minute (car window))
                           (org-timegrid--format-minute (cdr window))))
           'face 'org-agenda-structure
