@@ -1,0 +1,14 @@
+/*.elc
+/build/
+/.dir-locals-2.el
+*~
+.#*
+
+# Local development only: the ERT suite, the manual test matrix, the hot-reload
+# helper and the screenshot fixture generator.  Useful here, not part of what
+# the package installs.
+/test/
+/dev/
+/TEST-MATRIX.org
+/.agent-shell/
+/.serena/
