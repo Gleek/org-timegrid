@@ -91,7 +91,7 @@ Run `M-x org-timegrid-week` to open the week containing today.
 | Drag empty space | Create an entry for that range |
 | Drag a block | Move it |
 | Drag a block's top or bottom edge | Resize it |
-| Option-drag a block | Copy it |
+| super-drag a block | Copy it |
 | Click | Put the cursor there |
 | Double-click a block | Visit its Org heading |
 | Wheel | Scroll the day |
@@ -136,13 +136,6 @@ range is written to the backend once keyboard input pauses.
 Horizontal motion, including `n` and `p`, crosses week boundaries. If the next
 week has no block to select, the calendar still opens it and leaves the cursor
 at the near edge.
-
-Incremental title search is an optional extension. Enable it in your Emacs
-configuration:
-
-```elisp
-(require 'org-timegrid-isearch)
-```
 
 `C-s` searches block titles forward and `C-r` searches backward. Matches update
 as you type. Press either key again to move to the next match in that direction.

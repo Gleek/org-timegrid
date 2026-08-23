@@ -2955,4 +2955,5 @@ Revisiting an existing calendar retains its pixel scroll position."
           #'org-timegrid--restore-frame-calendars)
 
 (provide 'org-timegrid)
+(require 'org-timegrid-isearch)
 ;;; org-timegrid.el ends here
