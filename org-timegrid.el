@@ -1321,19 +1321,14 @@ leave no central move target."
             (setq-local org-timegrid--scroll-restore-timer nil)
             (org-timegrid--restore-scroll window))))))))
 
-(defun org-timegrid--restore-visible-calendars ()
-  "Restore newly shown calendars that Emacs placed at the top."
-  (dolist (buffer (buffer-list))
-    (with-current-buffer buffer
-      (when (derived-mode-p 'org-timegrid-mode)
-        (dolist (window (get-buffer-window-list buffer nil t))
-          (when (and (zerop (window-vscroll window t))
-                     (> org-timegrid--saved-vscroll 0))
-            (org-timegrid--schedule-scroll-restore window)))))))
-
-(defun org-timegrid--window-buffers-changed (_frame)
-  "Restore calendars after a window changes the buffer it displays."
-  (org-timegrid--restore-visible-calendars))
+(defun org-timegrid--restore-frame-calendars (frame)
+  "Restore calendars newly displayed in a window on FRAME."
+  (dolist (window (window-list frame 'no-minibuffer))
+    (with-current-buffer (window-buffer window)
+      (when (and (derived-mode-p 'org-timegrid-mode)
+                 (zerop (window-vscroll window t))
+                 (> org-timegrid--saved-vscroll 0))
+        (org-timegrid--schedule-scroll-restore window)))))
 
 (defun org-timegrid--theme-changed (&rest _ignored)
   "Redraw live SVG calendars after Emacs changes theme faces."
@@ -2646,44 +2641,69 @@ the mouse and the keyboard drive the same state.
 
 ;;;###autoload
 (defun org-timegrid-open (backend &optional absolute-date)
-  "Open BACKEND on the week containing ABSOLUTE-DATE."
+  "Open BACKEND on the week containing ABSOLUTE-DATE.
+Revisiting an existing calendar retains its pixel scroll position."
   (unless (org-timegrid-backend-p backend)
     (user-error "A calendar backend is required"))
-  (let ((buffer (get-buffer-create org-timegrid-buffer-name)))
-    (with-current-buffer buffer
-      (org-timegrid--cancel-timers)
-      (org-timegrid-mode)
-      (setq-local org-timegrid--backend backend)
-      (setq-local org-timegrid--state
-                  (org-timegrid--load-state
-                   (org-timegrid-week-start absolute-date)))
-      (let ((owner buffer))
-        (setq-local
-         org-timegrid--clock-timer
-         (run-at-time
-          60 60
-          (lambda () (org-timegrid--clock-tick owner))))
-        (setq-local
-         org-timegrid--data-timer
-         (run-at-time
-          org-timegrid-data-refresh-seconds
-          org-timegrid-data-refresh-seconds
-          (lambda () (org-timegrid--data-tick owner))))))
+  (let* ((existing (get-buffer org-timegrid-buffer-name))
+         (buffer (or existing
+                     (get-buffer-create org-timegrid-buffer-name)))
+         (requested-week (and absolute-date
+                              (org-timegrid-week-start absolute-date)))
+         refreshp)
+    (if existing
+        (with-current-buffer buffer
+          (let ((current-week (plist-get org-timegrid--state :week-start)))
+            (when (or org-timegrid--stale
+                      (not (eq org-timegrid--backend backend))
+                      (and requested-week
+                           (/= requested-week current-week)))
+              (setq-local org-timegrid--backend backend)
+              (setq-local org-timegrid--state
+                          (org-timegrid--load-state
+                           (or requested-week current-week)))
+              (setq-local org-timegrid--stale nil)
+              (setq refreshp t))))
+      (with-current-buffer buffer
+        (org-timegrid-mode)
+        (setq-local org-timegrid--backend backend)
+        (setq-local org-timegrid--state
+                    (org-timegrid--load-state
+                     (org-timegrid-week-start absolute-date)))
+        (let ((owner buffer))
+          (setq-local
+           org-timegrid--clock-timer
+           (run-at-time
+            60 60
+            (lambda () (org-timegrid--clock-tick owner))))
+          (setq-local
+           org-timegrid--data-timer
+           (run-at-time
+            org-timegrid-data-refresh-seconds
+            org-timegrid-data-refresh-seconds
+            (lambda () (org-timegrid--data-tick owner)))))))
     (pop-to-buffer buffer)
-    (with-current-buffer buffer
-      (org-timegrid--refresh))
-    (when-let ((window (get-buffer-window buffer t)))
-      (org-timegrid--center-now window))
+    (let ((window (get-buffer-window buffer t)))
+      (with-current-buffer buffer
+        (cond
+         ((null existing)
+          (org-timegrid--refresh)
+          (when window
+            (org-timegrid--center-now window)))
+         ((or refreshp
+              (/= (org-timegrid--window-width)
+                  (or org-timegrid--last-width -1)))
+          (org-timegrid--refresh t)))
+        (when window
+          (org-timegrid--schedule-scroll-restore window))))
     buffer))
 
 (add-hook 'enable-theme-functions
           #'org-timegrid--theme-changed)
 (add-hook 'disable-theme-functions
           #'org-timegrid--theme-changed)
-(add-hook 'buffer-list-update-hook
-          #'org-timegrid--restore-visible-calendars)
 (add-hook 'window-buffer-change-functions
-          #'org-timegrid--window-buffers-changed)
+          #'org-timegrid--restore-frame-calendars)
 
 (provide 'org-timegrid)
 ;;; org-timegrid.el ends here
