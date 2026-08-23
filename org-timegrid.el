@@ -1514,10 +1514,15 @@ leave no central move target."
                 (org-timegrid--window-width))
     (set-buffer-modified-p nil)
     (when window
-      (set-window-point window (point-min))
-      (redisplay)
-      (when vscroll
-        (org-timegrid--set-vscroll window vscroll)))))
+      ;; Restore the viewport before redisplay.  Painting after the tile
+      ;; insertion but before this restoration flashes the top of the
+      ;; calendar whenever an edit reloads its backend data.
+      (if vscroll
+          (org-timegrid--set-vscroll window vscroll)
+        (set-window-start window (point-min) t)
+        (set-window-point window (point-min))
+        (set-window-vscroll window 0 t))
+      (redisplay t))))
 
 (defun org-timegrid--window-scroll-pixels (window)
   "Return WINDOW's absolute pixel offset in the tiled calendar."
