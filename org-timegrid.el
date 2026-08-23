@@ -241,16 +241,17 @@ is whether the start falls within this slot rather than equalling it;
 otherwise such a block could never be selected.  Shortest first, so a
 nested child is offered before its parent.  Several blocks can share a
 slot, which is what the cursor's :lane disambiguates."
-  (sort (seq-filter (lambda (block)
-                      (and (not (plist-get block :preview))
-                           (= (plist-get block :day) day)
-                           (>= (plist-get block :start) minute)
-                           (< (plist-get block :start)
-                              (+ minute org-timegrid-slot-minutes))))
-                    (copy-sequence (plist-get org-timegrid--state :blocks)))
-        (lambda (left right)
-          (< (- (plist-get left :end) (plist-get left :start))
-             (- (plist-get right :end) (plist-get right :start))))))
+  (when (and (numberp day) (numberp minute))
+    (sort (seq-filter (lambda (block)
+                        (and (not (plist-get block :preview))
+                             (= (plist-get block :day) day)
+                             (>= (plist-get block :start) minute)
+                             (< (plist-get block :start)
+                                (+ minute org-timegrid-slot-minutes))))
+                      (copy-sequence (plist-get org-timegrid--state :blocks)))
+          (lambda (left right)
+            (< (- (plist-get left :end) (plist-get left :start))
+               (- (plist-get right :end) (plist-get right :start)))))))
 
 (defun org-timegrid--selected-id ()
   "Return the id of the block the cursor selects, or nil.
@@ -1103,11 +1104,38 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                           (decoded-time-minute now))))
       (when (and (<= 0 today-day 6)
                  (<= start-minute now-minute end-minute))
-        (let ((y (* (- now-minute start-minute) scale)))
-          (svg-line svg org-timegrid--label-width y width y
+        (let* ((y (* (- now-minute start-minute) scale))
+               (today-x (+ org-timegrid--label-width
+                            (* today-day column-width)))
+               (label (format "%02d:%02d"
+                              (decoded-time-hour now)
+                              (decoded-time-minute now)))
+               (bubble-width 34)
+               (bubble-height 12)
+               (bubble-x (/ (- org-timegrid--label-width bubble-width) 2.0))
+               (bubble-right (+ bubble-x bubble-width))
+               (today-line-x (if (= today-day 0) bubble-right today-x))
+               (bubble-y (max 1 (min (- height bubble-height 1)
+                                     (- y (/ bubble-height 2.0))))))
+          ;; Keep the line as quiet context in the other day columns.  The
+          ;; opaque segment and dot make today's column unambiguous.
+          (svg-line svg bubble-right y width y
+                    :stroke (plist-get palette :red) :stroke-width 2
+                    :stroke-opacity 0.16)
+          (svg-line svg today-line-x y (+ today-x column-width) y
                     :stroke (plist-get palette :red) :stroke-width 2)
-          (svg-circle svg org-timegrid--label-width y 4
-                      :fill (plist-get palette :red)))))
+          ;; On the first day the pill meets today's line, so a dot at the
+          ;; same join only makes the marker look swollen.
+          (when (> today-day 0)
+            (svg-circle svg today-x y 4
+                        :fill (plist-get palette :red)))
+          (svg-rectangle svg bubble-x bubble-y bubble-width
+                         bubble-height :rx 6 :ry 6
+                         :fill (plist-get palette :red))
+          (svg-text svg label :x (/ org-timegrid--label-width 2.0)
+                    :y (+ bubble-y 9) :font-size 7 :font-weight "600"
+                    :font-family font-family :text-anchor "middle"
+                    :fill "#ffffff"))))
     (setq-local org-timegrid--geometry geometry)
     svg))
 
