@@ -135,6 +135,18 @@ Horizontal motion, including `n` and `p`, crosses week boundaries. If the next
 week has no block to select, the calendar still opens it and leaves the cursor
 at the near edge.
 
+Incremental title search is an optional extension. Enable it in your Emacs
+configuration:
+
+```elisp
+(require 'org-timegrid-isearch)
+```
+
+`C-s` searches block titles forward and `C-r` searches backward. Matches update
+as you type. Press either key again to move to the next match in that direction.
+Search wraps within the displayed week. `RET` keeps the current match, while
+`C-g` returns to the block or calendar slot where the search began.
+
 Entries do not need to align to the grid. An entry from 13:50 to 14:10 remains
 reachable and editable. Snapping applies when you change it.
 
