@@ -217,6 +217,12 @@ priority, property, or file.
 | `org-timegrid-org-capture-todo-keyword` | `"TODO"` | Keyword for new headings |
 | `org-timegrid-org-tag-color-alist` | `nil` | Tag-to-colour mapping |
 
+On an empty slot, `RET` and mouse-drag creation complete against unfinished
+TODO headings in the configured Org files. Choosing one adds the new time
+range to that heading. Entering text that does not match a candidate creates a
+heading in `org-timegrid-org-capture-file`, as before. This uses Org's parser
+and works with any `completion-styles`; it does not require `org-ql` or Consult.
+
 ## Hooks and custom backends
 
 `org-timegrid-org-after-create-hook` runs with point on a newly created Org
@@ -231,9 +237,9 @@ heading. Hook edits join the same undo step.
 
 The renderer itself does not require Org. `org-timegrid-open` accepts an
 `org-timegrid-backend` with a listing function and optional callbacks for
-create, update, delete, undo, visit, and date input. A backend with only a
-listing function is read-only. See `org-timegrid-backend-create` for the full
-contract.
+create, update, delete, undo, visit, entry completion, and date input. A
+backend with only a listing function is read-only. See
+`org-timegrid-backend-create` for the full contract.
 
 ## Screenshots
 

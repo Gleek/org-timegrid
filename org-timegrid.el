@@ -1541,15 +1541,27 @@ cut wants: the entry has to survive for the yank to copy it."
     (cons (+ day-minute (plist-get block :start))
           (+ day-minute (plist-get block :end)))))
 
-(defun org-timegrid--backend-create (title block &optional source-event)
+(defun org-timegrid--backend-create (title block &optional source-event target)
   "Ask the active backend to create TITLE using BLOCK's range."
   (let ((creator (org-timegrid-backend-create-function
                   org-timegrid--backend))
         (range (org-timegrid--block-absolute-range block)))
     (unless (functionp creator)
       (user-error "This backend cannot create calendar entries"))
-    (funcall creator title (car range) (cdr range) source-event)
+    (if target
+        (funcall creator title (car range) (cdr range) source-event target)
+      (funcall creator title (car range) (cdr range) source-event))
     (org-timegrid-refresh)))
+
+(defun org-timegrid--read-entry ()
+  "Read a title and optional existing record for a new block."
+  (let ((reader (and (fboundp 'org-timegrid-backend-read-entry-function)
+                     org-timegrid--backend
+                     (org-timegrid-backend-read-entry-function
+                      org-timegrid--backend))))
+    (if (functionp reader)
+        (funcall reader)
+      (cons (org-timegrid--read-title) nil))))
 
 (defun org-timegrid--backend-update (block)
   "Ask the active backend to apply BLOCK's new range."
@@ -1577,15 +1589,16 @@ cut wants: the entry has to survive for the yank to copy it."
       (org-timegrid--clear-preview)
       (message "%s" error-message))
      ((eq kind 'create)
-      (let (title)
+      (let (entry)
         (unwind-protect
             (progn
               (org-timegrid--set-preview proposal)
-              (setq title (org-timegrid--read-title)))
+              (setq entry (org-timegrid--read-entry)))
           (setq-local org-timegrid--state (plist-put org-timegrid--state :preview nil))
           (org-timegrid--refresh t))
-        (unless (string-empty-p title)
-          (org-timegrid--backend-create title block))))
+        (unless (string-empty-p (car entry))
+          (org-timegrid--backend-create
+           (car entry) block nil (cdr entry)))))
      ((eq kind 'copy)
       (setq-local org-timegrid--state (plist-put org-timegrid--state :preview nil))
       (let ((source (org-timegrid--block (plist-get block :id))))
@@ -2270,7 +2283,8 @@ sharing one key made nudging the cursor resize whatever it had selected."
   (interactive)
   (org-timegrid--reveal-cursor)
   (let* ((cursor (org-timegrid--ensure-cursor))
-         (title (org-timegrid--read-title)))
+         (entry (org-timegrid--read-entry))
+         (title (car entry)))
     (if (string-empty-p title)
         (message "Nothing created")
       (let* ((minutes (org-timegrid--read-minutes
@@ -2279,7 +2293,7 @@ sharing one key made nudging the cursor resize whatever it had selected."
              (block (org-timegrid--make-block
                      'new (plist-get cursor :day) start (+ start minutes)
                      title 'blue)))
-        (org-timegrid--backend-create title block)))))
+        (org-timegrid--backend-create title block nil (cdr entry))))))
 
 (defun org-timegrid-open-at-cursor ()
   "Visit the block under the cursor, or create one when the slot is empty."

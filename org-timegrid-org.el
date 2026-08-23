@@ -219,43 +219,111 @@ templates do — stamping a CAPTURED property, filing an ID, adding a
 default tag."
   :type 'hook)
 
-(defun org-timegrid-org--create-event (title start end &optional source)
+(defun org-timegrid-org--add-range (marker start end)
+  "Add the range from START to END to the heading at MARKER."
+  (unless (and (markerp marker) (marker-buffer marker))
+    (user-error "The selected Org heading is no longer live"))
+  (with-current-buffer (marker-buffer marker)
+    (org-with-wide-buffer
+     (goto-char marker)
+     (org-back-to-heading t)
+     (undo-boundary)
+     (atomic-change-group
+       (org-end-of-meta-data t)
+       (unless (bolp) (insert "\n"))
+       (insert (org-timegrid-org--format-range start end) "\n"))
+     (undo-boundary)
+     (org-timegrid-org--note-edit))))
+
+(defun org-timegrid-org--create-event (title start end &optional source target)
   "Create TITLE from absolute minute START to END in the capture buffer."
-  (let ((file (org-timegrid-org--capture-target))
-        (entry (if source
-                   (org-timegrid-org--duplicate-entry-string
-                    source title start end)
-                 (concat "* " org-timegrid-org-capture-todo-keyword
-                         " " title "\n"
-                         (org-timegrid-org--format-range start end)
-                         "\n"))))
-    (unless file
-      (user-error "Set `org-timegrid-org-capture-file' first"))
-    (let ((buffer (find-file-noselect (expand-file-name file))))
-      (with-current-buffer buffer
-        (unless (derived-mode-p 'org-mode)
-          (org-mode))
+  (if target
+      (progn
+        (org-timegrid-org--add-range target start end)
+        (message "Added time block to %s" title))
+    (let ((file (org-timegrid-org--capture-target))
+          (entry (if source
+                     (org-timegrid-org--duplicate-entry-string
+                      source title start end)
+                   (concat "* " org-timegrid-org-capture-todo-keyword
+                           " " title "\n"
+                           (org-timegrid-org--format-range start end)
+                           "\n"))))
+      (unless file
+        (user-error "Set `org-timegrid-org-capture-file' first"))
+      (let ((buffer (find-file-noselect (expand-file-name file))))
+        (with-current-buffer buffer
+          (unless (derived-mode-p 'org-mode)
+            (org-mode))
+          (org-with-wide-buffer
+           (goto-char (point-max))
+           (undo-boundary)
+           (atomic-change-group
+             (unless (or (= (point-min) (point-max)) (bolp))
+               (insert "\n"))
+             (unless (or (= (point-min) (point-max))
+                         (save-excursion
+                           (forward-line -1)
+                           (looking-at-p "[[:space:]]*$")))
+               (insert "\n"))
+             (let ((beginning (point)))
+               (insert entry)
+               ;; Run the hook inside the change group, with point on the new
+               ;; heading, so anything it adds belongs to the same undo step as
+               ;; the entry rather than needing a second undo of its own.
+               (goto-char beginning)
+               (run-hooks 'org-timegrid-org-after-create-hook)))
+           (undo-boundary))
+          (org-timegrid-org--note-edit)
+          (message "Added %s" title))))))
+
+(defun org-timegrid-org--heading-candidates ()
+  "Return completion candidates for unfinished TODO headings."
+  (let (candidates)
+    (dolist (file (org-timegrid-org--files))
+      (with-current-buffer (find-file-noselect file)
         (org-with-wide-buffer
-         (goto-char (point-max))
-         (undo-boundary)
-         (atomic-change-group
-           (unless (or (= (point-min) (point-max)) (bolp))
-             (insert "\n"))
-           (unless (or (= (point-min) (point-max))
-                       (save-excursion
-                         (forward-line -1)
-                         (looking-at-p "[[:space:]]*$")))
-             (insert "\n"))
-           (let ((beginning (point)))
-             (insert entry)
-             ;; Run the hook inside the change group, with point on the new
-             ;; heading, so anything it adds belongs to the same undo step as
-             ;; the entry rather than needing a second undo of its own.
-             (goto-char beginning)
-             (run-hooks 'org-timegrid-org-after-create-hook)))
-         (undo-boundary))
-        (org-timegrid-org--note-edit)
-      (message "Added %s" title)))))
+         (org-element-map (org-element-parse-buffer) 'headline
+           (lambda (headline)
+             (when (and (org-element-property :todo-keyword headline)
+                        (not (eq (org-element-property :todo-type headline)
+                                 'done)))
+               (let* ((title (org-element-property :raw-value headline))
+                      (todo (org-element-property :todo-keyword headline))
+                      (tags (org-element-property :tags headline))
+                      (marker (copy-marker
+                               (org-element-property :begin headline)))
+                      (path (save-excursion
+                              (goto-char marker)
+                              (org-get-outline-path)))
+                      (context (string-join
+                                (append path
+                                        (list (file-name-nondirectory file)))
+                                " / "))
+                      (tag-text (and tags
+                                     (concat ":" (string-join tags ":") ":")))
+                      (display
+                       (string-join
+                        (delq nil
+                              (list (propertize todo 'face
+                                               (org-get-todo-face todo))
+                                    title
+                                    (and tag-text
+                                         (propertize tag-text 'face 'org-tag))
+                                    (propertize (format "[%s]" context)
+                                                'face 'shadow)))
+                        "  ")))
+                 (push (cons display (cons title marker)) candidates))))))))
+    (nreverse candidates)))
+
+(defun org-timegrid-org-read-entry ()
+  "Read an agenda TODO heading, or a title for a new capture entry."
+  (let* ((candidates (org-timegrid-org--heading-candidates))
+         (choice (completing-read "Task: " candidates nil nil))
+         (match (assoc choice candidates)))
+    (if match
+        (cdr match)
+      (cons choice nil))))
 
 (defvar org-timegrid-org--edited-buffers nil
   "Buffers this calendar has edited, most recent first.")
@@ -673,6 +741,7 @@ FILE defaults to `buffer-file-name'."
        :delete-entry-function #'org-timegrid-org--remove-entry
        :undo-function #'org-timegrid-org--undo
        :visit-function #'org-timegrid-org--visit-event
+       :read-entry-function #'org-timegrid-org-read-entry
        :read-timestamp-function #'org-timegrid-org-read-timestamp))
 
 (defun org-timegrid-org-read-timestamp (absolute-start duration)

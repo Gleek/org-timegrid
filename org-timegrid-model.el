@@ -45,17 +45,20 @@ SOURCE is opaque to the renderer and belongs to the backend."
                (:constructor org-timegrid-backend-create))
   "Operations supplied by a calendar data backend.
 LIST-FUNCTION receives inclusive START and exclusive END absolute minutes.
-CREATE-FUNCTION receives TITLE, START, END, and an optional source event to
-duplicate.  UPDATE-FUNCTION receives an existing event, its new START and END,
-and an optional heading title.  DELETE-FUNCTION removes an event's time;
+CREATE-FUNCTION receives TITLE, START, END, an optional source event to
+duplicate, and an optional existing backend record selected by
+READ-ENTRY-FUNCTION.  UPDATE-FUNCTION receives an existing event, its new
+START and END, and an optional heading title.  DELETE-FUNCTION removes an
+event's time;
 DELETE-ENTRY-FUNCTION removes the record that carried it.  UNDO-FUNCTION
 receives non-nil when it continues an unbroken run of undos, and REDO
 when the caller wants the reverse; the backend owns undo because only it
-knows where the edit landed.  READ-TIMESTAMP-FUNCTION lets a backend
-supply its own date prompt.  Mutation functions may be nil."
+knows where the edit landed.  READ-ENTRY-FUNCTION may return a cons of the
+display title and an opaque existing record.  READ-TIMESTAMP-FUNCTION lets a
+backend supply its own date prompt.  Mutation functions may be nil."
   name list-function create-function update-function delete-function
   delete-entry-function undo-function visit-function
-  read-timestamp-function)
+  read-entry-function read-timestamp-function)
 
 (defcustom org-timegrid-slot-minutes 15
   "Granularity of the calendar, in minutes.
