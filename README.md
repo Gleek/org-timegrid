@@ -1,6 +1,6 @@
 # org-timegrid
 
-`org-timegrid` is an SVG week calendar for Org mode. It reads timed active
+`org-timegrid` is a beautiful SVG week calendar for Org mode. It reads timed active
 timestamps from your Org files and writes edits back to their source headings.
 
 Create, move, resize, copy, rename, and remove calendar blocks with the mouse
@@ -36,17 +36,11 @@ support with `(image-type-available-p 'svg)`. There are no other dependencies.
 With [Elpaca](https://github.com/progfolio/elpaca):
 
 ```elisp
-(use-package org-timegrid-org
-  :ensure (org-timegrid :host github :repo "Gleek/org-timegrid")
+(use-package org-timegrid
+  :ensure (:host github :repo "Gleek/org-timegrid")
   :commands (org-timegrid-week)
-  :bind ("C-c c" . org-timegrid-week)
-  :config
-  (setq org-timegrid-org-capture-file "~/org/inbox.org"))
+  :bind ("C-c c" . org-timegrid-week))
 ```
-
-The two names have different jobs. `org-timegrid` is the package and repository
-name. `org-timegrid-org` is the feature that connects the renderer to Org, so
-it is the feature that `use-package` configures.
 
 For a manual install, put the `.el` files on `load-path`, evaluate `(require
 'org-timegrid-org)`, then run `M-x org-timegrid-week`.
@@ -89,15 +83,15 @@ Run `M-x org-timegrid-week` to open the week containing today.
 
 ### Mouse
 
-| Gesture | Action |
-|---|---|
-| Drag empty space | Create an entry for that range |
-| Drag a block | Move it |
-| Drag a block's top or bottom edge | Resize it |
-| super-drag a block | Copy it |
-| Click | Put the cursor there |
-| Double-click a block | Visit its Org heading |
-| Wheel | Scroll the day |
+| Gesture                           | Action                         |
+|-----------------------------------|--------------------------------|
+| Drag empty space                  | Create an entry for that range |
+| Drag a block                      | Move it                        |
+| Drag a block's top or bottom edge | Resize it                      |
+| super-drag a block                | Copy it                        |
+| Click                             | Put the cursor there           |
+| Double-click a block              | Visit its Org heading          |
+| Wheel                             | Scroll the day                 |
 
 Mouse edits snap to 15 minutes and use a 15-minute minimum. Release commits a
 drag. Press `C-g` before releasing to cancel it.
@@ -108,45 +102,32 @@ The calendar has one cursor. A block is selected when the cursor sits on the
 slot where that block begins. This keeps keyboard and mouse selection in sync
 after redraws.
 
-| Key | Action |
-|---|---|
-| `C-n` / `C-p`, up/down | Move the cursor by 15 minutes |
-| `C-f` / `C-b`, left/right | Move through overlapping lanes, then days |
-| `C-v` / `M-v`, `SPC` | Move by one screen |
-| `C-a` / `C-e` | Go to the first or last slot of the day |
-| `C-l` | Center the view on the cursor |
-| `n` / `p` | Select the next or previous block |
-| `RET` | Visit the selected block, or create one at the cursor |
-| `C-g` | Hide the cursor |
-| `M-down` / `M-up` | Move the selected block by 15 minutes |
-| `M-right` / `M-left` | Move the block by one day |
-| `M-s-right` / `M-s-left` | Copy the block by one day |
-| `S-down` / `S-up` | Move the end time |
-| `C-S-up` / `C-S-down` | Move the start time |
-| `t` | Enter a new time or range |
-| `e` | Rename the heading |
-| `d`, Delete | Remove its time, then optionally delete the heading |
-| `M-w` / `C-w` / `C-y` | Copy, cut, or paste a block |
-| `u`, `C-/`, `C-x u` | Undo the last calendar edit |
-| `b` / `f`, `M-b` / `M-f` | Shift by a day or week |
-| `j` / `.` | Jump to a date or today |
-| `g` | Reload the week from the backend |
-| `q` | Quit |
+| Key                       | Action                                                                               |
+|---------------------------|--------------------------------------------------------------------------------------|
+| `C-n` / `C-p`, up/down    | Move the cursor by 15 minutes                                                        |
+| `C-f` / `C-b`, left/right | Move through overlapping lanes, then days                                            |
+| `C-v` / `M-v`, `SPC`      | Move by one screen                                                                   |
+| `C-a` / `C-e`             | Go to the first or last slot of the day                                              |
+| `C-l`                     | Center the view on the cursor                                                        |
+| `n` / `p`                 | Select the next or previous block                                                    |
+| `RET`                     | Visit the selected block, or create one at the cursor                                |
+| `C-g`                     | Hide the cursor                                                                      |
+| `M-down` / `M-up`         | Move the selected block by 15 minutes                                                |
+| `M-right` / `M-left`      | Move the block by one day                                                            |
+| `M-s-right` / `M-s-left`  | Copy the block by one day                                                            |
+| `S-down` / `S-up`         | Move the end time                                                                    |
+| `C-S-up` / `C-S-down`     | Move the start time                                                                  |
+| `t`                       | Enter a new time or range                                                            |
+| `e`                       | Rename the heading                                                                   |
+| `d`, Delete               | Remove its time, then optionally delete the heading                                  |
+| `M-w` / `C-w` / `C-y`     | Copy, cut, or paste a block                                                          |
+| `u`, `C-/`, `C-x u`       | Undo the last calendar edit                                                          |
+| `b` / `f`, `M-b` / `M-f`  | Shift by a day or week                                                               |
+| `j` / `.`                 | Jump to a date or today                                                              |
+| `g`                       | Reload the week from the backend                                                     |
+| `q`                       | Quit                                                                                 |
+| `C-s`, `C-r`              | Isearch like forward or backward search. `RET` keeps the current match, `C-g` resets |
 
-Held movement and resize keys update the visible tiles immediately. The final
-range is written to the backend once keyboard input pauses.
-
-Horizontal motion, including `n` and `p`, crosses week boundaries. If the next
-week has no block to select, the calendar still opens it and leaves the cursor
-at the near edge.
-
-`C-s` searches block titles forward and `C-r` searches backward. Matches update
-as you type. Press either key again to move to the next match in that direction.
-Search wraps within the displayed week. `RET` keeps the current match, while
-`C-g` returns to the block or calendar slot where the search began.
-
-Entries do not need to align to the grid. An entry from 13:50 to 14:10 remains
-reachable and editable. Snapping applies when you change it.
 
 ## Org Agenda strip
 
@@ -198,42 +179,72 @@ priority, property, or file.
 
 ## Configuration
 
-| Variable | Default | Meaning |
-|---|---:|---|
-| `org-timegrid-start-hour` / `org-timegrid-end-hour` | `0` / `24` | Hours drawn |
-| `org-timegrid-pixels-per-minute` | `0.9` | Week-view scale |
-| `org-timegrid-slot-minutes` | `15` | Cursor and edit granularity |
-| `org-timegrid-cursor-step-minutes` | `15` | Normal keyboard step |
-| `org-timegrid-keyboard-commit-delay` | `0.25` | Idle delay before a moved block is saved |
-| `org-timegrid-default-duration-minutes` | `30` | Length used when no end is present |
-| `org-timegrid-block-gap` | `1` | Gap between blocks, in pixels |
-| `org-timegrid-corner-radius` | `0` | Block corner radius |
-| `org-timegrid-nesting-indent` | `8` | Indent for contained events |
-| `org-timegrid-title-clearance` | `18` | Space a parent keeps for its title |
-| `org-timegrid-data-refresh-seconds` | `300` | Backend reload interval |
+| Variable                                            |    Default | Meaning                                  |
+|-----------------------------------------------------|-----------:|------------------------------------------|
+| `org-timegrid-start-hour` / `org-timegrid-end-hour` | `0` / `24` | Hours drawn                              |
+| `org-timegrid-pixels-per-minute`                    |      `0.9` | Week-view scale                          |
+| `org-timegrid-slot-minutes`                         |       `15` | Cursor and edit granularity              |
+| `org-timegrid-cursor-step-minutes`                  |       `15` | Normal keyboard step                     |
+| `org-timegrid-keyboard-commit-delay`                |     `0.25` | Idle delay before a moved block is saved |
+| `org-timegrid-default-duration-minutes`             |       `30` | Length used when no end is present       |
+| `org-timegrid-block-gap`                            |        `1` | Gap between blocks, in pixels            |
+| `org-timegrid-corner-radius`                        |        `0` | Block corner radius                      |
+| `org-timegrid-nesting-indent`                       |        `8` | Indent for contained events              |
+| `org-timegrid-title-clearance`                      |       `18` | Space a parent keeps for its title       |
+| `org-timegrid-data-refresh-seconds`                 |      `300` | Backend reload interval                  |
 
-| Agenda variable | Default | Meaning |
-|---|---:|---|
+| Agenda variable                                 |       Default | Meaning                   |
+|-------------------------------------------------|--------------:|---------------------------|
 | `org-timegrid-agenda-minutes-before` / `-after` | `180` / `180` | Visible window around now |
-| `org-timegrid-agenda-insert-after` | `"To Refile"` | Block above the strip |
-| `org-timegrid-agenda-separator` | `t` | Separator after the strip |
-| `org-timegrid-compact-pixels-per-minute` | `0.95` | Strip scale |
-| `org-timegrid-compact-font-size` | `11` | Strip text size |
+| `org-timegrid-agenda-insert-after`              | `"To Refile"` | Block above the strip     |
+| `org-timegrid-agenda-separator`                 |           `t` | Separator after the strip |
+| `org-timegrid-compact-pixels-per-minute`        |        `0.95` | Strip scale               |
+| `org-timegrid-compact-font-size`                |          `11` | Strip text size           |
 
-| Org variable | Default | Meaning |
-|---|---:|---|
-| `org-timegrid-org-files` | `agenda` | Files to query; a list is literal |
-| `org-timegrid-org-extra-files` | `nil` | Extra files always queried |
-| `org-timegrid-org-capture-file` | `nil` | Target for new entries |
-| `org-timegrid-org-capture-todo-keyword` | `"TODO"` | Keyword for new headings |
-| `org-timegrid-org-show-repeaters` | `t` | Show timestamps with repeaters |
-| `org-timegrid-org-tag-color-alist` | `nil` | Tag-to-colour mapping |
+| Org variable                        |                                  Default | Meaning                                              |
+|-------------------------------------|-----------------------------------------:|------------------------------------------------------|
+| `org-timegrid-org-files`            |                                 `agenda` | Files to query; a list is literal                    |
+| `org-timegrid-org-capture-file`     | `calendar.org` in `user-emacs-directory` | Target for new entries; always queried               |
+| `org-timegrid-org-capture-template` |           top-level title and time range | Structure and location inside the capture file       |
+| `org-timegrid-org-auto-save`        |                                    `nil` | Save the affected Org file after every calendar edit |
+| `org-timegrid-org-show-repeaters`   |                                      `t` | Show timestamps with repeaters                       |
+| `org-timegrid-org-tag-color-alist`  |                                    `nil` | Tag-to-colour mapping                                |
 
 On an empty slot, `RET` and mouse-drag creation complete against unfinished
 TODO headings in the configured Org files. Choosing one adds the new time
 range to that heading. Entering text that does not match a candidate creates a
 heading in `org-timegrid-org-capture-file`, as before. This uses Org's parser
-and works with any `completion-styles`; it does not require `org-ql` or Consult.
+and works with any `completion-styles`.
+
+The default template is `(:target file :template "* %{title}\n%{time-range}\n%?")`.
+Its target may also be `datetree`, `(headline "Name")`, or
+`(olp "Parent" "Child")`. Template headings are relative to that target. The
+available substitutions are `%{title}`, `%{time-range}`, `%{start}`, `%{end}`,
+`%{duration}`, `%<FORMAT>` (using the selected start time), and `%?` for the
+final point.
+
+To keep calendar entries in a dedicated file organized by their start date:
+
+```elisp
+(setq org-timegrid-org-capture-file "~/org/timegrid.org"
+      org-timegrid-org-capture-template
+      '(:target datetree
+        :template "* %{title}\n%{time-range}\n%?"))
+```
+
+Creating “Project review” on August 25, 2026 produces a child of that date:
+
+```org
+* 2026
+** 2026-08 August
+*** 2026-08-25 Tuesday
+**** Project review
+<2026-08-25 Tue 10:00-11:00>
+```
+
+The datetree date comes from the block's selected start time, including when
+creating an entry in a past or future week. The capture file is also searched
+and displayed automatically; it need not be added to `org-agenda-files`.
 
 ## Hooks and custom backends
 
@@ -244,7 +255,7 @@ heading. Hook edits join the same undo step.
 (add-hook 'org-timegrid-org-after-create-hook
           (lambda ()
             (org-set-property
-             "CAPTURED" (format-time-string "[%F %a %R]"))))
+             "CREATED_AT" (format-time-string "[%F %a %R]"))))
 ```
 
 The renderer itself does not require Org. `org-timegrid-open` accepts an
@@ -253,25 +264,15 @@ create, update, delete, undo, visit, entry completion, and date input. A
 backend with only a listing function is read-only. See
 `org-timegrid-backend-create` for the full contract.
 
-## Screenshots
-
-| Light | Dark |
-|---|---|
-| ![Week view using a light theme](screenshots/week-light.png) | ![Week view using a dark theme](screenshots/week-dark.png) |
-| ![Agenda strip using a light theme](screenshots/agenda-light.png) | ![Agenda strip using a dark theme](screenshots/agenda-dark.png) |
-
 ## Credits and status
 
 The visual design and interaction borrow from macOS Calendar. [`org-timeblock`](https://github.com/ichernyshovvv/org-timeblock)
 and [`timeblock`](https://github.com/ichernyshovvv/timeblock.el) supplied the idea of drawing an Emacs calendar with SVG, and
-[`calfw`](https://github.com/kiwanami/emacs-calfw) was the original push toward a calendar view for Org.
+[`calfw`](https://github.com/kiwanami/emacs-calfw) and [`calfw-blocks`](https://github.com/ml729/calfw-blocks) were the original
+inspiration toward a calendar view for Org.
 
 ## AI usage
-Even though directed the UI, interaction design, package structure, public
+Even though I directed the UI, interaction design, package structure, public
 commands, and customization options. Opus 5 and GPT-5.6-Codex wrote all code
 in the current implementation. The SVG renderer was agent-written and then
 reworked through hands-on usability testing.
-
-The package is in daily use. Date-only events and day or three-day views are
-not implemented yet. Only the week view edits Org data; the agenda strip is
-read-only.

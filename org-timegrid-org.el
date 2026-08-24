@@ -38,6 +38,7 @@
 (require 'org)
 (require 'org-element)
 (require 'org-agenda)
+(require 'org-datetree)
 (require 'org-timegrid-model)
 ;; The backend value names renderer functions, so the renderer has to be
 ;; loaded, not autoloaded.  There is no cycle: `org-timegrid.el' never
@@ -51,33 +52,45 @@
 
 (defcustom org-timegrid-org-files 'agenda
   "Files queried for timed Org ranges.
-The symbol `agenda' means use `org-agenda-files'.  A function value is
-called without arguments.  A list is used literally, so an empty list
-queries no files beyond `org-timegrid-org-extra-files' and the
-capture file."
+The symbol `agenda' means use the variable `org-agenda-files'.  A
+function value is called without arguments.  A list is used literally.
+The capture file is always queried in addition to these files."
   :type '(choice (const :tag "Org agenda files" agenda)
                  (function :tag "File-producing function")
                  (repeat :tag "Explicit files" file)))
 
-(defcustom org-timegrid-org-extra-files nil
-  "Files always queried in addition to `org-timegrid-org-files'."
-  :type '(repeat file))
-
-(defcustom org-timegrid-org-capture-file nil
+(defcustom org-timegrid-org-capture-file
+  (expand-file-name "calendar.org" user-emacs-directory)
   "File reserved for calendar-created Org entries.
-The date query always includes this file, even when it is not in
-`org-agenda-files'.  Nil uses the first agenda file, which is commonly an
-inbox.  New entries are inserted into its live buffer and left unsaved."
-  :type '(choice (const :tag "First Org agenda file" nil) file))
+The date query always includes this file, even when it is not in the variable
+`org-agenda-files'.  New entries are inserted into its live buffer and
+left unsaved."
+  :type 'file)
 
-(defcustom org-timegrid-org-capture-todo-keyword "TODO"
-  "TODO keyword used for entries drawn on the calendar."
-  :type 'string)
+(defcustom org-timegrid-org-capture-template
+  '(:target file :template "* %{title}\n%{time-range}\n%?")
+  "Template used for new calendar entries in the capture file.
+
+TARGET controls the insertion position inside the file.  It may be
+`file', `datetree', `(headline NAME)', or `(olp NAME ...)'.  Headings in
+the template are relative to that target.
+
+TEMPLATE recognizes `%{title}', `%{time-range}', `%{start}', `%{end}',
+`%{duration}', `%<FORMAT>' (formatted from the selected start), and `%?'
+for the final point."
+  :type '(plist :key-type symbol :value-type sexp))
 
 (defcustom org-timegrid-org-show-repeaters t
   "Whether repeating Org timestamps appear on the calendar.
 When nil, the calendar omits both the anchor and generated occurrences of
 timestamps with an Org repeater."
+  :type 'boolean)
+
+(defcustom org-timegrid-org-auto-save nil
+  "Whether calendar edits immediately save their affected Org files.
+When non-nil, creating, moving, resizing, renaming, copying, deleting,
+undoing, and redoing a calendar entry save the source buffer after the
+edit succeeds."
   :type 'boolean)
 
 (defcustom org-timegrid-org-tag-color-alist nil
@@ -110,8 +123,7 @@ Named apart from `org-timegrid-org-capture-file': a function and a user
 option sharing one name is legal and confusing, and it also makes a
 minor mode indistinguishable from an option to any code that inspects
 symbols."
-  (or org-timegrid-org-capture-file
-      (car (org-agenda-files))))
+  org-timegrid-org-capture-file)
 
 (defun org-timegrid-org--files ()
   "Return the existing, deduplicated Org files to query."
@@ -124,7 +136,6 @@ symbols."
                 ((listp org-timegrid-org-files)
                  org-timegrid-org-files)
                 (t nil))
-          org-timegrid-org-extra-files
           (and (org-timegrid-org--capture-target)
                (list (org-timegrid-org--capture-target))))))
     (delete-dups
@@ -225,36 +236,124 @@ templates do — stamping a CAPTURED property, filing an ID, adding a
 default tag."
   :type 'hook)
 
-(defun org-timegrid-org--add-range (marker start end)
-  "Add the range from START to END to the heading at MARKER."
-  (unless (and (markerp marker) (marker-buffer marker))
-    (user-error "The selected Org heading is no longer live"))
-  (with-current-buffer (marker-buffer marker)
-    (org-with-wide-buffer
-     (goto-char marker)
-     (org-back-to-heading t)
-     (undo-boundary)
-     (atomic-change-group
-       (org-end-of-meta-data t)
-       (unless (bolp) (insert "\n"))
-       (insert (org-timegrid-org--format-range start end) "\n"))
-     (undo-boundary)
-     (org-timegrid-org--note-edit))))
+(defun org-timegrid-org--format-instant (absolute-minute)
+  "Format ABSOLUTE-MINUTE as an active Org timestamp."
+  (format "<%s %s>"
+          (org-timegrid-org--format-date (floor absolute-minute 1440))
+          (org-timegrid-org--format-clock (% absolute-minute 1440))))
+
+(defun org-timegrid-org--absolute-time (absolute-minute)
+  "Return an Emacs time value for local ABSOLUTE-MINUTE."
+  (let* ((date (calendar-gregorian-from-absolute
+                (floor absolute-minute 1440)))
+         (clock (% absolute-minute 1440)))
+    (encode-time 0 (% clock 60) (/ clock 60)
+                 (nth 1 date) (nth 0 date) (nth 2 date))))
+
+(defun org-timegrid-org--expand-capture-template (title start end)
+  "Expand the calendar template for TITLE and range START through END."
+  (let ((text (plist-get org-timegrid-org-capture-template :template)))
+    (unless (stringp text)
+      (user-error "The timegrid capture template needs a :template string"))
+    (dolist (replacement
+             `(("%{title}" . ,title)
+               ("%{time-range}" . ,(org-timegrid-org--format-range start end))
+               ("%{start}" . ,(org-timegrid-org--format-instant start))
+               ("%{end}" . ,(org-timegrid-org--format-instant end))
+               ("%{duration}" . ,(number-to-string (- end start)))))
+      (setq text (string-replace (car replacement) (cdr replacement) text)))
+    (replace-regexp-in-string
+     "%<\\([^>\n]+\\)>"
+     (lambda (match)
+       (format-time-string (substring match 2 -1)
+                           (org-timegrid-org--absolute-time start)))
+     text t t)))
+
+(defun org-timegrid-org--capture-parent (target start)
+  "Move to TARGET for an entry starting at START and return its level."
+  (pcase target
+    ('file
+     (goto-char (point-max))
+     0)
+    ('datetree
+     (org-datetree-find-date-create
+      (calendar-gregorian-from-absolute (floor start 1440)))
+     (prog1 (org-current-level)
+       (org-end-of-subtree t t)))
+    (`(headline ,name)
+     (goto-char (org-find-olp (list name) t))
+     (prog1 (org-current-level)
+       (org-end-of-subtree t t)))
+    (`(olp . ,path)
+     (goto-char (org-find-olp path t))
+     (prog1 (org-current-level)
+       (org-end-of-subtree t t)))
+    (_ (user-error "Unknown timegrid capture target: %S" target))))
+
+(defun org-timegrid-org--relative-template (template parent-level)
+  "Make TEMPLATE headings relative to PARENT-LEVEL."
+  (if (zerop parent-level)
+      template
+    (replace-regexp-in-string
+     "^\\*+"
+     (lambda (stars) (concat (make-string parent-level ?*) stars))
+     template)))
+
+(defun org-timegrid-org--insert-capture-template (title start end)
+  "Insert a new entry for TITLE and range START through END.
+Return markers for its beginning and the position selected by `%?'."
+  (let* ((target (or (plist-get org-timegrid-org-capture-template :target)
+                     'file))
+         (cursor-token "<<org-timegrid-final-point>>")
+         (template (string-replace
+                    "%?" cursor-token
+                    (org-timegrid-org--expand-capture-template
+                     title start end)))
+         (parent-level (org-timegrid-org--capture-parent target start)))
+    (unless (or (= (point-min) (point-max)) (bolp))
+      (insert "\n"))
+    (let ((beginning (point)))
+      (insert (org-timegrid-org--relative-template template parent-level))
+      (unless (bolp) (insert "\n"))
+      (goto-char beginning)
+      (if (search-forward cursor-token nil t)
+          (replace-match "" t t)
+        (goto-char beginning))
+      (list (copy-marker beginning) (copy-marker (point))))))
+
+(defun org-timegrid-org--add-range (record start end)
+  "Add the range from START to END to the heading identified by RECORD.
+RECORD is either a marker selected interactively or an event source
+plist retained while cutting a calendar block."
+  (let ((marker (if (markerp record)
+                    record
+                  (plist-get record :marker))))
+    (unless (and (markerp marker) (marker-buffer marker))
+      (user-error "The selected Org heading is no longer live"))
+    (with-current-buffer (marker-buffer marker)
+      (org-with-wide-buffer
+       (goto-char marker)
+       (org-back-to-heading t)
+       (undo-boundary)
+       (atomic-change-group
+         (org-end-of-meta-data t)
+         (unless (bolp) (insert "\n"))
+         (insert (org-timegrid-org--format-range start end) "\n"))
+       (undo-boundary)
+       (org-timegrid-org--note-edit)))))
 
 (defun org-timegrid-org--create-event (title start end &optional source target)
-  "Create TITLE from absolute minute START to END in the capture buffer."
+  "Create TITLE from absolute minute START to END in the capture buffer.
+When SOURCE is non-nil, duplicate that event.  When TARGET is non-nil,
+add the range to that existing heading instead."
   (if target
       (progn
         (org-timegrid-org--add-range target start end)
         (message "Added time block to %s" title))
     (let ((file (org-timegrid-org--capture-target))
-          (entry (if source
-                     (org-timegrid-org--duplicate-entry-string
-                      source title start end)
-                   (concat "* " org-timegrid-org-capture-todo-keyword
-                           " " title "\n"
-                           (org-timegrid-org--format-range start end)
-                           "\n"))))
+          (entry (and source
+                      (org-timegrid-org--duplicate-entry-string
+                       source title start end))))
       (unless file
         (user-error "Set `org-timegrid-org-capture-file' first"))
       (let ((buffer (find-file-noselect (expand-file-name file))))
@@ -265,35 +364,62 @@ default tag."
            (goto-char (point-max))
            (undo-boundary)
            (atomic-change-group
-             (unless (or (= (point-min) (point-max)) (bolp))
-               (insert "\n"))
-             (unless (or (= (point-min) (point-max))
-                         (save-excursion
-                           (forward-line -1)
-                           (looking-at-p "[[:space:]]*$")))
-               (insert "\n"))
-             (let ((beginning (point)))
-               (insert entry)
+             (let* ((positions
+                     (if entry
+                         (progn
+                           (unless (or (= (point-min) (point-max)) (bolp))
+                             (insert "\n"))
+                           (unless (or (= (point-min) (point-max))
+                                       (save-excursion
+                                         (forward-line -1)
+                                         (looking-at-p "[[:space:]]*$")))
+                             (insert "\n"))
+                           (let ((beginning (copy-marker (point))))
+                             (insert entry)
+                             (list beginning beginning)))
+                       (org-timegrid-org--insert-capture-template
+                        title start end)))
+                    (beginning (car positions))
+                    (final-point (cadr positions)))
                ;; Run the hook inside the change group, with point on the new
                ;; heading, so anything it adds belongs to the same undo step as
                ;; the entry rather than needing a second undo of its own.
                (goto-char beginning)
-               (run-hooks 'org-timegrid-org-after-create-hook)))
+               (run-hooks 'org-timegrid-org-after-create-hook)
+               (goto-char final-point)))
            (undo-boundary))
           (org-timegrid-org--note-edit)
           (message "Added %s" title))))))
 
+(defun org-timegrid-org--headline-has-timed-range-p (headline)
+  "Return non-nil when HEADLINE's own section has a timed Org range."
+  (when-let ((section (seq-find
+                       (lambda (element)
+                         (eq (org-element-type element) 'section))
+                       (org-element-contents headline))))
+    (catch 'timed
+      (org-element-map section 'timestamp
+        (lambda (timestamp)
+          (when (org-timegrid-org--timestamp-timed-p timestamp)
+            (throw 'timed t))))
+      nil)))
+
 (defun org-timegrid-org--heading-candidates ()
-  "Return completion candidates for unfinished TODO headings."
+  "Return headings eligible for adding another calendar range.
+This includes unfinished TODO headings and plain headings that already
+have a timed range in their own section."
   (let (candidates)
     (dolist (file (org-timegrid-org--files))
       (with-current-buffer (find-file-noselect file)
         (org-with-wide-buffer
          (org-element-map (org-element-parse-buffer) 'headline
            (lambda (headline)
-             (when (and (org-element-property :todo-keyword headline)
-                        (not (eq (org-element-property :todo-type headline)
-                                 'done)))
+             (when (and
+                    (not (eq (org-element-property :todo-type headline)
+                             'done))
+                    (or (org-element-property :todo-keyword headline)
+                        (org-timegrid-org--headline-has-timed-range-p
+                         headline)))
                (let* ((title (org-element-property :raw-value headline))
                       (todo (org-element-property :todo-keyword headline))
                       (tags (org-element-property :tags headline))
@@ -309,10 +435,12 @@ default tag."
                       (tag-text (and tags
                                      (concat ":" (string-join tags ":") ":")))
                       (display
-                       (string-join
-                        (delq nil
-                              (list (propertize todo 'face
-                                               (org-get-todo-face todo))
+                        (string-join
+                         (delq nil
+                              (list (and todo
+                                         (propertize
+                                          todo 'face
+                                          (org-get-todo-face todo)))
                                     title
                                     (and tag-text
                                          (propertize tag-text 'face 'org-tag))
@@ -323,7 +451,7 @@ default tag."
     (nreverse candidates)))
 
 (defun org-timegrid-org-read-entry ()
-  "Read an agenda TODO heading, or a title for a new capture entry."
+  "Read an eligible Org heading, or a title for a new capture entry."
   (let* ((candidates (org-timegrid-org--heading-candidates))
          (choice (completing-read "Task: " candidates nil nil))
          (match (assoc choice candidates)))
@@ -337,12 +465,16 @@ default tag."
 (defun org-timegrid-org--note-edit ()
   "Remember the current buffer as the calendar's most recent edit.
 Undo has to happen where the change landed, and only the backend knows
-where that was."
+where that was.  Save it when `org-timegrid-org-auto-save' is non-nil."
   (setq org-timegrid-org--edited-buffers
         (cons (current-buffer)
               (seq-filter #'buffer-live-p
                           (delq (current-buffer)
-                                org-timegrid-org--edited-buffers)))))
+                                org-timegrid-org--edited-buffers))))
+  (when (and org-timegrid-org-auto-save
+             buffer-file-name
+             (buffer-modified-p))
+    (save-buffer)))
 
 (defun org-timegrid-org--undo (continue redo)
   "Undo, or REDO, the calendar's most recent Org edit.
@@ -362,7 +494,11 @@ undoing the previous undo.  Each calendar edit is bracketed by
       ;; by the caller's command, which must survive this call.
       (let ((last-command (and continue 'undo))
             (this-command this-command))
-        (if redo (undo-redo) (undo))))))
+        (if redo (undo-redo) (undo)))
+      (when (and org-timegrid-org-auto-save
+                 buffer-file-name
+                 (buffer-modified-p))
+        (save-buffer)))))
 
 (defun org-timegrid-org--remove-entry (event)
   "Delete the whole Org heading that owned EVENT.

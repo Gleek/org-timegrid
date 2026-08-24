@@ -2545,7 +2545,8 @@ sharing one key made nudging the cursor resize whatever it had selected."
 (defvar org-timegrid--kill nil
   "Plist describing the most recently copied block.
 Holds :title, :minutes, and the opaque :event needed to reproduce the
-entry's content, so a yank survives cutting the original.")
+entry's content.  A cut also holds :target, the backend record onto
+which a yank should restore the removed time.")
 
 (defun org-timegrid-copy-selected ()
   "Copy the selected block for a later yank."
@@ -2558,16 +2559,27 @@ entry's content, so a yank survives cutting the original.")
     (message "Copied %s" (plist-get block :title))))
 
 (defun org-timegrid-cut-selected ()
-  "Copy the selected block, then remove it from its calendar source."
+  "Cut the selected block for a later yank.
+Unlike a copy, yanking a cut block adds its time back to the original
+backend record instead of duplicating that record."
   (interactive)
-  (org-timegrid-copy-selected)
-  (org-timegrid-remove-selected t))
+  (let* ((block (org-timegrid--selected-block))
+         (event (plist-get block :event)))
+    (setq org-timegrid--kill
+          (list :title (plist-get block :title)
+                :minutes (- (plist-get block :end) (plist-get block :start))
+                :event event
+                :target (org-timegrid-event-source event)))
+    (org-timegrid-remove-selected t)
+    (message "Cut %s" (plist-get block :title))))
 
 (defun org-timegrid-yank ()
-  "Create a copy of the most recently copied block at the cursor."
+  "Yank the most recently copied or cut block at the cursor.
+A copied block becomes a new backend record; a cut block is restored on
+the record from which it was removed."
   (interactive)
   (unless org-timegrid--kill
-    (user-error "Nothing copied yet; select a block and press M-w"))
+    (user-error "Nothing to yank; select a block and press M-w or C-w"))
   (org-timegrid--reveal-cursor)
   (let* ((cursor (org-timegrid--ensure-cursor))
          (minutes (plist-get org-timegrid--kill :minutes))
@@ -2578,7 +2590,8 @@ entry's content, so a yank survives cutting the original.")
                  (plist-get org-timegrid--kill :title) 'blue)))
     (org-timegrid--backend-create
      (plist-get org-timegrid--kill :title) block
-     (plist-get org-timegrid--kill :event))))
+     (plist-get org-timegrid--kill :event)
+     (plist-get org-timegrid--kill :target))))
 
 ;;; Keyboard re-timing
 
