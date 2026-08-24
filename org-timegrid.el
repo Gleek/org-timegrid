@@ -2265,17 +2265,21 @@ search starts from the cursor."
 
 (defun org-timegrid--move-selection-across-week (direction)
   "Move one week in DIRECTION and select its first or last block."
-  (let ((minute (plist-get (org-timegrid--ensure-cursor) :minute)))
-    (org-timegrid--reload-state
-     (+ (plist-get org-timegrid--state :week-start) (* direction 7)))
-    (if-let ((blocks (org-timegrid--ordered-blocks)))
-        (org-timegrid--goto-block
-         (if (> direction 0) (car blocks) (car (last blocks))))
-      (org-timegrid--set-cursor (if (> direction 0) 0 6) minute 0)
-      (setq-local org-timegrid--state
-                  (plist-put org-timegrid--state :cursor-visible t))
-      (org-timegrid--refresh t)
-      (message "No block in this week"))))
+  (let* ((week-start (+ (plist-get org-timegrid--state :week-start)
+                        (* direction 7)))
+         (state (org-timegrid--load-state week-start))
+         (blocks (let ((org-timegrid--state state))
+                   (org-timegrid--ordered-blocks))))
+    ;; Loading the prospective week separately keeps failed navigation a
+    ;; no-op: do not replace the current week or manufacture an edge cursor
+    ;; when there is no block to select.
+    (if blocks
+        (progn
+          (setq-local org-timegrid--state state)
+          (setq-local org-timegrid--static-inner nil)
+          (org-timegrid--goto-block
+           (if (> direction 0) (car blocks) (car (last blocks)))))
+      (message "No further block"))))
 
 (defun org-timegrid-next-block ()
   "Select the next block by start time, anywhere in the visible week."
