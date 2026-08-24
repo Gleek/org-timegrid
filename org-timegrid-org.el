@@ -728,6 +728,18 @@ FILE defaults to `buffer-file-name'."
     (org-back-to-heading t)
     (org-fold-show-context)))
 
+(defun org-timegrid-org-selected-marker ()
+  "Return the Org heading marker for the selected calendar block.
+Signal a user error if no block is selected, its backend is not Org, or
+its source entry is no longer available."
+  (let* ((block (org-timegrid--selected-block))
+         (event (plist-get block :event))
+         (source (and event (org-timegrid-event-source event)))
+         (marker (plist-get source :marker)))
+    (unless (and (markerp marker) (marker-buffer marker))
+      (user-error "The selected block has no Org source entry"))
+    marker))
+
 (defvar org-timegrid-org-backend nil
   "Org backend used by the integrated Week view.")
 
