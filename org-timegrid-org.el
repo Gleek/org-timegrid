@@ -74,6 +74,12 @@ inbox.  New entries are inserted into its live buffer and left unsaved."
   "TODO keyword used for entries drawn on the calendar."
   :type 'string)
 
+(defcustom org-timegrid-org-show-repeaters t
+  "Whether repeating Org timestamps appear on the calendar.
+When nil, the calendar omits both the anchor and generated occurrences of
+timestamps with an Org repeater."
+  :type 'boolean)
+
 (defcustom org-timegrid-org-tag-color-alist nil
   "Map Org tag strings to calendar colours.
 A value is a name in `org-timegrid-colors' or any colour string.  Tags
@@ -713,8 +719,12 @@ FILE defaults to `buffer-file-name'."
            (with-current-buffer (find-file-noselect file)
              (org-with-wide-buffer
               (mapcan (lambda (event)
-                        (org-timegrid-org--expand-event
-                         event start end))
+                        (let ((metadata (org-timegrid-event-metadata event)))
+                          (unless (and
+                                   (not org-timegrid-org-show-repeaters)
+                                   (plist-get metadata :repeater-type))
+                            (org-timegrid-org--expand-event
+                             event start end))))
                       (org-timegrid-org--buffer-events file))))))
 
 (defun org-timegrid-org--visit-event (event)

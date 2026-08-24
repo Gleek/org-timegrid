@@ -56,7 +56,7 @@
   "Vertical SVG scale in pixels per minute."
   :type 'number)
 
-(defcustom org-timegrid-block-gap 3
+(defcustom org-timegrid-block-gap 1
   "Vertical gap in pixels between consecutive blocks."
   :type 'integer)
 
@@ -1276,13 +1276,16 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                          (equal (plist-get block :id) selected))))
                 (org-timegrid--layout-day blocks day))))))
 
-(defun org-timegrid--geometry-tiles (geometry)
-  "Return the tile indices intersected by GEOMETRY."
-  (let* ((first (max 0 (floor (plist-get geometry :y)
-                              org-timegrid--tile-height)))
+(defun org-timegrid--geometry-tiles (geometry &optional margin)
+  "Return tiles intersected by GEOMETRY and its visual MARGIN."
+  (let* ((margin (or margin 0))
+         (top (max 0 (- (plist-get geometry :y) margin)))
+         (bottom (min org-timegrid--image-height
+                      (+ (plist-get geometry :y)
+                         (plist-get geometry :height) margin)))
+         (first (max 0 (floor top org-timegrid--tile-height)))
          (last (min (1- org-timegrid--tile-count)
-                    (floor (+ (plist-get geometry :y)
-                              (plist-get geometry :height) -0.001)
+                    (floor (- bottom 0.001)
                            org-timegrid--tile-height))))
     (number-sequence first last)))
 
@@ -1306,7 +1309,9 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                    org-timegrid-pixels-per-minute column-width
                    palette font-family)))
         (push item geometry)
-        (dolist (tile (org-timegrid--geometry-tiles item))
+        ;; Selected blocks have a two-pixel outline.  Include its full visual
+        ;; bounds when it crosses an SVG tile edge.
+        (dolist (tile (org-timegrid--geometry-tiles item 1))
           (cl-pushnew tile tiles))))
     (when (and (null preview) (org-timegrid--cursor-visible-p)
                (null selected))
@@ -1319,7 +1324,9 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                        :fill-opacity org-timegrid-cursor-opacity
                        :stroke (plist-get palette :cursor) :stroke-width 1
                        :rx org-timegrid-corner-radius)
-        (dolist (tile (org-timegrid--geometry-tiles rectangle))
+        ;; SVG strokes are centered on their path, so the cursor extends half
+        ;; a pixel beyond its geometric rectangle on every side.
+        (dolist (tile (org-timegrid--geometry-tiles rectangle 0.5))
           (cl-pushnew tile tiles))))
     (cons (org-timegrid--svg-inner-xml svg) (sort tiles #'<))))
 

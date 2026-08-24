@@ -80,6 +80,9 @@ modifiers. Edits leave source buffers modified but unsaved, like Org Agenda
 commands. Press `u` in the calendar to undo the edit in the Org buffer it
 changed.
 
+Set `org-timegrid-org-show-repeaters` to nil to omit repeating timestamps and
+all of their occurrences.
+
 ## Week view
 
 Run `M-x org-timegrid-week` to open the week containing today.
@@ -203,7 +206,7 @@ priority, property, or file.
 | `org-timegrid-cursor-step-minutes` | `15` | Normal keyboard step |
 | `org-timegrid-keyboard-commit-delay` | `0.25` | Idle delay before a moved block is saved |
 | `org-timegrid-default-duration-minutes` | `30` | Length used when no end is present |
-| `org-timegrid-block-gap` | `3` | Gap between blocks, in pixels |
+| `org-timegrid-block-gap` | `1` | Gap between blocks, in pixels |
 | `org-timegrid-corner-radius` | `0` | Block corner radius |
 | `org-timegrid-nesting-indent` | `8` | Indent for contained events |
 | `org-timegrid-title-clearance` | `18` | Space a parent keeps for its title |
@@ -223,6 +226,7 @@ priority, property, or file.
 | `org-timegrid-org-extra-files` | `nil` | Extra files always queried |
 | `org-timegrid-org-capture-file` | `nil` | Target for new entries |
 | `org-timegrid-org-capture-todo-keyword` | `"TODO"` | Keyword for new headings |
+| `org-timegrid-org-show-repeaters` | `t` | Show timestamps with repeaters |
 | `org-timegrid-org-tag-color-alist` | `nil` | Tag-to-colour mapping |
 
 On an empty slot, `RET` and mouse-drag creation complete against unfinished
