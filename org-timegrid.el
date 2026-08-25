@@ -1227,9 +1227,11 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
 (defun org-timegrid--make-tile-image (tile &optional fragment)
   "Create TILE's image, adding optional dynamic SVG FRAGMENT."
   (let ((map (org-timegrid--tile-image-map tile))
-        (fragment (concat (and (memq tile org-timegrid--clock-tiles)
-                               org-timegrid--clock-fragment)
-                          fragment)))
+        ;; The current-time marker is calendar chrome, so paint it after
+        ;; selection and preview fragments instead of letting those cover it.
+        (fragment (concat fragment
+                          (and (memq tile org-timegrid--clock-tiles)
+                               org-timegrid--clock-fragment))))
     (if map
         (create-image (org-timegrid--tile-xml tile fragment) 'svg t
                       :ascent 90 :map map :original-map map)
