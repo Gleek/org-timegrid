@@ -184,7 +184,7 @@ half-hour block room for two lines of title."
 (defconst org-timegrid--lane-gap 3)
 (defconst org-timegrid--grid-top-inset 6
   "Pixels between the sticky date rail and the midnight grid line.")
-(defconst org-timegrid--header-title-height 38)
+(defconst org-timegrid--header-title-height 44)
 (defconst org-timegrid--header-date-height 30)
 (defconst org-timegrid--rail-top
   (+ org-timegrid--header-title-height org-timegrid--header-date-height))
@@ -220,6 +220,7 @@ half-hour block room for two lines of title."
 (defvar-local org-timegrid--clock-fragment nil)
 (defvar-local org-timegrid--clock-tiles nil)
 (defvar-local org-timegrid--base-excluded-id nil)
+(defvar-local org-timegrid--fringe-remap-cookie nil)
 (defvar org-timegrid--static-render nil)
 (defvar org-timegrid--render-excluded-id nil)
 (defvar org-timegrid--theme-timer nil)
@@ -563,6 +564,17 @@ six-digit value as three one-digit components in `color-values'."
           :cursor (org-timegrid--face-color 'cursor :background blue)
           :preview-fill (org-timegrid--blend muted background 0.18)
           :done-fill (org-timegrid--blend muted background 0.11))))
+
+(defun org-timegrid--sync-fringe-background ()
+  "Match this buffer's fringes to its time-label gutter."
+  (when org-timegrid--fringe-remap-cookie
+    (face-remap-remove-relative org-timegrid--fringe-remap-cookie))
+  (setq-local
+   org-timegrid--fringe-remap-cookie
+   (face-remap-add-relative
+    'fringe
+    (list :background
+          (plist-get (org-timegrid--palette) :time-background)))))
 
 (defun org-timegrid--layout-day (blocks day)
   "Lay out BLOCKS on DAY as nested, independently split sibling groups."
@@ -1626,11 +1638,11 @@ Sunday-starting calendar begins one day before the corresponding ISO week."
          geometry)
     (svg-rectangle svg 0 0 width height
                    :fill (plist-get palette :time-background))
-    (svg-text svg month-title :x title-x :y 27
+    (svg-text svg month-title :x title-x :y 34
               :font-size 22 :font-weight "700"
               :font-family font-family :fill (plist-get palette :foreground))
     (svg-text svg year-title
-              :x (+ title-x (* 13.4 (string-width month-title)) 8) :y 27
+              :x (+ title-x (* 13.4 (string-width month-title)) 8) :y 34
               :font-size 22 :font-weight "300"
               :font-family font-family
               :fill (plist-get palette :secondary-text))
@@ -1733,7 +1745,10 @@ Sunday-starting calendar begins one day before the corresponding ISO week."
               :stroke (plist-get palette :grid) :stroke-width 1)
     (setq-local org-timegrid--header-geometry geometry)
     (propertize " "
-                'display (svg-image svg :ascent 0)
+                ;; Header lines still use text baseline metrics for images.
+                ;; With zero ascent Emacs reserves a full text ascent above
+                ;; the SVG, which appears as an unexplained blank strip.
+                'display (svg-image svg :ascent 100)
                 'keymap org-timegrid--header-map
                 'help-echo "Click to select an all-day cell or event")))
 
@@ -1813,6 +1828,7 @@ leave no central move target."
 (defun org-timegrid--refresh (&optional preserve-scroll)
   "Rebuild cached tiles, preserving pixel scroll when requested."
   (org-timegrid--ensure-state)
+  (org-timegrid--sync-fringe-background)
   (let* ((window (get-buffer-window (current-buffer) t))
          (vscroll (and preserve-scroll window
                        (let ((current (org-timegrid--window-scroll-pixels
