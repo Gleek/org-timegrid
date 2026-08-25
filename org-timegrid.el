@@ -810,8 +810,14 @@ works without the palette having to know it in advance."
 Coordinates are minutes within that day, so a range running past midnight
 arrives clipped at 1440 rather than spilling into a day that is not being
 drawn.  Overlaps get plain side-by-side lanes: the Week view nests a child
-inside its parent, which needs more height than one compact row has."
+inside its parent, which needs more height than one compact row has.
+Date-only events are omitted: compact day images have no all-day rail, and
+rendering them as midnight-to-midnight timed blocks would be misleading."
   (let* ((start (* absolute-day 1440))
+         (events
+          (seq-remove
+           #'org-timegrid-event-all-day
+           (org-timegrid-backend-list backend start (+ start 1440))))
          (blocks
           (mapcar
            (lambda (event)
@@ -823,7 +829,7 @@ inside its parent, which needs more height than one compact row has."
                    :color (org-timegrid-event-color event)
                    :done (eq (org-timegrid-event-state event) 'done)
                    :event event))
-           (org-timegrid-backend-list backend start (+ start 1440)))))
+           events)))
     (org-timegrid-basic-layout-day blocks 0)))
 
 (defun org-timegrid--draw-edge-shadow (svg x y width direction palette)
