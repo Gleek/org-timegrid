@@ -87,7 +87,7 @@ This keeps at least one line of the containing block's title visible."
   :type 'integer)
 
 (defcustom org-timegrid-colors
-  '((blue     . "#007aff")
+  '((blue     . "#4da3ff")
     (cyan     . "#32ade6")
     (teal     . "#30b0c7")
     (indigo   . "#5856d6")
@@ -184,6 +184,10 @@ half-hour block room for two lines of title."
 (defconst org-timegrid--lane-gap 3)
 (defconst org-timegrid--grid-top-inset 6
   "Pixels between the sticky date rail and the midnight grid line.")
+(defconst org-timegrid--header-title-height 38)
+(defconst org-timegrid--header-date-height 30)
+(defconst org-timegrid--rail-top
+  (+ org-timegrid--header-title-height org-timegrid--header-date-height))
 (defvar-local org-timegrid--geometry nil)
 (defvar-local org-timegrid--header-geometry nil)
 (defvar-local org-timegrid--rendered-ui nil)
@@ -1126,9 +1130,10 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
          (palette (org-timegrid--palette))
          (font-family (let ((family (face-attribute 'default :family nil t)))
                         (if (stringp family) family "monospace")))
+         (week-start (plist-get org-timegrid--state :week-start))
          (today-column
           (- (calendar-absolute-from-gregorian (calendar-current-date))
-             (plist-get org-timegrid--state :week-start)))
+             week-start))
          (blocks (org-timegrid--effective-blocks))
          (day-blocks (make-vector 7 nil))
          geometry)
@@ -1137,11 +1142,15 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
     (svg-rectangle svg 0 0 org-timegrid--label-width height
                    :fill (plist-get palette :time-background))
     (dotimes (day 7)
-      (let ((x (+ org-timegrid--label-width
-                  (* day column-width))))
+      (let* ((x (+ org-timegrid--label-width
+                   (* day column-width)))
+             (weekday
+              (calendar-day-of-week
+               (calendar-gregorian-from-absolute (+ week-start day)))))
         (svg-rectangle svg x 0 column-width height
                        :fill (cond ((= day today-column) (plist-get palette :today))
-                                   ((memq day '(5 6)) (plist-get palette :weekend))
+                                   ((memq weekday '(0 6))
+                                    (plist-get palette :weekend))
                                    (t (plist-get palette :background))))
         (svg-line svg x 0 x height
                   :stroke (plist-get palette :grid) :stroke-width 1)
@@ -1543,6 +1552,43 @@ The ordering favours earlier and longer spans, then title and identity."
     (list :id (plist-get block :id) :lane (plist-get block :rail-lane)
           :x x :y y :width (- right x) :height height)))
 
+(defun org-timegrid--header-month-parts (week-start)
+  "Return the visible month title for WEEK-START as (PRIMARY SECONDARY).
+SECONDARY is the final year and is drawn with lighter weight.  PRIMARY
+includes both month names when the visible week crosses a boundary."
+  (let* ((first (calendar-gregorian-from-absolute week-start))
+         (last (calendar-gregorian-from-absolute (+ week-start 6)))
+         (first-month (calendar-month-name (nth 0 first)))
+         (last-month (calendar-month-name (nth 0 last)))
+         (first-year (nth 2 first))
+         (last-year (nth 2 last)))
+    (cond
+     ((and (= (nth 0 first) (nth 0 last)) (= first-year last-year))
+      (list first-month (number-to-string first-year)))
+     ((= first-year last-year)
+      (list (format "%s–%s" first-month last-month)
+            (number-to-string first-year)))
+     (t
+      (list (format "%s %d–%s" first-month first-year last-month)
+            (number-to-string last-year))))))
+
+(defun org-timegrid--iso-week-format (absolute-date format)
+  "Format ABSOLUTE-DATE as an ISO week using time FORMAT."
+  (pcase-let ((`(,month ,day ,year)
+               (calendar-gregorian-from-absolute absolute-date)))
+    (format-time-string format (encode-time 0 0 12 day month year))))
+
+(defun org-timegrid--week-label (absolute-date)
+  "Return the ISO week label that best represents the visible week.
+ABSOLUTE-DATE is the first displayed day.  Use its midpoint because a
+Sunday-starting calendar begins one day before the corresponding ISO week."
+  (org-timegrid--iso-week-format (+ absolute-date 3) "W%V"))
+
+(defun org-timegrid--week-current-p (week-start today)
+  "Return non-nil when WEEK-START's displayed ISO week contains TODAY."
+  (equal (org-timegrid--iso-week-format (+ week-start 3) "%G-%V")
+         (org-timegrid--iso-week-format today "%G-%V")))
+
 (defun org-timegrid--header ()
   "Return a pixel-aligned SVG header for the calendar."
   (org-timegrid--ensure-state)
@@ -1562,7 +1608,8 @@ The ordering favours earlier and longer spans, then title and identity."
          ;; One final row is intentionally empty: it is the future keyboard
          ;; cursor/creation lane and keeps the rail visually discoverable.
          (rail-rows (1+ event-rows))
-         (height (+ 28 (* rail-rows org-timegrid-all-day-lane-height)))
+         (height (+ org-timegrid--rail-top
+                    (* rail-rows org-timegrid-all-day-lane-height)))
          (column-width (/ (- canvas-width
                              org-timegrid--label-width)
                           7.0))
@@ -1571,41 +1618,79 @@ The ordering favours earlier and longer spans, then title and identity."
                         (if (stringp family) family "monospace")))
          (week-start (plist-get org-timegrid--state :week-start))
          (today (calendar-absolute-from-gregorian (calendar-current-date)))
+         (month-parts (org-timegrid--header-month-parts week-start))
+         (month-title (car month-parts))
+         (year-title (cadr month-parts))
+         (title-x (+ left-offset 8))
          (svg (svg-create width height :stroke-width 0))
          geometry)
     (svg-rectangle svg 0 0 width height
                    :fill (plist-get palette :time-background))
-    (svg-text svg "Time" :x (+ left-offset 5) :y 19
-              :font-size 11 :font-weight "600"
+    (svg-text svg month-title :x title-x :y 27
+              :font-size 22 :font-weight "700"
               :font-family font-family :fill (plist-get palette :foreground))
+    (svg-text svg year-title
+              :x (+ title-x (* 13.4 (string-width month-title)) 8) :y 27
+              :font-size 22 :font-weight "300"
+              :font-family font-family
+              :fill (plist-get palette :secondary-text))
+    (svg-text svg (org-timegrid--week-label week-start)
+              :x (+ left-offset 7)
+              :y (+ org-timegrid--header-title-height 20)
+              :font-size 10 :font-family font-family
+              :fill (plist-get palette
+                               (if (org-timegrid--week-current-p week-start today)
+                                   :red
+                                 :secondary-text)))
     (dotimes (day 7)
       (let* ((absolute (+ week-start day))
+             (date (calendar-gregorian-from-absolute absolute))
+             (day-name (calendar-day-name date t))
+             (day-number (number-to-string (nth 1 date)))
              (x (+ left-offset
                    org-timegrid--label-width
-                   (* day column-width))))
-        (when (= absolute today)
-          (svg-rectangle svg x 0 column-width height
-                         :fill (plist-get palette :today)))
-        (svg-line svg x 0 x height
-                  :stroke (plist-get palette :grid) :stroke-width 1)
-        (svg-text svg
-                  (org-timegrid-date-label absolute)
-                  :x (+ x 7) :y 19 :font-size 11 :font-weight "600"
-                  :font-family font-family
-                  :fill (plist-get palette :foreground))))
-    (svg-text svg "all-day" :x (+ left-offset 5) :y 43
+                   (* day column-width)))
+             (center (+ x (/ column-width 2.0)))
+             (baseline (+ org-timegrid--header-title-height 20)))
+        (if (= absolute today)
+            (let* ((name-width (* 6.2 (string-width day-name)))
+                   (circle-radius 10)
+                   (gap 5)
+                   (group-width (+ name-width gap (* 2 circle-radius)))
+                   (name-x (- center (/ group-width 2.0)))
+                   (number-x (+ name-x name-width gap circle-radius)))
+              (svg-text svg day-name :x name-x :y baseline
+                        :font-size 11 :font-weight "500"
+                        :font-family font-family
+                        :fill (plist-get palette :foreground))
+              (svg-circle svg number-x (- baseline 4) circle-radius
+                          :fill (plist-get palette :red))
+              (svg-text svg day-number :x number-x :y baseline
+                        :font-size 11 :font-weight "700"
+                        :font-family font-family :text-anchor "middle"
+                        :fill "#ffffff"))
+          (svg-text svg (format "%s %s" day-name day-number)
+                    :x center :y baseline :font-size 11 :font-weight "500"
+                    :font-family font-family :text-anchor "middle"
+                    :fill (plist-get palette :foreground)))))
+    (svg-line svg 0 (1- org-timegrid--rail-top)
+              width (1- org-timegrid--rail-top)
+              :stroke (plist-get palette :grid) :stroke-width 1)
+    (svg-text svg "all-day" :x (+ left-offset 5)
+              :y (+ org-timegrid--rail-top 15)
               :font-size 9 :font-family font-family
               :fill (plist-get palette :secondary-text))
     (dotimes (day 7)
       (let ((x (+ left-offset org-timegrid--label-width (* day column-width))))
-        (svg-line svg x 28 x height
+        (svg-line svg x org-timegrid--rail-top x height
                   :stroke (plist-get palette :grid) :stroke-width 1)))
     (dolist (block all-day)
       (when (< (plist-get block :rail-lane) org-timegrid-all-day-max-lanes)
         (push (org-timegrid--draw-all-day-block
                svg block left-offset column-width
-               (+ 28 (* (plist-get block :rail-lane)
-                        org-timegrid-all-day-lane-height))
+               (+ org-timegrid--rail-top
+                  (* (plist-get block :rail-lane)
+                     org-timegrid-all-day-lane-height))
                palette font-family)
               geometry)))
     (when-let* (((org-timegrid--cursor-visible-p))
@@ -1616,8 +1701,9 @@ The ordering favours earlier and longer spans, then title and identity."
                                org-timegrid-pixels-per-minute))
              (x (+ left-offset org-timegrid--label-width
                    (* (plist-get cursor :day) column-width) 1))
-             (y (+ 28 (* (plist-get cursor :lane)
-                         org-timegrid-all-day-lane-height)
+             (y (+ org-timegrid--rail-top
+                   (* (plist-get cursor :lane)
+                      org-timegrid-all-day-lane-height)
                    (/ (- org-timegrid-all-day-lane-height cursor-height) 2.0))))
         (svg-rectangle svg x y (- column-width 2)
                        cursor-height
@@ -1639,7 +1725,8 @@ The ordering favours earlier and longer spans, then title and identity."
           (svg-text svg (format "+%d more" hidden)
                     :x (+ left-offset org-timegrid--label-width
                           (* day column-width) 7)
-                    :y (+ 28 (* event-rows org-timegrid-all-day-lane-height) 15)
+                    :y (+ org-timegrid--rail-top
+                          (* event-rows org-timegrid-all-day-lane-height) 15)
                     :font-size 9 :font-family font-family
                     :fill (plist-get palette :secondary-text)))))
     (svg-line svg 0 (1- height) width (1- height)
@@ -2141,7 +2228,7 @@ selects nothing.  The mouse and the keyboard drive one shared cursor."
                         0))
          (canvas-width (org-timegrid--window-width))
          (column-width (/ (- canvas-width org-timegrid--label-width) 7.0)))
-    (when (and (numberp x) (numberp y) (>= y 28)
+    (when (and (numberp x) (numberp y) (>= y org-timegrid--rail-top)
                (>= x (+ left-offset org-timegrid--label-width))
                (< x (+ left-offset canvas-width)))
       (let ((geometry
@@ -2157,7 +2244,7 @@ selects nothing.  The mouse and the keyboard drive one shared cursor."
                                   (/ (- x left-offset
                                         org-timegrid--label-width)
                                      column-width))))
-              :lane (max 0 (floor (/ (- y 28)
+              :lane (max 0 (floor (/ (- y org-timegrid--rail-top)
                                      org-timegrid-all-day-lane-height))))))))
 
 (defun org-timegrid-header-click (event)
