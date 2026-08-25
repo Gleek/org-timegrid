@@ -83,15 +83,15 @@ Run `M-x org-timegrid-week` to open the week containing today.
 
 ### Mouse
 
-| Gesture                           | Action                         |
-|-----------------------------------|--------------------------------|
-| Drag empty space                  | Create an entry for that range |
-| Drag a block                      | Move it                        |
-| Drag a block's top or bottom edge | Resize it                      |
-| super-drag a block                | Copy it                        |
-| Click                             | Put the cursor there           |
-| Double-click a block              | Visit its Org heading          |
-| Wheel                             | Scroll the day                 |
+| Gesture                           | Action                                |
+|-----------------------------------|---------------------------------------|
+| Drag empty space                  | Create an entry for that range        |
+| Drag a block                      | Move it                               |
+| Drag a block's top or bottom edge | Resize it                             |
+| super-drag a block                | Add a copied time to its source entry |
+| Click                             | Put the cursor there                  |
+| Double-click a block              | Visit its Org heading                 |
+| Wheel                             | Scroll the day                        |
 
 Mouse edits snap to 15 minutes and use a 15-minute minimum. Release commits a
 drag. Press `C-g` before releasing to cancel it.
@@ -114,19 +114,45 @@ after redraws.
 | `C-g`                     | Hide the cursor                                                                      |
 | `M-down` / `M-up`         | Move the selected block by 15 minutes                                                |
 | `M-right` / `M-left`      | Move the block by one day                                                            |
-| `M-s-right` / `M-s-left`  | Copy the block by one day                                                            |
+| `M-s-right` / `M-s-left`  | Add a copied time to the same entry, one day away                                    |
 | `S-down` / `S-up`         | Move the end time                                                                    |
 | `C-S-up` / `C-S-down`     | Move the start time                                                                  |
 | `t`                       | Enter a new time or range                                                            |
 | `e`                       | Rename the heading                                                                   |
 | `d`, Delete               | Remove its time, then optionally delete the heading                                  |
-| `M-w` / `C-w` / `C-y`     | Copy, cut, or paste a block                                                          |
+| `M-w` / `C-w` / `C-y`     | Copy, cut, or paste block                                    |
 | `u`, `C-/`, `C-x u`       | Undo the last calendar edit                                                          |
+| `:`, `C-c C-q`            | Change the selected entry's tags                                                      |
+| `C-c C-t`                 | Change the selected entry's TODO state                                                |
+| `,`, `C-c ,`              | Set the selected entry's priority                                                     |
+| `i`                       | Clock in to the selected entry                                                        |
+| `O`                       | Clock out                                                                             |
+| `z`, `C-c C-z`            | Add a note to the selected entry                                                      |
+| `C-c C-x e`               | Set the selected entry's effort                                                       |
+| `C-c C-w`                 | Refile the selected entry                                                             |
+| `$`                       | Archive the selected entry                                                            |
 | `b` / `f`, `M-b` / `M-f`  | Shift by a day or week                                                               |
 | `j` / `.`                 | Jump to a date or today                                                              |
 | `g`                       | Reload the week from the backend                                                     |
 | `q`                       | Quit                                                                                 |
 | `C-s`, `C-r`              | Isearch like forward or backward search. `RET` keeps the current match, `C-g` resets |
+
+The Org backend can wrap other interactive commands for use in the calendar.
+`org-timegrid-org-command` runs a command at the selected source heading.
+`org-timegrid-org-agenda-command` finds the corresponding line in a live Org
+Agenda buffer and runs the command there. Both wrappers return to the calendar
+and reload it without resetting the cursor or scroll position.
+
+```elisp
+(keymap-set org-timegrid-mode-map "i"
+            (org-timegrid-org-command #'org-clock-in))
+(keymap-set org-timegrid-mode-map ","
+            (org-timegrid-org-agenda-command #'org-agenda-priority))
+```
+
+The Agenda wrapper signals a user error when no live Agenda buffer contains
+the selected entry. Prefer the Org wrapper when the underlying Org command is
+available, since it does not depend on an Agenda view being open.
 
 
 ## Org Agenda strip

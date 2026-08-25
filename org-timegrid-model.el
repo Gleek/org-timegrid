@@ -46,8 +46,8 @@ SOURCE is opaque to the renderer and belongs to the backend."
   "Operations supplied by a calendar data backend.
 LIST-FUNCTION receives inclusive START and exclusive END absolute minutes.
 CREATE-FUNCTION receives TITLE, START, END, an optional source event to
-duplicate, and an optional existing backend record selected by
-READ-ENTRY-FUNCTION or retained from an event's SOURCE while cutting it.
+copy, and an optional existing backend record selected by
+READ-ENTRY-FUNCTION or retained from an event's SOURCE while copying it.
 UPDATE-FUNCTION receives an existing event, its new START and END, and an
 optional heading title.  DELETE-FUNCTION removes an event's time;
 DELETE-ENTRY-FUNCTION removes the record that carried it.  UNDO-FUNCTION

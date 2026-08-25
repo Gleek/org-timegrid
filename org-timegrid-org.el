@@ -886,6 +886,129 @@ its source entry is no longer available."
       (user-error "The selected block has no Org source entry"))
     marker))
 
+(defun org-timegrid-org--heading-location (marker)
+  "Return MARKER's Org heading as a buffer-position pair."
+  (unless (and (markerp marker) (marker-buffer marker))
+    (user-error "The selected block has no live Org source entry"))
+  (with-current-buffer (marker-buffer marker)
+    (org-with-wide-buffer
+     (goto-char marker)
+     (org-back-to-heading t)
+     (cons (current-buffer) (point)))))
+
+(defun org-timegrid-org--run-at (command buffer position &optional heading)
+  "Run COMMAND interactively in BUFFER at POSITION, then refresh the calendar.
+When HEADING is non-nil, move to the containing Org heading first."
+  (unless (commandp command)
+    (user-error "%S is not an interactive command" command))
+  (let ((calendar (current-buffer)))
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer buffer
+            (save-restriction
+              (widen)
+              (goto-char position)
+              (when heading (org-back-to-heading t))
+              (call-interactively command))))
+      (when (buffer-live-p calendar)
+        (with-current-buffer calendar
+          (org-timegrid--refresh-data))))))
+
+(defun org-timegrid-org--run-selected-command (command)
+  "Run Org COMMAND at the selected calendar entry."
+  (pcase-let ((`(,buffer . ,position)
+               (org-timegrid-org--heading-location
+                (org-timegrid-org-selected-marker))))
+    (org-timegrid-org--run-at command buffer position t)))
+
+(defun org-timegrid-org--agenda-location (source-marker)
+  "Return an Agenda buffer-position pair for SOURCE-MARKER."
+  (let ((source (org-timegrid-org--heading-location source-marker)))
+    (or
+     (catch 'found
+       (dolist (buffer (buffer-list))
+         (with-current-buffer buffer
+           (when (derived-mode-p 'org-agenda-mode)
+             (save-excursion
+               (goto-char (point-min))
+               (while (not (eobp))
+                 (let ((marker (or (org-get-at-bol 'org-hd-marker)
+                                   (org-get-at-bol 'org-marker))))
+                   (when (and (markerp marker)
+                              (equal (org-timegrid-org--heading-location marker)
+                                     source))
+                     (throw 'found (cons buffer (point)))))
+                 (forward-line 1)))))))
+     (user-error "The selected entry is not present in a live Org Agenda buffer"))))
+
+(defun org-timegrid-org--run-selected-agenda-command (command)
+  "Run Agenda COMMAND on the line for the selected calendar entry."
+  (pcase-let ((`(,buffer . ,position)
+               (org-timegrid-org--agenda-location
+                (org-timegrid-org-selected-marker))))
+    (org-timegrid-org--run-at command buffer position)))
+
+(defun org-timegrid-org-command (command)
+  "Return an interactive wrapper that runs Org COMMAND on the selected entry."
+  (lambda ()
+    (interactive)
+    (org-timegrid-org--run-selected-command command)))
+
+(defun org-timegrid-org-agenda-command (command)
+  "Return an interactive wrapper that runs Agenda COMMAND on the selected entry."
+  (lambda ()
+    (interactive)
+    (org-timegrid-org--run-selected-agenda-command command)))
+
+(defalias 'org-timegrid-org-set-tags
+  (org-timegrid-org-command #'org-set-tags-command)
+  "Set tags on the selected calendar entry, then refresh the calendar.")
+
+(defalias 'org-timegrid-org-todo
+  (org-timegrid-org-command #'org-todo)
+  "Change the selected calendar entry's TODO state, then refresh the calendar.")
+
+(defalias 'org-timegrid-org-clock-in
+  (org-timegrid-org-command #'org-clock-in)
+  "Clock in to the selected calendar entry, then refresh the calendar.")
+
+(defalias 'org-timegrid-org-clock-out
+  (org-timegrid-org-command #'org-clock-out)
+  "Clock out from the selected calendar entry, then refresh the calendar.")
+
+(defalias 'org-timegrid-org-priority
+  (org-timegrid-org-command #'org-priority)
+  "Set the selected calendar entry's priority, then refresh the calendar.")
+
+(defalias 'org-timegrid-org-set-effort
+  (org-timegrid-org-command #'org-set-effort)
+  "Set the selected calendar entry's effort, then refresh the calendar.")
+
+(defalias 'org-timegrid-org-add-note
+  (org-timegrid-org-command #'org-add-note)
+  "Add a note to the selected calendar entry, then refresh the calendar.")
+
+(defalias 'org-timegrid-org-refile
+  (org-timegrid-org-command #'org-refile)
+  "Refile the selected calendar entry, then refresh the calendar.")
+
+(defalias 'org-timegrid-org-archive
+  (org-timegrid-org-command #'org-archive-subtree-default)
+  "Archive the selected calendar entry, then refresh the calendar.")
+
+(keymap-set org-timegrid-mode-map ":" #'org-timegrid-org-set-tags)
+(keymap-set org-timegrid-mode-map "C-c C-q" #'org-timegrid-org-set-tags)
+(keymap-set org-timegrid-mode-map "C-c C-t" #'org-timegrid-org-todo)
+(keymap-set org-timegrid-mode-map "," #'org-timegrid-org-priority)
+(keymap-set org-timegrid-mode-map "C-c ," #'org-timegrid-org-priority)
+(keymap-set org-timegrid-mode-map "i" #'org-timegrid-org-clock-in)
+(keymap-set org-timegrid-mode-map "O" #'org-timegrid-org-clock-out)
+(keymap-set org-timegrid-mode-map "z" #'org-timegrid-org-add-note)
+(keymap-set org-timegrid-mode-map "C-c C-z" #'org-timegrid-org-add-note)
+(keymap-set org-timegrid-mode-map "C-c C-x e" #'org-timegrid-org-set-effort)
+(keymap-set org-timegrid-mode-map "C-c C-w" #'org-timegrid-org-refile)
+(keymap-set org-timegrid-mode-map "$" #'org-timegrid-org-archive)
+
 (defvar org-timegrid-org-backend nil
   "Org backend used by the integrated Week view.")
 

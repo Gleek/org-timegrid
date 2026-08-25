@@ -1878,7 +1878,8 @@ cut wants: the entry has to survive for the yank to copy it."
       (setq-local org-timegrid--state (plist-put org-timegrid--state :preview nil))
       (let ((source (org-timegrid--block (plist-get block :id))))
         (org-timegrid--backend-create
-         (plist-get source :title) block (plist-get source :event))))
+         (plist-get source :title) block (plist-get source :event)
+         (org-timegrid-event-source (plist-get source :event)))))
      ((memq kind '(move resize))
       (setq-local org-timegrid--state (plist-put org-timegrid--state :preview nil))
       (plist-put block :preview nil)
@@ -2445,9 +2446,11 @@ consecutive days instead of stacking every copy on the same one."
       (user-error "That day is outside the visible week"))
     (let ((copy (copy-sequence block)))
       (plist-put copy :day day)
-      (org-timegrid--backend-create title copy (plist-get block :event)))
-    ;; A copy is a new entry whose identity the calendar cannot predict, so
-    ;; the slot is what the cursor follows.
+      (org-timegrid--backend-create
+       title copy (plist-get block :event)
+       (org-timegrid-event-source (plist-get block :event))))
+    ;; The new timestamp belongs to the same heading, but its event identity
+    ;; is not known until the backend data is reloaded, so follow its slot.
     (let* ((candidates (org-timegrid--blocks-starting-at day start))
            (lane (or (cl-position title candidates
                                   :key (lambda (candidate)
@@ -2547,8 +2550,8 @@ sharing one key made nudging the cursor resize whatever it had selected."
 (defvar org-timegrid--kill nil
   "Plist describing the most recently copied block.
 Holds :title, :minutes, and the opaque :event needed to reproduce the
-entry's content.  A cut also holds :target, the backend record onto
-which a yank should restore the removed time.")
+entry's content.  :target is the backend record to which a yank adds
+the copied timestamp.")
 
 (defun org-timegrid-copy-selected ()
   "Copy the selected block for a later yank."
@@ -2557,7 +2560,9 @@ which a yank should restore the removed time.")
     (setq org-timegrid--kill
           (list :title (plist-get block :title)
                 :minutes (- (plist-get block :end) (plist-get block :start))
-                :event (plist-get block :event)))
+                :event (plist-get block :event)
+                :target (org-timegrid-event-source
+                         (plist-get block :event))))
     (message "Copied %s" (plist-get block :title))))
 
 (defun org-timegrid-cut-selected ()
@@ -2577,8 +2582,8 @@ backend record instead of duplicating that record."
 
 (defun org-timegrid-yank ()
   "Yank the most recently copied or cut block at the cursor.
-A copied block becomes a new backend record; a cut block is restored on
-the record from which it was removed."
+The new timestamp is added to the backend record from which the block
+was copied or cut."
   (interactive)
   (unless org-timegrid--kill
     (user-error "Nothing to yank; select a block and press M-w or C-w"))
