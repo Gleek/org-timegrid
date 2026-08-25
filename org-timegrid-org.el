@@ -175,8 +175,24 @@ symbols."
               end-date
               (org-timegrid-org--format-clock end-clock)))))
 
+(defun org-timegrid-org--format-all-day-range (start end)
+  "Format half-open absolute minute START and END as an active Org date range."
+  (let* ((start-day (floor start 1440))
+         (end-day (floor (1- end) 1440))
+         (start-date (org-timegrid-org--format-date start-day)))
+    (if (= start-day end-day)
+        (format "<%s>" start-date)
+      (format "<%s>--<%s>" start-date
+              (org-timegrid-org--format-date end-day)))))
+
+(defun org-timegrid-org--all-day-range-p (start end)
+  "Return non-nil when START and END describe whole exclusive days."
+  (and (= (% start 1440) 0)
+       (= (% end 1440) 0)
+       (>= (- end start) 1440)))
+
 (defun org-timegrid-org--duplicate-entry-string
-    (source title start end)
+    (source title start end &optional all-day)
   "Return a top-level copy of SOURCE using TITLE and range START through END."
   (let* ((source-data (org-timegrid-event-source source))
          (marker (plist-get source-data :marker))
@@ -224,7 +240,10 @@ symbols."
         (delete-region (point) (min (point-max) (line-beginning-position 2))))
       (goto-char (point-max))
       (unless (bolp) (insert "\n"))
-      (insert (org-timegrid-org--format-range start end) "\n")
+      (insert (if all-day
+                  (org-timegrid-org--format-all-day-range start end)
+                (org-timegrid-org--format-range start end))
+              "\n")
       (buffer-string))))
 
 (defcustom org-timegrid-org-after-create-hook nil
@@ -321,7 +340,7 @@ Return markers for its beginning and the position selected by `%?'."
         (goto-char beginning))
       (list (copy-marker beginning) (copy-marker (point))))))
 
-(defun org-timegrid-org--add-range (record start end)
+(defun org-timegrid-org--add-range (record start end &optional all-day)
   "Add the range from START to END to the heading identified by RECORD.
 RECORD is either a marker selected interactively or an event source
 plist retained while cutting a calendar block."
@@ -338,7 +357,10 @@ plist retained while cutting a calendar block."
        (atomic-change-group
          (org-end-of-meta-data t)
          (unless (bolp) (insert "\n"))
-         (insert (org-timegrid-org--format-range start end) "\n"))
+         (insert (if all-day
+                     (org-timegrid-org--format-all-day-range start end)
+                   (org-timegrid-org--format-range start end))
+                 "\n"))
        (undo-boundary)
        (org-timegrid-org--note-edit)))))
 
@@ -346,14 +368,15 @@ plist retained while cutting a calendar block."
   "Create TITLE from absolute minute START to END in the capture buffer.
 When SOURCE is non-nil, duplicate that event.  When TARGET is non-nil,
 add the range to that existing heading instead."
-  (if target
+  (let ((all-day (org-timegrid-org--all-day-range-p start end)))
+   (if target
       (progn
-        (org-timegrid-org--add-range target start end)
+        (org-timegrid-org--add-range target start end all-day)
         (message "Added time block to %s" title))
     (let ((file (org-timegrid-org--capture-target))
           (entry (and source
                       (org-timegrid-org--duplicate-entry-string
-                       source title start end))))
+                       source title start end all-day))))
       (unless file
         (user-error "Set `org-timegrid-org-capture-file' first"))
       (let ((buffer (find-file-noselect (expand-file-name file))))
@@ -389,7 +412,7 @@ add the range to that existing heading instead."
                (goto-char final-point)))
            (undo-boundary))
           (org-timegrid-org--note-edit)
-          (message "Added %s" title))))))
+          (message "Added %s" title)))))))
 
 (defun org-timegrid-org--headline-has-timed-range-p (headline)
   "Return non-nil when HEADLINE's own section has a timed Org range."
@@ -553,6 +576,34 @@ ENDPOINT is the symbol `start' or `end'."
     (org-element-put-property
      timestamp (intern (format ":minute-%s" suffix)) (% minute-of-day 60))))
 
+(defun org-timegrid-org--put-date-endpoint (timestamp endpoint absolute-day)
+  "Set date-only TIMESTAMP ENDPOINT from ABSOLUTE-DAY."
+  (let* ((date (calendar-gregorian-from-absolute absolute-day))
+         (suffix (symbol-name endpoint)))
+    (org-element-put-property
+     timestamp (intern (format ":year-%s" suffix)) (nth 2 date))
+    (org-element-put-property
+     timestamp (intern (format ":month-%s" suffix)) (nth 0 date))
+    (org-element-put-property
+     timestamp (intern (format ":day-%s" suffix)) (nth 1 date))
+    (org-element-put-property
+     timestamp (intern (format ":hour-%s" suffix)) nil)
+    (org-element-put-property
+     timestamp (intern (format ":minute-%s" suffix)) nil)))
+
+(defun org-timegrid-org--rewrite-all-day-timestamp (timestamp start end)
+  "Return date-only TIMESTAMP rewritten to half-open START through END.
+END is exclusive internally; Org's written date-range endpoint is inclusive."
+  (let* ((copy (copy-tree timestamp))
+         (start-day (floor start 1440))
+         (end-day (floor (1- end) 1440))
+         (range (> end-day start-day)))
+    (org-element-put-property copy :type (if range 'active-range 'active))
+    (org-element-put-property copy :range-type (and range 'daterange))
+    (org-timegrid-org--put-date-endpoint copy 'start start-day)
+    (org-timegrid-org--put-date-endpoint copy 'end end-day)
+    (org-element-interpret-data copy)))
+
 (defun org-timegrid-org--rewrite-timestamp
     (timestamp start end)
   "Return TIMESTAMP rewritten to absolute START and END minutes."
@@ -596,14 +647,25 @@ ENDPOINT is the symbol `start' or `end'."
          (user-error "The source Org buffer is read-only"))
        (undo-boundary)
        (atomic-change-group
-         (let* ((base-start
-                 (org-timegrid-org--timestamp-minutes timestamp nil))
+         (let* ((all-day (org-timegrid-event-all-day event))
+                (base-start
+                 (if all-day
+                     (org-timegrid-org--timestamp-all-day-minutes timestamp nil)
+                   (org-timegrid-org--timestamp-minutes timestamp nil)))
                 (occurrence-start (org-timegrid-event-start event))
                 (new-base-start (+ base-start (- start occurrence-start)))
                 (new-base-end (+ new-base-start (- end start)))
+                (new-all-day
+                 (and all-day
+                      (= (% new-base-start 1440) 0)
+                      (= (% new-base-end 1440) 0)
+                      (>= (- new-base-end new-base-start) 1440)))
                 (replacement
-                 (org-timegrid-org--rewrite-timestamp
-                  timestamp new-base-start new-base-end)))
+                 (if new-all-day
+                     (org-timegrid-org--rewrite-all-day-timestamp
+                      timestamp new-base-start new-base-end)
+                   (org-timegrid-org--rewrite-timestamp
+                    timestamp new-base-start new-base-end))))
            (goto-char (org-element-property :begin timestamp))
            (delete-region (org-element-property :begin timestamp)
                           (org-element-property :end timestamp))
@@ -675,6 +737,27 @@ still have no place on a time grid."
        (integerp (org-element-property :hour-start timestamp))
        (integerp (org-element-property :minute-start timestamp))))
 
+(defun org-timegrid-org--timestamp-all-day-p (timestamp)
+  "Return non-nil when TIMESTAMP is an active date without a clock time."
+  (and timestamp
+       (memq (org-element-property :type timestamp)
+             '(active active-range))
+       (not (integerp (org-element-property :hour-start timestamp)))))
+
+(defun org-timegrid-org--timestamp-all-day-minutes (timestamp endp)
+  "Return the exclusive absolute-minute bounds of date-only TIMESTAMP.
+Org writes an inclusive final date, whereas the renderer uses a half-open
+interval.  Thus an Org range through August 27 ends internally at the start
+of August 28, without displaying or writing an August 28 occurrence."
+  (let* ((suffix (if (and endp (org-element-property :range-type timestamp))
+                     "-end"
+                   "-start"))
+         (year (org-element-property (intern (format ":year%s" suffix)) timestamp))
+         (month (org-element-property (intern (format ":month%s" suffix)) timestamp))
+         (day (org-element-property (intern (format ":day%s" suffix)) timestamp))
+         (absolute (calendar-absolute-from-gregorian (list month day year))))
+    (* (+ absolute (if endp 1 0)) 1440)))
+
 (defun org-timegrid-org--timestamp-minutes (timestamp endp)
   "Return TIMESTAMP start or end as an absolute minute.
 ENDP selects the endpoint.  A clock-only range whose endpoint is not later
@@ -728,7 +811,7 @@ with no end time gets `org-timegrid-default-duration-minutes'."
   (list file position kind))
 
 (defun org-timegrid-org--event
-    (file headline timestamp kind)
+    (file headline timestamp kind &optional all-day)
   "Create a calendar event for FILE HEADLINE TIMESTAMP of KIND."
   (let* ((todo (org-element-property :todo-keyword headline))
          (done (and todo (member todo org-done-keywords)))
@@ -740,8 +823,13 @@ with no end time gets `org-timegrid-default-duration-minutes'."
     (org-timegrid-event-create
      :id (org-timegrid-org--event-id file begin kind)
      :title (or (org-element-property :raw-value headline) "Untitled")
-     :start (org-timegrid-org--timestamp-minutes timestamp nil)
-     :end (org-timegrid-org--timestamp-minutes timestamp t)
+     :start (if all-day
+                (org-timegrid-org--timestamp-all-day-minutes timestamp nil)
+              (org-timegrid-org--timestamp-minutes timestamp nil))
+     :end (if all-day
+              (org-timegrid-org--timestamp-all-day-minutes timestamp t)
+            (org-timegrid-org--timestamp-minutes timestamp t))
+     :all-day all-day
      :tags (org-element-property :tags headline)
      :state (if done 'done todo)
      :color (funcall org-timegrid-org-color-function headline)
@@ -828,10 +916,12 @@ FILE defaults to `buffer-file-name'."
                             (deadline . ,(org-element-property
                                           :deadline headline))))
           (let ((timestamp (cdr planning)))
-            (when (org-timegrid-org--timestamp-timed-p timestamp)
+            (when (or (org-timegrid-org--timestamp-timed-p timestamp)
+                      (org-timegrid-org--timestamp-all-day-p timestamp))
               (push (org-element-property :begin timestamp) seen)
               (push (org-timegrid-org--event
-                     file headline timestamp (car planning))
+                     file headline timestamp (car planning)
+                     (org-timegrid-org--timestamp-all-day-p timestamp))
                     events))))
         (let ((section
                (cl-find-if
@@ -841,10 +931,12 @@ FILE defaults to `buffer-file-name'."
             (org-element-map section 'timestamp
               (lambda (timestamp)
                 (when (and
-                       (org-timegrid-org--timestamp-timed-p timestamp)
+                       (or (org-timegrid-org--timestamp-timed-p timestamp)
+                           (org-timegrid-org--timestamp-all-day-p timestamp))
                        (not (memq (org-element-property :begin timestamp) seen)))
                   (push (org-timegrid-org--event
-                         file headline timestamp 'timestamp)
+                         file headline timestamp 'timestamp
+                         (org-timegrid-org--timestamp-all-day-p timestamp))
                         events))))))))
     (nreverse events)))
 

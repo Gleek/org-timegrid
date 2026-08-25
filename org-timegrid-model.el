@@ -39,7 +39,7 @@
   "A backend-neutral timed calendar event.
 START and END are integer minutes based on Emacs absolute Gregorian dates.
 SOURCE is opaque to the renderer and belongs to the backend."
-  id title start end tags state color source metadata)
+  id title start end all-day tags state color source metadata)
 
 (cl-defstruct (org-timegrid-backend
                (:constructor org-timegrid-backend-create))
@@ -125,6 +125,7 @@ the height of the keyboard cursor."
           :day day
           :start (- relative-start day-start)
           :end (- relative-end day-start)
+          :all-day (org-timegrid-event-all-day event)
           :title (org-timegrid-event-title event)
           :tags (org-timegrid-event-tags event)
           :state (org-timegrid-event-state event)
