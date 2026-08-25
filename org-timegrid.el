@@ -35,6 +35,7 @@
 
 (require 'cl-lib)
 (require 'color)
+(require 'face-remap)
 (require 'svg)
 (require 'subr-x)
 (require 'org-timegrid-model)
@@ -193,11 +194,26 @@ half-hour block room for two lines of title."
 (defvar-local org-timegrid--rendered-ui nil)
 (defvar org-timegrid--header-map
   (let ((map (make-sparse-keymap)))
-    (define-key map [header-line down-mouse-1] #'org-timegrid-header-click)
+    (define-key map [header-line down-mouse-1] #'org-timegrid-header-press)
     (define-key map [header-line mouse-1] #'org-timegrid-header-click)
     (define-key map [header-line double-mouse-1] #'org-timegrid-header-visit)
     map)
   "Mouse map installed directly on the sticky calendar header image.")
+;; Refresh an existing map when this source is evaluated in a live Emacs.
+;; Header-line events arrive prefixed through the mode map but unprefixed
+;; through the image string's `keymap' property, so support both forms.
+(define-key org-timegrid--header-map [down-mouse-1]
+            #'org-timegrid-header-press)
+(define-key org-timegrid--header-map [mouse-1]
+            #'org-timegrid-header-click)
+(define-key org-timegrid--header-map [double-mouse-1]
+            #'org-timegrid-header-visit)
+(define-key org-timegrid--header-map [header-line down-mouse-1]
+            #'org-timegrid-header-press)
+(define-key org-timegrid--header-map [header-line mouse-1]
+            #'org-timegrid-header-click)
+(define-key org-timegrid--header-map [header-line double-mouse-1]
+            #'org-timegrid-header-visit)
 (defvar-local org-timegrid--image-height nil)
 (defvar-local org-timegrid--last-width nil)
 (defvar-local org-timegrid--pointer-overlay nil)
@@ -1471,16 +1487,17 @@ The ordering favours earlier and longer spans, then title and identity."
          (preview (plist-get org-timegrid--state :preview))
          (preview-block (plist-get preview :block))
          (replace-id (plist-get preview :replace-id))
-         (source (if replace-id
-                     (append
-                      (cl-remove replace-id
-                                 (plist-get org-timegrid--state :all-day-blocks)
-                                 :key (lambda (block) (plist-get block :id))
-                                 :test #'equal)
-                      (and preview-block
-                           (plist-get preview-block :all-day)
-                           (list preview-block)))
-                   (plist-get org-timegrid--state :all-day-blocks)))
+         (source
+          (append
+           (if replace-id
+               (cl-remove replace-id
+                          (plist-get org-timegrid--state :all-day-blocks)
+                          :key (lambda (block) (plist-get block :id))
+                          :test #'equal)
+             (plist-get org-timegrid--state :all-day-blocks))
+           (and preview-block
+                (plist-get preview-block :all-day)
+                (list preview-block))))
          (blocks (sort (mapcar #'copy-sequence source)
                        #'org-timegrid--all-day-less-p))
          lane-ends result)
@@ -2051,7 +2068,9 @@ reset the horizontal origin.  Add the tile offset to glyph-relative Y."
   (let ((preview (and proposal (not (plist-get proposal :error)) proposal)))
     (unless (equal preview (plist-get org-timegrid--state :preview))
       (setq-local org-timegrid--state (plist-put org-timegrid--state :preview preview))
-      (org-timegrid--render-dynamic t))))
+      (if (plist-get (plist-get preview :block) :all-day)
+          (org-timegrid--render-header-dynamic)
+        (org-timegrid--render-dynamic t)))))
 
 (defun org-timegrid--clear-preview ()
   "Remove a pending SVG preview."
@@ -2281,6 +2300,97 @@ selects nothing.  The mouse and the keyboard drive one shared cursor."
                     (plist-put org-timegrid--state :cursor-visible t))
         (org-timegrid--cursor-moved)))))
 
+(defun org-timegrid--all-day-create-proposal (origin target)
+  "Return a date-only creation proposal spanning ORIGIN through TARGET.
+Both endpoints are rail targets.  The mouse-selected final day is inclusive;
+the block and backend range use an exclusive midnight endpoint."
+  (let ((origin-day (plist-get origin :day))
+        (target-day (plist-get target :day)))
+    (if (or (null origin-day) (null target-day))
+        (list :error "Release inside an all-day cell")
+      (let* ((first (min origin-day target-day))
+             (last (max origin-day target-day))
+             (block (org-timegrid--make-block
+                     'preview first 0 (* (1+ (- last first)) 1440)
+                     "New all-day block" 'blue)))
+        (plist-put block :all-day t)
+        (plist-put block :preview t)
+        (list :kind 'create :block block)))))
+
+(defun org-timegrid--header-position-xy (position)
+  "Return the SVG-local coordinates of header-line POSITION."
+  (or (posn-object-x-y position) (posn-x-y position)))
+
+(defun org-timegrid--track-drag-gesture
+    (event position-function target-function proposal-function click-function)
+  "Track one mouse EVENT independently of its calendar surface.
+POSITION-FUNCTION returns comparable pixel coordinates, TARGET-FUNCTION
+returns model coordinates, PROPOSAL-FUNCTION builds a preview, and
+CLICK-FUNCTION handles a press that never becomes a drag."
+  (let* ((origin-position (event-start event))
+         (origin (funcall target-function origin-position))
+         (origin-xy (funcall position-function origin-position))
+         (end-target origin)
+         dragged finished next basic)
+    (track-mouse
+      (while (not finished)
+        (setq next (read-event)
+              basic (event-basic-type next))
+        (cond
+         ((mouse-movement-p next)
+          (setq next (org-timegrid--latest-motion-event next))
+          (let* ((position (event-end next))
+                 (xy (funcall position-function position))
+                 (target (funcall target-function position)))
+            (when (and origin-xy xy target (not (equal origin-xy xy)))
+              (setq dragged t
+                    end-target target)
+              (org-timegrid--set-preview
+               (funcall proposal-function origin end-target)))))
+         ((memq basic '(mouse-1 drag-mouse-1))
+          (setq end-target
+                (or (funcall target-function (event-end next)) end-target)
+                finished t))
+         ((eq basic 'switch-frame))
+         (t
+          (push next unread-command-events)
+          (setq finished 'cancelled)))))
+    (cond
+     ((eq finished 'cancelled)
+      (org-timegrid--clear-preview))
+     (dragged
+      (org-timegrid--apply (funcall proposal-function origin end-target)))
+     (t
+      (funcall click-function origin-position)))))
+
+(defun org-timegrid-header-press (event)
+  "Track an all-day range creation gesture beginning with mouse EVENT.
+Dragging an empty rail cell across date columns creates an inclusive range.
+Pressing an existing block retains ordinary click-to-select behavior."
+  (interactive "@e")
+  (when mark-active (deactivate-mark))
+  (let* ((origin-position (event-start event))
+         (origin (org-timegrid--header-target origin-position))
+         (creator (and org-timegrid--backend
+                       (org-timegrid-backend-create-function
+                        org-timegrid--backend))))
+    (cond
+     ((null origin)
+      (message "Press inside an all-day cell"))
+     ((plist-get origin :id)
+      (org-timegrid-header-click (list 'mouse-1 origin-position)))
+     ((not (functionp creator))
+      (org-timegrid-header-click (list 'mouse-1 origin-position))
+      (message "This backend cannot create calendar entries"))
+     (t
+      (org-timegrid--track-drag-gesture
+       event
+       #'org-timegrid--header-position-xy
+       #'org-timegrid--header-target
+       #'org-timegrid--all-day-create-proposal
+       (lambda (position)
+         (org-timegrid-header-click (list 'mouse-1 position))))))))
+
 (defun org-timegrid-header-visit (event)
   "Visit the all-day event under header-line mouse EVENT."
   (interactive "@e")
@@ -2340,44 +2450,14 @@ Leave the first non-motion event for the gesture loop to process."
         (progn
           (org-timegrid-click (list 'mouse-1 origin-position))
           (message "Unsupported drag"))
-      (let* (
-           (origin-xy
-            (org-timegrid--position-image-xy origin-position))
-           (end-position origin-position)
-           dragged finished next basic)
-      (track-mouse
-        (while (not finished)
-          (setq next (read-event)
-                basic (event-basic-type next))
-          (cond
-           ((mouse-movement-p next)
-            (setq next
-                  (org-timegrid--latest-motion-event next))
-            (setq end-position (event-end next))
-            (let ((xy
-                   (org-timegrid--position-image-xy
-                    end-position)))
-              (when (and origin-xy xy (not (equal origin-xy xy)))
-                (setq dragged t)
-                (org-timegrid--set-preview
-                 (org-timegrid--proposal
-                  origin (org-timegrid--target end-position)
-                  copying)))))
-           ((memq basic '(mouse-1 drag-mouse-1))
-            (setq end-position (event-end next) finished t))
-           ((eq basic 'switch-frame))
-           (t (push next unread-command-events)
-              (setq finished 'cancelled)))))
-      (cond
-       ((eq finished 'cancelled)
-        (org-timegrid--clear-preview))
-       (dragged
-        (org-timegrid--apply
-         (org-timegrid--proposal
-          origin (org-timegrid--target end-position)
-          copying)))
-       (t (org-timegrid-click
-           (list 'mouse-1 origin-position))))))))
+      (org-timegrid--track-drag-gesture
+       event
+       #'org-timegrid--position-image-xy
+       #'org-timegrid--target
+       (lambda (from to)
+         (org-timegrid--proposal from to copying))
+       (lambda (position)
+         (org-timegrid-click (list 'mouse-1 position)))))))
 
 (defun org-timegrid-pointer-feedback (event)
   "Set a resize or move pointer under SVG mouse EVENT."
@@ -2838,20 +2918,29 @@ inside its parent.  Overlap rather than containment matters because an Org
 range may start at 13:50, which lies inside the 13:45 slot but after it,
 and such a block was unreachable while this asked for containment."
   (or (org-timegrid--block (org-timegrid--selected-id))
-      (let* ((slot-start (org-timegrid--cursor-absolute))
-             (slot-end (+ slot-start org-timegrid-slot-minutes)))
-        (car (sort (seq-filter
-                    (lambda (block)
-                      (let* ((start (org-timegrid--block-absolute-start block))
-                             (end (+ start (- (plist-get block :end)
-                                              (plist-get block :start)))))
-                        (and (not (plist-get block :preview))
-                             (< start slot-end)
-                             (> end slot-start))))
-                    (copy-sequence (plist-get org-timegrid--state :blocks)))
-                   (lambda (left right)
-                     (< (- (plist-get left :end) (plist-get left :start))
-                        (- (plist-get right :end) (plist-get right :start)))))))))
+      (let ((cursor (org-timegrid--cursor)))
+        (if (eq (plist-get cursor :surface) 'rail)
+            (org-timegrid--all-day-at (plist-get cursor :day)
+                                      (plist-get cursor :lane))
+          (let* ((slot-start (org-timegrid--cursor-absolute))
+                 (slot-end (+ slot-start org-timegrid-slot-minutes)))
+            (car (sort (seq-filter
+                        (lambda (block)
+                          (let* ((start
+                                  (org-timegrid--block-absolute-start block))
+                                 (end (+ start
+                                         (- (plist-get block :end)
+                                            (plist-get block :start)))))
+                            (and (not (plist-get block :preview))
+                                 (< start slot-end)
+                                 (> end slot-start))))
+                        (copy-sequence
+                         (plist-get org-timegrid--state :blocks)))
+                       (lambda (left right)
+                         (< (- (plist-get left :end)
+                               (plist-get left :start))
+                            (- (plist-get right :end)
+                               (plist-get right :start)))))))))))
 
 ;;; Keyboard editing
 ;;
@@ -3152,20 +3241,26 @@ sharing one key made nudging the cursor resize whatever it had selected."
   (org-timegrid-grow-all-day-start (- (or count 1))))
 
 (defun org-timegrid-create-at-cursor ()
-  "Create a block at the cursor, prompting for a title and a duration."
+  "Create a block at the cursor.
+Rail cells create a one-day date-only entry without a duration prompt;
+time-grid cells prompt for the timed duration as usual."
   (interactive)
   (org-timegrid--reveal-cursor)
   (let* ((cursor (org-timegrid--ensure-cursor))
+         (all-day (eq (plist-get cursor :surface) 'rail))
          (entry (org-timegrid--read-entry))
          (title (car entry)))
     (if (string-empty-p title)
         (message "Nothing created")
-      (let* ((minutes (org-timegrid--read-minutes
-                       org-timegrid-default-duration-minutes))
-             (start (plist-get cursor :minute))
+      (let* ((minutes (if all-day
+                          1440
+                        (org-timegrid--read-minutes
+                         org-timegrid-default-duration-minutes)))
+             (start (if all-day 0 (plist-get cursor :minute)))
              (block (org-timegrid--make-block
                      'new (plist-get cursor :day) start (+ start minutes)
                      title 'blue)))
+        (plist-put block :all-day all-day)
         (org-timegrid--backend-create title block nil (cdr entry))))))
 
 (defun org-timegrid-open-at-cursor ()
@@ -3439,7 +3534,7 @@ where it was left.  Only an explicit refresh forgets it."
     (define-key map [mouse-1] #'org-timegrid-click)
     (define-key map [double-mouse-1] #'org-timegrid-visit)
     (define-key map [header-line mouse-1] #'org-timegrid-header-click)
-    (define-key map [header-line down-mouse-1] #'org-timegrid-header-click)
+    (define-key map [header-line down-mouse-1] #'org-timegrid-header-press)
     (define-key map [header-line double-mouse-1] #'org-timegrid-header-visit)
     (dolist (area '(calendar-block calendar-resize))
       (define-key map (vector area 'down-mouse-1)
@@ -3549,7 +3644,7 @@ where it was left.  Only an explicit refresh forgets it."
 (define-key org-timegrid-mode-map [header-line mouse-1]
             #'org-timegrid-header-click)
 (define-key org-timegrid-mode-map [header-line down-mouse-1]
-            #'org-timegrid-header-click)
+            #'org-timegrid-header-press)
 (define-key org-timegrid-mode-map [header-line double-mouse-1]
             #'org-timegrid-header-visit)
 

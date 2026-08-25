@@ -269,16 +269,30 @@ default tag."
     (encode-time 0 (% clock 60) (/ clock 60)
                  (nth 1 date) (nth 0 date) (nth 2 date))))
 
-(defun org-timegrid-org--expand-capture-template (title start end)
-  "Expand the calendar template for TITLE and range START through END."
-  (let ((text (plist-get org-timegrid-org-capture-template :template)))
+(defun org-timegrid-org--expand-capture-template
+    (title start end &optional all-day)
+  "Expand the calendar template for TITLE and range START through END.
+When ALL-DAY is non-nil, timestamp substitutions contain dates without
+clock times and END is treated as an exclusive midnight bound."
+  (let ((text (plist-get org-timegrid-org-capture-template :template))
+        (range (if all-day
+                   (org-timegrid-org--format-all-day-range start end)
+                 (org-timegrid-org--format-range start end)))
+        (start-text (if all-day
+                        (org-timegrid-org--format-all-day-range
+                         start (+ start 1440))
+                      (org-timegrid-org--format-instant start)))
+        (end-text (if all-day
+                      (org-timegrid-org--format-all-day-range
+                       (- end 1440) end)
+                    (org-timegrid-org--format-instant end))))
     (unless (stringp text)
       (user-error "The timegrid capture template needs a :template string"))
     (dolist (replacement
              `(("%{title}" . ,title)
-               ("%{time-range}" . ,(org-timegrid-org--format-range start end))
-               ("%{start}" . ,(org-timegrid-org--format-instant start))
-               ("%{end}" . ,(org-timegrid-org--format-instant end))
+               ("%{time-range}" . ,range)
+               ("%{start}" . ,start-text)
+               ("%{end}" . ,end-text)
                ("%{duration}" . ,(number-to-string (- end start)))))
       (setq text (string-replace (car replacement) (cdr replacement) text)))
     (replace-regexp-in-string
@@ -318,7 +332,8 @@ default tag."
      (lambda (stars) (concat (make-string parent-level ?*) stars))
      template)))
 
-(defun org-timegrid-org--insert-capture-template (title start end)
+(defun org-timegrid-org--insert-capture-template
+    (title start end &optional all-day)
   "Insert a new entry for TITLE and range START through END.
 Return markers for its beginning and the position selected by `%?'."
   (let* ((target (or (plist-get org-timegrid-org-capture-template :target)
@@ -327,7 +342,7 @@ Return markers for its beginning and the position selected by `%?'."
          (template (string-replace
                     "%?" cursor-token
                     (org-timegrid-org--expand-capture-template
-                     title start end)))
+                     title start end all-day)))
          (parent-level (org-timegrid-org--capture-parent target start)))
     (unless (or (= (point-min) (point-max)) (bolp))
       (insert "\n"))
@@ -401,7 +416,7 @@ add the range to that existing heading instead."
                              (insert entry)
                              (list beginning beginning)))
                        (org-timegrid-org--insert-capture-template
-                        title start end)))
+                        title start end all-day)))
                     (beginning (car positions))
                     (final-point (cadr positions)))
                ;; Run the hook inside the change group, with point on the new
