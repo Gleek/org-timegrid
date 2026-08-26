@@ -32,7 +32,7 @@
       (seq-filter
        (lambda (block)
          (string-match-p
-          (regexp-quote query) (or (plist-get block :title) "")))
+          (regexp-quote query) (or (org-timegrid-block-title block) "")))
        (org-timegrid--ordered-blocks)))))
 
 (defun org-timegrid-isearch--first-from-origin (matches direction)
@@ -58,7 +58,7 @@ When REPEAT is non-nil, move past the current match and wrap if needed."
          (current
           (and repeat org-timegrid-isearch--current-id
                (cl-position org-timegrid-isearch--current-id matches
-                            :key (lambda (block) (plist-get block :id))
+                            :key (lambda (block) (org-timegrid-block-id block))
                             :test #'equal)))
          (block
           (cond
@@ -68,7 +68,7 @@ When REPEAT is non-nil, move past the current match and wrap if needed."
            (t (org-timegrid-isearch--first-from-origin matches direction)))))
     (if block
         (progn
-          (setq org-timegrid-isearch--current-id (plist-get block :id))
+          (setq org-timegrid-isearch--current-id (org-timegrid-block-id block))
           (with-current-buffer org-timegrid-isearch--buffer
             (org-timegrid--goto-block block))
           t)
@@ -116,8 +116,10 @@ When REPEAT is non-nil, move past the current match and wrap if needed."
 (defun org-timegrid-isearch--start (direction)
   "Incrementally search calendar block titles in DIRECTION."
   (let* ((calendar (current-buffer))
-         (saved-week (plist-get org-timegrid--state :week-start))
-         (saved-cursor (copy-tree (org-timegrid--cursor)))
+         (saved-week (org-timegrid--calendar-state-week-start org-timegrid--state))
+         (saved-cursor (and (org-timegrid--cursor)
+                            (copy-org-timegrid--cursor-state
+                             (org-timegrid--cursor))))
          (saved-visible (org-timegrid--cursor-visible-p))
          (org-timegrid-isearch--buffer calendar)
          (org-timegrid-isearch--direction direction)
@@ -137,11 +139,11 @@ When REPEAT is non-nil, move past the current match and wrap if needed."
       (quit
        (with-current-buffer calendar
          (org-timegrid--reload-state saved-week)
-         (setq-local org-timegrid--state
-                     (plist-put org-timegrid--state :cursor saved-cursor))
-         (setq-local org-timegrid--state
-                     (plist-put org-timegrid--state
-                                :cursor-visible saved-visible))
+         (setf (org-timegrid--calendar-state-cursor org-timegrid--state)
+               saved-cursor
+               (org-timegrid--calendar-state-cursor-visible
+                org-timegrid--state)
+               saved-visible)
          (org-timegrid--refresh t)
          (when saved-visible
            (org-timegrid--scroll-cursor-into-view)))

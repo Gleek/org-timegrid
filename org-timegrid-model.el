@@ -36,20 +36,40 @@
 
 (cl-defstruct (org-timegrid-event
                (:constructor org-timegrid-event-create))
-  "A backend-neutral timed calendar event.
+  "A backend-neutral calendar event.
 START and END are integer minutes based on Emacs absolute Gregorian dates.
 SOURCE is opaque to the renderer and belongs to the backend."
   id title start end all-day tags state color source metadata)
+
+(cl-defstruct (org-timegrid-block
+               (:constructor org-timegrid-block-create))
+  "A backend event expressed in coordinates relative to a displayed week.
+TIME-KIND is either `timed' or `all-day'.  The remaining layout slots are
+filled by the renderers without changing the event's calendar meaning."
+  id day start end title time-kind tags state color done event preview
+  source-day source-start source-end allow-top allow-bottom boundary-edge
+  nest-depth root-id parent-id layout-path nested-family lane lanes
+  rail-start rail-end continues-left continues-right rail-lane)
+
+(defun org-timegrid-block-all-day-p (block)
+  "Return non-nil when BLOCK belongs on an all-day surface."
+  (eq (org-timegrid-block-time-kind block) 'all-day))
+
+(defun org-timegrid-event-time-kind (event)
+  "Return EVENT's explicit presentation kind."
+  (if (org-timegrid-event-all-day event) 'all-day 'timed))
 
 (cl-defstruct (org-timegrid-backend
                (:constructor org-timegrid-backend-create))
   "Operations supplied by a calendar data backend.
 LIST-FUNCTION receives inclusive START and exclusive END absolute minutes.
 CREATE-FUNCTION receives TITLE, START, END, an optional source event to
-copy, and an optional existing backend record selected by
-READ-ENTRY-FUNCTION or retained from an event's SOURCE while copying it.
-UPDATE-FUNCTION receives an existing event, its new START and END, and an
-optional heading title.  DELETE-FUNCTION removes an event's time;
+copy, an optional existing backend record selected by READ-ENTRY-FUNCTION
+or retained from an event's SOURCE while copying it, and TIME-KIND, either
+`timed' or `all-day'.  UPDATE-FUNCTION receives an existing event, its new
+START and END, an optional heading title, and TIME-KIND.  Callers remain
+compatible with older functions that do not accept TIME-KIND.
+DELETE-FUNCTION removes an event's time;
 DELETE-ENTRY-FUNCTION removes the record that carried it.  UNDO-FUNCTION
 receives non-nil when it continues an unbroken run of undos, and REDO
 when the caller wants the reverse; the backend owns undo because only it
@@ -121,17 +141,18 @@ the height of the keyboard cursor."
                           week-minute))
          (day (floor relative-start 1440))
          (day-start (* day 1440)))
-    (list :id (org-timegrid-event-id event)
-          :day day
-          :start (- relative-start day-start)
-          :end (- relative-end day-start)
-          :all-day (org-timegrid-event-all-day event)
-          :title (org-timegrid-event-title event)
-          :tags (org-timegrid-event-tags event)
-          :state (org-timegrid-event-state event)
-          :color (org-timegrid-event-color event)
-          :done (eq (org-timegrid-event-state event) 'done)
-          :event event)))
+    (org-timegrid-block-create
+     :id (org-timegrid-event-id event)
+     :day day
+     :start (- relative-start day-start)
+     :end (- relative-end day-start)
+     :time-kind (org-timegrid-event-time-kind event)
+     :title (org-timegrid-event-title event)
+     :tags (org-timegrid-event-tags event)
+     :state (org-timegrid-event-state event)
+     :color (org-timegrid-event-color event)
+     :done (eq (org-timegrid-event-state event) 'done)
+     :event event)))
 
 (defun org-timegrid-events-to-blocks (events week-start)
   "Convert EVENTS to renderer blocks relative to WEEK-START."
@@ -145,38 +166,42 @@ the height of the keyboard cursor."
     (dolist (block group)
       (let ((lane 0))
         (while (and (< lane (length lane-ends))
-                    (> (nth lane lane-ends) (plist-get block :start)))
+                    (> (nth lane lane-ends) (org-timegrid-block-start block)))
           (setq lane (1+ lane)))
         (if (= lane (length lane-ends))
             (setq lane-ends
-                  (append lane-ends (list (plist-get block :end))))
-          (setf (nth lane lane-ends) (plist-get block :end)))
-        (push (plist-put (copy-sequence block) :lane lane) assigned)))
+                  (append lane-ends (list (org-timegrid-block-end block))))
+          (setf (nth lane lane-ends) (org-timegrid-block-end block)))
+        (let ((copy (copy-org-timegrid-block block)))
+          (setf (org-timegrid-block-lane copy) lane)
+          (push copy assigned))))
     (let ((count (max 1 (length lane-ends))))
-      (mapcar (lambda (block) (plist-put block :lanes count))
+      (mapcar (lambda (block)
+                (setf (org-timegrid-block-lanes block) count)
+                block)
               (nreverse assigned)))))
 
 (defun org-timegrid-basic-layout-day (blocks day)
   "Annotate BLOCKS on DAY with stable overlap lanes."
   (let ((sorted (sort (cl-remove-if-not
-                       (lambda (block) (= day (plist-get block :day)))
+                       (lambda (block) (= day (org-timegrid-block-day block)))
                        (copy-sequence blocks))
                       (lambda (left right)
-                        (< (plist-get left :start)
-                           (plist-get right :start)))))
+                        (< (org-timegrid-block-start left)
+                           (org-timegrid-block-start right)))))
         group group-end output)
     (dolist (block sorted)
-      (if (or (null group) (< (plist-get block :start) group-end))
+      (if (or (null group) (< (org-timegrid-block-start block) group-end))
           (progn
             (push block group)
             (setq group-end
-                  (max (or group-end 0) (plist-get block :end))))
+                  (max (or group-end 0) (org-timegrid-block-end block))))
         (setq output
               (nconc output
                      (org-timegrid--assign-group-lanes
                       (nreverse group))))
         (setq group (list block)
-              group-end (plist-get block :end))))
+              group-end (org-timegrid-block-end block))))
     (when group
       (setq output
             (nconc output

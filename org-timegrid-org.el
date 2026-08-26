@@ -379,11 +379,17 @@ plist retained while cutting a calendar block."
        (undo-boundary)
        (org-timegrid-org--note-edit)))))
 
-(defun org-timegrid-org--create-event (title start end &optional source target)
+(defun org-timegrid-org--create-event
+    (title start end &optional source target time-kind)
   "Create TITLE from absolute minute START to END in the capture buffer.
 When SOURCE is non-nil, duplicate that event.  When TARGET is non-nil,
-add the range to that existing heading instead."
-  (let ((all-day (org-timegrid-org--all-day-range-p start end)))
+add the range to that existing heading instead.  TIME-KIND explicitly
+distinguishes date-only values from midnight-aligned timed values."
+  (let ((all-day (if time-kind
+                     (eq time-kind 'all-day)
+                   (org-timegrid-org--all-day-range-p start end))))
+   (when (and all-day (not (org-timegrid-org--all-day-range-p start end)))
+     (user-error "All-day ranges must span whole days"))
    (if target
       (progn
         (org-timegrid-org--add-range target start end all-day)
@@ -650,8 +656,8 @@ END is exclusive internally; Org's written date-range endpoint is inclusive."
      (org-edit-headline title))))
 
 (defun org-timegrid-org--update-event-range
-    (event start end &optional title)
-  "Update EVENT to absolute range START through END and optional TITLE."
+    (event start end &optional title time-kind)
+  "Update EVENT to START through END, optional TITLE, and TIME-KIND."
   (let* ((source (org-timegrid-event-source event))
          (marker (plist-get source :marker))
          (timestamp (org-timegrid-org--timestamp-at-marker marker)))
@@ -671,16 +677,22 @@ END is exclusive internally; Org's written date-range endpoint is inclusive."
                 (new-base-start (+ base-start (- start occurrence-start)))
                 (new-base-end (+ new-base-start (- end start)))
                 (new-all-day
-                 (and all-day
-                      (= (% new-base-start 1440) 0)
-                      (= (% new-base-end 1440) 0)
-                      (>= (- new-base-end new-base-start) 1440)))
+                 (if time-kind
+                     (eq time-kind 'all-day)
+                   (and all-day
+                        (= (% new-base-start 1440) 0)
+                        (= (% new-base-end 1440) 0)
+                        (>= (- new-base-end new-base-start) 1440))))
                 (replacement
-                 (if new-all-day
+                 (if (and new-all-day
+                          (not (org-timegrid-org--all-day-range-p
+                                new-base-start new-base-end)))
+                     (user-error "All-day ranges must span whole days")
+                   (if new-all-day
                      (org-timegrid-org--rewrite-all-day-timestamp
                       timestamp new-base-start new-base-end)
                    (org-timegrid-org--rewrite-timestamp
-                    timestamp new-base-start new-base-end))))
+                    timestamp new-base-start new-base-end)))))
            (goto-char (org-element-property :begin timestamp))
            (delete-region (org-element-property :begin timestamp)
                           (org-element-property :end timestamp))
@@ -984,9 +996,9 @@ FILE defaults to `buffer-file-name'."
 (defun org-timegrid-org-selected-marker ()
   "Return the Org heading marker for the selected calendar block.
 Signal a user error if no block is selected, its backend is not Org, or
-its source entry is no longer available."
+  its source entry is no longer available."
   (let* ((block (org-timegrid--selected-block))
-         (event (plist-get block :event))
+         (event (org-timegrid-block-event block))
          (source (and event (org-timegrid-event-source event)))
          (marker (plist-get source :marker)))
     (unless (and (markerp marker) (marker-buffer marker))

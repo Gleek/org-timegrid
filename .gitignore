@@ -4,10 +4,9 @@
 *~
 .#*
 
-# Local development only: the ERT suite, the manual test matrix, the hot-reload
-# helper and the screenshot fixture generator.  Useful here, not part of what
-# the package installs.
-/test/
+# Local development only: the manual test matrix, hot-reload helper and
+# screenshot fixture generator.  Useful here, not part of what the package
+# installs.  The ERT regression suite under /test is versioned.
 /dev/
 /TEST-MATRIX.org
 /.agent-shell/

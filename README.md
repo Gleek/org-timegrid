@@ -290,6 +290,11 @@ create, update, delete, undo, visit, entry completion, and date input. A
 backend with only a listing function is read-only. See
 `org-timegrid-backend-create` for the full contract.
 
+Create and update callbacks can accept a final `time-kind` argument whose
+value is `timed` or `all-day`. This distinguishes date-only entries from timed
+entries that happen to span whole days; callbacks using the older arity remain
+supported.
+
 ## Credits and status
 
 The visual design and interaction borrow from macOS Calendar. [`org-timeblock`](https://github.com/ichernyshovvv/org-timeblock)
