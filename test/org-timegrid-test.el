@@ -128,5 +128,104 @@
       (goto-char (point-min))
       (should (re-search-forward "00:00" nil t)))))
 
+(ert-deftest org-timegrid-test-drag-proposal-converts-timed-to-all-day ()
+  (let* ((source (org-timegrid-block-create
+                  :id 'meeting :day 1 :start 600 :end 690
+                  :title "Meeting" :time-kind 'timed))
+         (org-timegrid--state
+          (org-timegrid--calendar-state-create
+           :week-start 100 :blocks (list source)))
+         (proposal
+          (org-timegrid--proposal
+           '(:surface grid :block-id meeting :day 1 :minute 615)
+           '(:surface rail :day 4 :minute 0)
+           nil))
+         (block (org-timegrid--operation-block proposal)))
+    ;; Merely constructing the hover preview changes no source data.
+    (should (eq (org-timegrid--operation-kind proposal) 'move))
+    (should (eq (org-timegrid-block-time-kind block) 'all-day))
+    (should (= (org-timegrid-block-day block) 4))
+    (should (= (org-timegrid-block-start block) 0))
+    (should (= (org-timegrid-block-end block) 1440))
+    (should (eq (org-timegrid-block-time-kind source) 'timed))
+    (should (= (org-timegrid-block-start source) 600))
+    (should (= (org-timegrid-block-end source) 690))))
+
+(ert-deftest org-timegrid-test-drag-proposal-converts-all-day-to-default-time ()
+  (let* ((source (org-timegrid-block-create
+                  :id 'holiday :day 2 :start 0 :end 1440
+                  :title "Holiday" :time-kind 'all-day))
+         (org-timegrid-default-duration-minutes 45)
+         (org-timegrid--state
+          (org-timegrid--calendar-state-create
+           :week-start 100 :blocks (list source)))
+         (proposal
+          (org-timegrid--proposal
+           '(:surface rail :block-id holiday :day 2 :minute 0)
+           '(:surface grid :day 5 :minute 780)
+           nil))
+         (block (org-timegrid--operation-block proposal)))
+    (should (eq (org-timegrid-block-time-kind block) 'timed))
+    (should (= (org-timegrid-block-day block) 5))
+    (should (= (org-timegrid-block-start block) 780))
+    (should (= (org-timegrid-block-end block) 825))))
+
+(ert-deftest org-timegrid-test-multi-day-drag-to-time-grid-is-rejected ()
+  (let* ((source (org-timegrid-block-create
+                  :id 'trip :day 2 :start 0 :end 2880
+                  :title "Trip" :time-kind 'all-day))
+         (org-timegrid--state
+          (org-timegrid--calendar-state-create
+           :week-start 100 :blocks (list source)))
+         (proposal
+          (org-timegrid--proposal
+           '(:surface rail :block-id trip :day 2 :minute 0)
+           '(:surface grid :day 5 :minute 780)
+           nil)))
+    (should (org-timegrid--operation-error proposal))))
+
+(ert-deftest org-timegrid-test-drag-copy-kinds-remain-distinct ()
+  (let* ((source (org-timegrid-block-create
+                  :id 'meeting :day 1 :start 600 :end 660
+                  :title "Meeting" :time-kind 'timed))
+         (org-timegrid--state
+          (org-timegrid--calendar-state-create
+           :week-start 100 :blocks (list source)))
+         (origin '(:surface grid :block-id meeting :day 1 :minute 615))
+         (target '(:surface grid :day 2 :minute 615)))
+    (should
+     (eq (org-timegrid--operation-kind
+          (org-timegrid--proposal origin target 'duplicate-entry))
+         'duplicate-entry))
+    (should
+     (eq (org-timegrid--operation-kind
+          (org-timegrid--proposal origin target 'add-occurrence))
+         'add-occurrence))))
+
+(ert-deftest org-timegrid-test-yank-selects-entry-identity-semantics ()
+  (let* ((source (org-timegrid-event-create
+                  :id 'source :title "Meeting" :start 100 :end 160
+                  :source 'source-record))
+         (org-timegrid--state
+          (org-timegrid--calendar-state-create
+           :week-start 0
+           :cursor (org-timegrid--cursor-state-create
+                    :surface 'grid :day 2 :minute 600 :lane 0)
+           :cursor-visible t))
+         (org-timegrid--kill
+          (list :title "Meeting" :minutes 60 :all-day nil
+                :event source :target 'source-record :cut nil))
+         targets)
+    (cl-letf (((symbol-function 'org-timegrid--backend-create)
+               (lambda (_title _block _source target) (push target targets)))
+              ((symbol-function 'org-timegrid--reveal-cursor) #'ignore))
+      (org-timegrid-yank)
+      (org-timegrid-yank t)
+      (setq org-timegrid--kill
+            (plist-put org-timegrid--kill :cut t))
+      (org-timegrid-yank))
+    (should (equal (nreverse targets)
+                   '(nil source-record source-record)))))
+
 (provide 'org-timegrid-test)
 ;;; org-timegrid-test.el ends here

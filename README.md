@@ -88,7 +88,8 @@ Run `M-x org-timegrid-week` to open the week containing today.
 | Drag empty space                  | Create an entry for that range        |
 | Drag a block                      | Move it                               |
 | Drag a block's top or bottom edge | Resize it                             |
-| super-drag a block                | Add a copied time to its source entry |
+| super-drag a block                | Duplicate it as an independent entry  |
+| shift-drag a block                | Add another time to its source entry  |
 | Click                             | Put the cursor there                  |
 | Double-click a block              | Visit its Org heading                 |
 | Wheel                             | Scroll the day                        |
@@ -114,13 +115,14 @@ after redraws.
 | `C-g`                     | Hide the cursor                                                                      |
 | `M-down` / `M-up`         | Move the selected block by 15 minutes                                                |
 | `M-right` / `M-left`      | Move the block by one day                                                            |
-| `M-s-right` / `M-s-left`  | Add a copied time to the same entry, one day away                                    |
 | `S-down` / `S-up`         | Move the end time                                                                    |
 | `C-S-up` / `C-S-down`     | Move the start time                                                                  |
 | `t`                       | Enter a new time or range                                                            |
 | `e`                       | Rename the heading                                                                   |
 | `d`, Delete               | Remove its time, then optionally delete the heading                                  |
-| `M-w` / `C-w` / `C-y`     | Copy, cut, or paste block                                    |
+| `M-w`, then `C-y`          | Duplicate the block as an independent entry                  |
+| `C-w`, then `C-y`          | Move the block by cutting and restoring its timestamp        |
+| `C-u C-y`                  | Paste by adding another time to the copied entry              |
 | `u`, `C-/`, `C-x u`       | Undo the last calendar edit                                                          |
 | `:`, `C-c C-q`            | Change the selected entry's tags                                                      |
 | `C-c C-t`                 | Change the selected entry's TODO state                                                |

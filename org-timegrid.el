@@ -173,7 +173,7 @@ half-hour block room for two lines of title."
   "Seconds between visible backend data refreshes."
   :type 'number)
 
-(defcustom org-timegrid-keyboard-commit-delay 0.25
+(defcustom org-timegrid-keyboard-commit-delay 0.65
   "Idle seconds before a keyboard block movement is written to its backend."
   :type 'number)
 
@@ -483,10 +483,14 @@ visible week.  Timed ranges remain clamped to the visible week."
     (setf (org-timegrid-block-preview copy) t)
     copy))
 
-(defun org-timegrid--proposal (origin target copying)
+(defun org-timegrid--proposal (origin target copy-kind)
   "Return a drag proposal from ORIGIN to TARGET.
-COPYING means retain the source block and propose a duplicate."
+COPY-KIND is nil for a move, `duplicate-entry' for an independent copy,
+or `add-occurrence' for another time on the source entry."
   (let* ((id (plist-get origin :block-id))
+         (copying (memq copy-kind '(duplicate-entry add-occurrence)))
+         (origin-surface (or (plist-get origin :surface) 'grid))
+         (target-surface (or (plist-get target :surface) 'grid))
          (origin-day (plist-get origin :day))
          (target-day (plist-get target :day))
          (origin-minute (plist-get origin :minute))
@@ -509,6 +513,32 @@ COPYING means retain the source block and propose a duplicate."
                       "New block" 'blue)))
           (setf (org-timegrid-block-preview block) t)
           (org-timegrid--operation-create :kind 'create :block block))))
+     ((not (eq origin-surface target-surface))
+      (let ((source (org-timegrid--block id)))
+        (cond
+         ((null source)
+          (org-timegrid--operation-create
+           :error "Drag an existing block between the all-day rail and time grid"))
+         ((and (eq origin-surface 'rail)
+               (/= (- (org-timegrid-block-end source)
+                       (org-timegrid-block-start source))
+                   1440))
+          (org-timegrid--operation-create
+           :error "Multi-day blocks cannot move into the time grid"))
+         (t
+          (let* ((block (copy-org-timegrid-block source))
+                 (start (+ (* target-day 1440)
+                           (if (eq target-surface 'rail) 0 target-minute)))
+                 (duration (if (eq target-surface 'rail)
+                               1440
+                             org-timegrid-default-duration-minutes)))
+            (org-timegrid--set-absolute-range block start (+ start duration))
+            (setf (org-timegrid-block-time-kind block)
+                  (if (eq target-surface 'rail) 'all-day 'timed)
+                  (org-timegrid-block-preview block) t)
+            (org-timegrid--operation-create
+             :kind (if copying copy-kind 'move) :block block
+             :replace-id (and (not copying) id)))))))
      (t
       (let ((source (org-timegrid--block id)))
         (if (null source)
@@ -538,7 +568,7 @@ COPYING means retain the source block and propose a duplicate."
                     (max (+ absolute-target org-timegrid-slot-minutes)
                          (+ absolute-start org-timegrid-slot-minutes)))))
              (t
-              (setq kind (if copying 'copy 'move))
+              (setq kind (if copying copy-kind 'move))
               (let* ((grab-offset (- absolute-origin absolute-start))
                      (new-start (max 0 (min (- absolute-target grab-offset)
                                             (- (* 7 1440) duration)))))
@@ -2125,18 +2155,26 @@ reset the horizontal origin.  Add the tile offset to glyph-relative Y."
                           org-timegrid--geometry))
              (edge (and geometry
                         (org-timegrid--edge-at geometry y))))
-        (list :block-id (plist-get geometry :id)
+        (list :surface 'grid :block-id (plist-get geometry :id)
               :day day :minute minute :edge edge)))))
 
 (defun org-timegrid--set-preview (proposal)
   "Display PROPOSAL without committing it."
-  (let ((preview (and proposal (not (org-timegrid--operation-error proposal)) proposal)))
+  (let* ((old (org-timegrid--calendar-state-preview org-timegrid--state))
+         (preview (and proposal (not (org-timegrid--operation-error proposal)) proposal))
+         (old-all-day (and old (org-timegrid-block-all-day-p
+                                (org-timegrid--operation-block old))))
+         (new-all-day (and preview (org-timegrid-block-all-day-p
+                                    (org-timegrid--operation-block preview)))))
     (unless (equal preview (org-timegrid--calendar-state-preview org-timegrid--state))
       (setf (org-timegrid--calendar-state-preview org-timegrid--state) preview)
-      (if (and preview
-               (org-timegrid-block-all-day-p
-                (org-timegrid--operation-block preview)))
-          (org-timegrid--render-header-dynamic)
+      (if (eq old-all-day new-all-day)
+          (if new-all-day
+              (org-timegrid--render-header-dynamic)
+            (org-timegrid--render-dynamic t))
+        ;; A cross-surface preview removes the source from one canvas and
+        ;; paints it on the other, so both dynamic layers must be refreshed.
+        (org-timegrid--render-header-dynamic)
         (org-timegrid--render-dynamic t)))))
 
 (defun org-timegrid--clear-preview ()
@@ -2315,13 +2353,15 @@ cut wants: the entry has to survive for the yank to copy it."
         (unless (string-empty-p (car entry))
           (org-timegrid--backend-create
            (car entry) block nil (cdr entry)))))
-     ((eq kind 'copy)
+     ((memq kind '(duplicate-entry add-occurrence))
       (setf (org-timegrid--calendar-state-preview org-timegrid--state) nil)
       (let ((source (org-timegrid--block (org-timegrid-block-id block))))
         (org-timegrid--backend-create
          (org-timegrid-block-title source) block
          (org-timegrid-block-event source)
-         (org-timegrid-event-source (org-timegrid-block-event source)))))
+         (and (eq kind 'add-occurrence)
+              (org-timegrid-event-source
+               (org-timegrid-block-event source))))))
      ((memq kind '(move resize))
       (setf (org-timegrid--calendar-state-preview org-timegrid--state) nil
             (org-timegrid-block-preview block) nil)
@@ -2366,13 +2406,27 @@ selects nothing.  The mouse and the keyboard drive one shared cursor."
                      (<= (plist-get item :y) y
                          (+ (plist-get item :y) (plist-get item :height)))))
               org-timegrid--header-geometry)))
-        (list :id (plist-get geometry :id)
+        (list :surface 'rail
+              :id (plist-get geometry :id)
+              :block-id (plist-get geometry :id)
               :day (min 6 (max 0 (floor
                                   (/ (- x left-offset
                                         org-timegrid--label-width)
                                      column-width))))
+              :minute 0
               :lane (max 0 (floor (/ (- y org-timegrid--rail-top)
                                      org-timegrid-all-day-lane-height))))))))
+
+(defun org-timegrid--mouse-position-xy (position)
+  "Return comparable POSITION coordinates across the rail and time grid."
+  (let ((xy (or (posn-x-y position) (posn-object-x-y position))))
+    (and xy (list (posn-area position) (car xy) (cdr xy)))))
+
+(defun org-timegrid--mouse-target (position)
+  "Return calendar metadata for POSITION on either mouse surface."
+  (if (eq (posn-area position) 'header-line)
+      (org-timegrid--header-target position)
+    (org-timegrid--target position)))
 
 (defun org-timegrid-header-click (event)
   "Move the shared calendar cursor to all-day rail mouse EVENT."
@@ -2434,14 +2488,18 @@ CLICK-FUNCTION handles a press that never becomes a drag."
           (let* ((position (event-end next))
                  (xy (funcall position-function position))
                  (target (funcall target-function position)))
-            (when (and origin-xy xy target (not (equal origin-xy xy)))
+            (when (and origin-xy xy (not (equal origin-xy xy)))
               (setq dragged t
                     end-target target)
-              (org-timegrid--set-preview
-               (funcall proposal-function origin end-target)))))
+              (if target
+                  (org-timegrid--set-preview
+                   (funcall proposal-function origin end-target))
+                (org-timegrid--clear-preview)))))
          ((memq basic '(mouse-1 drag-mouse-1))
-          (setq end-target
-                (or (funcall target-function (event-end next)) end-target)
+          ;; Commit only the cell under the actual release.  In particular,
+          ;; do not retain a destructive cross-surface hover after the mouse
+          ;; has left the calendar.
+          (setq end-target (funcall target-function (event-end next))
                 finished t))
          ((eq basic 'switch-frame))
          (t
@@ -2463,6 +2521,9 @@ Pressing an existing block retains ordinary click-to-select behavior."
   (when mark-active (deactivate-mark))
   (let* ((origin-position (event-start event))
          (origin (org-timegrid--header-target origin-position))
+         (modifiers (event-modifiers event))
+         (copy-kind (cond ((memq 'super modifiers) 'duplicate-entry)
+                          ((memq 'shift modifiers) 'add-occurrence)))
          (creator (and org-timegrid--backend
                        (org-timegrid-backend-create-function
                         org-timegrid--backend))))
@@ -2470,7 +2531,24 @@ Pressing an existing block retains ordinary click-to-select behavior."
      ((null origin)
       (message "Press inside an all-day cell"))
      ((plist-get origin :id)
-      (org-timegrid-header-click (list 'mouse-1 origin-position)))
+      (let ((callback
+             (and org-timegrid--backend
+                  (if copy-kind
+                      (org-timegrid-backend-create-function
+                       org-timegrid--backend)
+                    (org-timegrid-backend-update-function
+                     org-timegrid--backend)))))
+        (if (not (functionp callback))
+            (progn
+              (org-timegrid-header-click (list 'mouse-1 origin-position))
+              (message "Unsupported drag"))
+          (org-timegrid--track-drag-gesture
+           event
+           #'org-timegrid--mouse-position-xy
+           #'org-timegrid--mouse-target
+           (lambda (from to) (org-timegrid--proposal from to copy-kind))
+           (lambda (position)
+             (org-timegrid-header-click (list 'mouse-1 position)))))))
      ((not (functionp creator))
       (org-timegrid-header-click (list 'mouse-1 origin-position))
       (message "This backend cannot create calendar entries"))
@@ -2523,16 +2601,19 @@ Leave the first non-motion event for the gesture loop to process."
     latest))
 
 (defun org-timegrid-press (event)
-  "Track a complete create, move, copy, or resize gesture from EVENT."
+  "Track a complete create, move, duplicate, occurrence, or resize gesture."
   (interactive "@e")
   (when mark-active (deactivate-mark))
   (let* ((origin-position (event-start event))
          (origin (org-timegrid--target origin-position))
-         ;; Super, which is the Option key under the usual macOS mapping.
-         (copying (memq 'super (event-modifiers event)))
+         (modifiers (event-modifiers event))
+         ;; Super, which is the Option key under the usual macOS mapping,
+         ;; makes an independent entry.  Shift retains the source entry.
+         (copy-kind (cond ((memq 'super modifiers) 'duplicate-entry)
+                          ((memq 'shift modifiers) 'add-occurrence)))
          (required-callback
           (and org-timegrid--backend
-               (if (or copying (null (plist-get origin :block-id)))
+               (if (or copy-kind (null (plist-get origin :block-id)))
                    (org-timegrid-backend-create-function
                     org-timegrid--backend)
                  (org-timegrid-backend-update-function
@@ -2544,10 +2625,10 @@ Leave the first non-motion event for the gesture loop to process."
           (message "Unsupported drag"))
       (org-timegrid--track-drag-gesture
        event
-       #'org-timegrid--position-image-xy
-       #'org-timegrid--target
+       #'org-timegrid--mouse-position-xy
+       #'org-timegrid--mouse-target
        (lambda (from to)
-         (org-timegrid--proposal from to copying))
+         (org-timegrid--proposal from to copy-kind))
        (lambda (position)
          (org-timegrid-click (list 'mouse-1 position)))))))
 
@@ -3341,7 +3422,8 @@ time-grid cells prompt for the timed duration as usual."
   "Plist describing the most recently copied block.
 Holds :title, :minutes, :all-day, and the opaque :event needed to
 reproduce the entry's content.  :target is the backend record to which a
-yank adds the copied timestamp.")
+yank with a prefix adds the copied timestamp.  :cut records whether the
+source timestamp was removed and must therefore be restored on yank.")
 
 (defun org-timegrid-copy-selected ()
   "Copy the selected block for a later yank."
@@ -3352,6 +3434,7 @@ yank adds the copied timestamp.")
                 :minutes (- (org-timegrid-block-end block) (org-timegrid-block-start block))
                 :all-day (and (org-timegrid-block-all-day-p block) t)
                 :event (org-timegrid-block-event block)
+                :cut nil
                 :target (org-timegrid-event-source
                          (org-timegrid-block-event block))))
     (message "Copied %s" (org-timegrid-block-title block))))
@@ -3368,15 +3451,17 @@ backend record instead of duplicating that record."
                 :minutes (- (org-timegrid-block-end block) (org-timegrid-block-start block))
                 :all-day (and (org-timegrid-block-all-day-p block) t)
                 :event event
+                :cut t
                 :target (org-timegrid-event-source event)))
     (org-timegrid-remove-selected t)
     (message "Cut %s" (org-timegrid-block-title block))))
 
-(defun org-timegrid-yank ()
+(defun org-timegrid-yank (&optional add-occurrence)
   "Yank the most recently copied or cut block at the cursor.
-The new timestamp is added to the backend record from which the block
-was copied or cut."
-  (interactive)
+Ordinarily a copied block becomes an independent backend entry.  With a
+prefix argument ADD-OCCURRENCE, add its timestamp to the original entry
+instead.  A cut block always returns to its original entry."
+  (interactive "P")
   (unless org-timegrid--kill
     (user-error "Nothing to yank; select a block and press M-w or C-w"))
   (org-timegrid--reveal-cursor)
@@ -3399,7 +3484,8 @@ was copied or cut."
     (org-timegrid--backend-create
      (plist-get org-timegrid--kill :title) block
      (plist-get org-timegrid--kill :event)
-     (plist-get org-timegrid--kill :target))))
+     (and (or add-occurrence (plist-get org-timegrid--kill :cut))
+          (plist-get org-timegrid--kill :target)))))
 
 ;;; Keyboard re-timing
 
@@ -3589,15 +3675,21 @@ where it was left.  Only an explicit refresh forgets it."
                 #'org-timegrid-press)
     (define-key map [s-down-mouse-1]
                 #'org-timegrid-press)
+    (define-key map [S-down-mouse-1]
+                #'org-timegrid-press)
     (define-key map [mouse-1] #'org-timegrid-click)
     (define-key map [double-mouse-1] #'org-timegrid-visit)
     (define-key map [header-line mouse-1] #'org-timegrid-header-click)
     (define-key map [header-line down-mouse-1] #'org-timegrid-header-press)
+    (define-key map [header-line s-down-mouse-1] #'org-timegrid-header-press)
+    (define-key map [header-line S-down-mouse-1] #'org-timegrid-header-press)
     (define-key map [header-line double-mouse-1] #'org-timegrid-header-visit)
     (dolist (area '(calendar-block calendar-resize))
       (define-key map (vector area 'down-mouse-1)
                   #'org-timegrid-press)
       (define-key map (vector area 's-down-mouse-1)
+                  #'org-timegrid-press)
+      (define-key map (vector area 'S-down-mouse-1)
                   #'org-timegrid-press)
       (define-key map (vector area 'mouse-1)
                   #'org-timegrid-click)
@@ -3661,10 +3753,6 @@ where it was left.  Only an explicit refresh forgets it."
     (keymap-set map "M-<up>" #'org-timegrid-move-earlier)
     (keymap-set map "M-<right>" #'org-timegrid-move-next-day)
     (keymap-set map "M-<left>" #'org-timegrid-move-previous-day)
-    ;; Super is Option under the usual macOS mapping, as it is for a
-    ;; duplicating drag, so the copy gesture reads the same either way.
-    (keymap-set map "M-s-<right>" #'org-timegrid-copy-to-next-day)
-    (keymap-set map "M-s-<left>" #'org-timegrid-copy-to-previous-day)
     (keymap-set map "S-<down>" #'org-timegrid-grow-end)
     (keymap-set map "S-<up>" #'org-timegrid-shrink-end)
     (keymap-set map "C-S-<up>" #'org-timegrid-grow-start)
@@ -3691,17 +3779,30 @@ where it was left.  Only an explicit refresh forgets it."
 (keymap-set org-timegrid-mode-map "M-<up>" #'org-timegrid-move-earlier)
 (keymap-set org-timegrid-mode-map "M-<right>" #'org-timegrid-move-next-day)
 (keymap-set org-timegrid-mode-map "M-<left>" #'org-timegrid-move-previous-day)
-(keymap-set org-timegrid-mode-map "M-s-<right>" #'org-timegrid-copy-to-next-day)
-(keymap-set org-timegrid-mode-map "M-s-<left>" #'org-timegrid-copy-to-previous-day)
+(keymap-unset org-timegrid-mode-map "M-s-<right>" t)
+(keymap-unset org-timegrid-mode-map "M-s-<left>" t)
 (keymap-set org-timegrid-mode-map "S-<right>" #'org-timegrid-grow-all-day-end)
 (keymap-set org-timegrid-mode-map "S-<left>" #'org-timegrid-shrink-all-day-end)
 (keymap-set org-timegrid-mode-map "C-S-<left>" #'org-timegrid-grow-all-day-start)
 (keymap-set org-timegrid-mode-map "C-S-<right>" #'org-timegrid-shrink-all-day-start)
 ;; These live outside the `defvar' initializer so evaluating an updated
 ;; package installs them in an already-running Emacs as well.
+(define-key org-timegrid-mode-map [s-down-mouse-1]
+            #'org-timegrid-press)
+(define-key org-timegrid-mode-map [S-down-mouse-1]
+            #'org-timegrid-press)
+(dolist (area '(calendar-block calendar-resize))
+  (define-key org-timegrid-mode-map (vector area 's-down-mouse-1)
+              #'org-timegrid-press)
+  (define-key org-timegrid-mode-map (vector area 'S-down-mouse-1)
+              #'org-timegrid-press))
 (define-key org-timegrid-mode-map [header-line mouse-1]
             #'org-timegrid-header-click)
 (define-key org-timegrid-mode-map [header-line down-mouse-1]
+            #'org-timegrid-header-press)
+(define-key org-timegrid-mode-map [header-line s-down-mouse-1]
+            #'org-timegrid-header-press)
+(define-key org-timegrid-mode-map [header-line S-down-mouse-1]
             #'org-timegrid-header-press)
 (define-key org-timegrid-mode-map [header-line double-mouse-1]
             #'org-timegrid-header-visit)
