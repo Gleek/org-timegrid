@@ -262,5 +262,34 @@
     (should (equal (nreverse targets)
                    '(nil source-record source-record)))))
 
+(ert-deftest org-timegrid-test-date-picker-groups-events-by-visible-day ()
+  (let ((events (list
+                 (org-timegrid-event-create
+                  :id 'blue :title "Blue" :start (* 101 1440)
+                  :end (+ (* 101 1440) 60) :color 'blue)
+                 (org-timegrid-event-create
+                  :id 'also-blue :title "Also blue" :start (* 101 1440)
+                  :end (+ (* 101 1440) 120) :color 'blue)
+                 (org-timegrid-event-create
+                  :id 'trip :title "Trip" :start (* 102 1440)
+                  :end (* 105 1440) :color 'green))))
+    (let* ((backend (org-timegrid-backend-create
+                     :name "Test"
+                     :list-function (lambda (_start _end) events)))
+           (days (org-timegrid-calendar--events-by-day backend 100 104)))
+      (should (eq (gethash 101 days) t))
+      (should (eq (gethash 102 days) t))
+      (should (eq (gethash 103 days) t))
+      (should-not (gethash 104 days)))
+    (let* ((org-timegrid-calendar-event-predicate
+            (lambda (event) (eq (org-timegrid-event-id event) 'trip)))
+           (backend (org-timegrid-backend-create
+                     :name "Filtered test"
+                     :list-function (lambda (_start _end) events)))
+           (days (org-timegrid-calendar--events-by-day backend 100 104)))
+      (should-not (gethash 101 days))
+      (should (eq (gethash 102 days) t))
+      (should (eq (gethash 103 days) t)))))
+
 (provide 'org-timegrid-test)
 ;;; org-timegrid-test.el ends here

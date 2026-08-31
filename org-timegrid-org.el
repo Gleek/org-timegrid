@@ -44,6 +44,7 @@
 ;; loaded, not autoloaded.  There is no cycle: `org-timegrid.el' never
 ;; requires Org.
 (require 'org-timegrid)
+(require 'org-timegrid-calendar)
 
 (defgroup org-timegrid-org nil
   "Org data support for `org-timegrid'."
@@ -1156,9 +1157,10 @@ it.  DURATION is unused because only a typed range can supply one here."
          (date (calendar-gregorian-from-absolute day))
          (default-time (encode-time 0 (% minute 60) (/ minute 60)
                                     (nth 1 date) (nth 0 date) (nth 2 date)))
-         (prefill (format-time-string "%Y-%m-%d %H:%M" default-time))
          (org-end-time-was-given nil)
-         (answer (org-read-date t nil nil "Time" default-time prefill))
+         (answer (org-timegrid-calendar-read-date
+                  org-timegrid-org-backend t nil nil "Time"
+                  default-time))
          (parsed (org-parse-time-string answer))
          (clock (+ (* 60 (nth 2 parsed)) (nth 1 parsed)))
          (start (+ (* 1440 (calendar-absolute-from-gregorian

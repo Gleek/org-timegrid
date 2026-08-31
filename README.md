@@ -187,6 +187,23 @@ shades an edge only when an event continues beyond the visible window.
 `org-timegrid-day-image` draws a chosen minute range as an SVG image. Neither
 function needs a calendar buffer.
 
+### Org date picker
+
+The standard Calendar opened by `org-read-date` shows dates containing events
+in bold coloured text.  The Org backend enables this by default for the `j`
+date prompt.  Other backends can reuse the integration directly:
+
+```elisp
+(require 'org-timegrid-calendar)
+(org-timegrid-calendar-read-date backend t nil nil "Time" default-time)
+```
+
+Calendar still owns its buffer, navigation, and selection; the integration
+only adds standard temporary Calendar marks while the prompt is active.  Set
+`org-timegrid-calendar-highlight-dates` to nil to disable them.  Customize
+`org-timegrid-calendar-event-face` to change their appearance, or set
+`org-timegrid-calendar-event-predicate` to choose which backend events count.
+
 ## Colours
 
 The grid, text, cursor, and backgrounds use the current Emacs theme. Images
