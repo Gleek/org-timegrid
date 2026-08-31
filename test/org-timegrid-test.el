@@ -219,6 +219,34 @@
       (should (equal (plist-get (nth 2 (car map)) 'pointer) 'hdrag))
       (should (equal (plist-get (nth 2 (cadr map)) 'pointer) 'hdrag)))))
 
+(ert-deftest org-timegrid-test-rail-image-map-areas-retain-surface-ownership ()
+  ;; Rendering a drag preview changes the hotspot beneath the pointer.  These
+  ;; must all remain the same logical surface or the preview oscillates
+  ;; between the rail and grid and an existing-block drag can become create.
+  (dolist (area '(header-line calendar-rail-block calendar-rail-resize))
+    (should (org-timegrid--rail-area-p area)))
+  (dolist (area '(nil calendar-block calendar-resize))
+    (should-not (org-timegrid--rail-area-p area))))
+
+(ert-deftest org-timegrid-test-cross-surface-preview-does-not-resize-drag-rail ()
+  (let* ((source (org-timegrid-block-create
+                  :id 'meeting :day 1 :start 600 :end 660
+                  :title "Meeting" :time-kind 'timed))
+         (org-timegrid--state
+          (org-timegrid--calendar-state-create
+           :week-start 100 :blocks (list source)))
+         (org-timegrid--drag-rail-rows
+          (org-timegrid--rail-row-count (org-timegrid--all-day-layout))))
+    (should (= org-timegrid--drag-rail-rows 1))
+    (setf (org-timegrid--calendar-state-preview org-timegrid--state)
+          (org-timegrid--proposal
+           '(:surface grid :block-id meeting :day 1 :minute 615)
+           '(:surface rail :day 4 :minute 0) nil))
+    ;; The preview now needs an event row plus the usual empty row, but the
+    ;; active gesture retains the one-row coordinate system it began with.
+    (should (= (org-timegrid--rail-row-count (org-timegrid--all-day-layout)) 2))
+    (should (= org-timegrid--drag-rail-rows 1))))
+
 (ert-deftest org-timegrid-test-drag-copy-kinds-remain-distinct ()
   (let* ((source (org-timegrid-block-create
                   :id 'meeting :day 1 :start 600 :end 660

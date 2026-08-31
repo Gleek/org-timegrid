@@ -191,6 +191,8 @@ half-hour block room for two lines of title."
   (+ org-timegrid--header-title-height org-timegrid--header-date-height))
 (defvar-local org-timegrid--geometry nil)
 (defvar-local org-timegrid--header-geometry nil)
+(defvar-local org-timegrid--drag-rail-rows nil
+  "Rail row count frozen for the duration of the current mouse gesture.")
 (defvar-local org-timegrid--rendered-ui nil)
 (defvar org-timegrid--header-map
   (let ((map (make-sparse-keymap)))
@@ -1627,6 +1629,15 @@ The ordering favours earlier and longer spans, then title and identity."
               (org-timegrid-block-rail-lane block) lane)
         (push block result)))))
 
+(defun org-timegrid--rail-row-count (layout)
+  "Return the visible rail row count needed for all-day LAYOUT.
+The final row is intentionally empty and can hold a cross-surface preview."
+  (let ((highest-lane (if layout
+                          (apply #'max
+                                 (mapcar #'org-timegrid-block-rail-lane layout))
+                        -1)))
+    (1+ (min org-timegrid-all-day-max-lanes (1+ highest-lane)))))
+
 (defun org-timegrid--draw-all-day-block
     (svg block left-offset column-width top palette font-family)
   "Draw one laid-out all-day BLOCK into SVG rail at TOP."
@@ -1776,16 +1787,9 @@ Sunday-starting calendar begins one day before the corresponding ISO week."
           (max 560 (org-timegrid--window-width)))
          (width (+ left-offset canvas-width))
          (all-day (org-timegrid--all-day-layout))
-         (highest-lane (if all-day
-                           (apply #'max (mapcar (lambda (block)
-                                                 (org-timegrid-block-rail-lane block))
-                                               all-day))
-                         -1))
-         (event-rows (min org-timegrid-all-day-max-lanes
-                          (1+ highest-lane)))
-         ;; One final row is intentionally empty: it is the future keyboard
-         ;; cursor/creation lane and keeps the rail visually discoverable.
-         (rail-rows (1+ event-rows))
+         (rail-rows (or org-timegrid--drag-rail-rows
+                        (org-timegrid--rail-row-count all-day)))
+         (event-rows (1- rail-rows))
          (height (+ org-timegrid--rail-top
                     (* rail-rows org-timegrid-all-day-lane-height)))
          (column-width (/ (- canvas-width
@@ -2477,11 +2481,22 @@ selects nothing.  The mouse and the keyboard drive one shared cursor."
 (defun org-timegrid--mouse-position-xy (position)
   "Return comparable POSITION coordinates across the rail and time grid."
   (let ((xy (or (posn-x-y position) (posn-object-x-y position))))
-    (and xy (list (posn-area position) (car xy) (cdr xy)))))
+    (and xy (list (org-timegrid--mouse-surface position)
+                  (car xy) (cdr xy)))))
+
+(defun org-timegrid--rail-area-p (area)
+  "Return non-nil when mouse AREA belongs to the all-day rail.
+Image-map hotspots replace `header-line' in `posn-area', so all of the
+rail's area names must be treated as one stable surface during a drag."
+  (memq area '(header-line calendar-rail-block calendar-rail-resize)))
+
+(defun org-timegrid--mouse-surface (position)
+  "Return the stable calendar surface containing mouse POSITION."
+  (if (org-timegrid--rail-area-p (posn-area position)) 'rail 'grid))
 
 (defun org-timegrid--mouse-target (position)
   "Return calendar metadata for POSITION on either mouse surface."
-  (if (eq (posn-area position) 'header-line)
+  (if (eq (org-timegrid--mouse-surface position) 'rail)
       (org-timegrid--header-target position)
     (org-timegrid--target position)))
 
@@ -2533,6 +2548,13 @@ CLICK-FUNCTION handles a press that never becomes a drag."
   (let* ((origin-position (event-start event))
          (origin (funcall target-function origin-position))
          (origin-xy (funcall position-function origin-position))
+         ;; Cross-surface previews add to or remove from the all-day layout.
+         ;; Letting that resize the sticky header moves the grid/rail boundary
+         ;; beneath the held pointer and makes hit-testing oscillate.  The
+         ;; rail's intentional empty row is enough preview space, so preserve
+         ;; the initial coordinate system until release.
+         (org-timegrid--drag-rail-rows
+          (org-timegrid--rail-row-count (org-timegrid--all-day-layout)))
          (end-target origin)
          dragged finished next basic)
     (track-mouse
