@@ -184,6 +184,41 @@
            nil)))
     (should (org-timegrid--operation-error proposal))))
 
+(ert-deftest org-timegrid-test-all-day-edge-drag-resizes-by-whole-days ()
+  (let* ((source (org-timegrid-block-create
+                  :id 'trip :day 1 :start 0 :end 4320
+                  :title "Trip" :time-kind 'all-day))
+         (org-timegrid--state
+          (org-timegrid--calendar-state-create
+           :week-start 100 :blocks (list source)))
+         (start-proposal
+          (org-timegrid--proposal
+           '(:surface rail :block-id trip :day 1 :minute 0 :edge top)
+           '(:surface rail :day 2 :minute 0)
+           nil))
+         (end-proposal
+          (org-timegrid--proposal
+           '(:surface rail :block-id trip :day 1 :minute 0 :edge bottom)
+           '(:surface rail :day 5 :minute 0)
+           nil))
+         (start-block (org-timegrid--operation-block start-proposal))
+         (end-block (org-timegrid--operation-block end-proposal)))
+    (should (eq (org-timegrid--operation-kind start-proposal) 'resize))
+    (should (= (org-timegrid-block-day start-block) 2))
+    (should (= (org-timegrid-block-end start-block) 2880))
+    (should (eq (org-timegrid--operation-kind end-proposal) 'resize))
+    (should (= (org-timegrid-block-day end-block) 1))
+    (should (= (org-timegrid-block-end end-block) 7200))))
+
+(ert-deftest org-timegrid-test-all-day-edge-hotspots-use-horizontal-drag ()
+  (let ((org-timegrid--header-geometry
+         '((:id trip :x 100 :y 50 :width 200 :height 18
+                :allow-left t :allow-right t))))
+    (let ((map (org-timegrid--header-image-map)))
+      (should (= (length map) 3))
+      (should (equal (plist-get (nth 2 (car map)) 'pointer) 'hdrag))
+      (should (equal (plist-get (nth 2 (cadr map)) 'pointer) 'hdrag)))))
+
 (ert-deftest org-timegrid-test-drag-copy-kinds-remain-distinct ()
   (let* ((source (org-timegrid-block-create
                   :id 'meeting :day 1 :start 600 :end 660

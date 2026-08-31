@@ -214,6 +214,13 @@ half-hour block room for two lines of title."
             #'org-timegrid-header-click)
 (define-key org-timegrid--header-map [header-line double-mouse-1]
             #'org-timegrid-header-visit)
+(dolist (area '(calendar-rail-block calendar-rail-resize))
+  (define-key org-timegrid--header-map (vector area 'down-mouse-1)
+              #'org-timegrid-header-press)
+  (define-key org-timegrid--header-map (vector area 'mouse-1)
+              #'org-timegrid-header-click)
+  (define-key org-timegrid--header-map (vector area 'double-mouse-1)
+              #'org-timegrid-header-visit))
 (defvar-local org-timegrid--image-height nil)
 (defvar-local org-timegrid--last-width nil)
 (defvar-local org-timegrid--pointer-overlay nil)
@@ -553,27 +560,30 @@ or `add-occurrence' for another time on the source entry."
                  (absolute-origin (+ (* origin-day 1440) origin-minute))
                  (absolute-target (+ (* target-day 1440) target-minute))
                  kind)
-            (cond
+            (let ((unit (if (eq origin-surface 'rail)
+                            1440
+                          org-timegrid-slot-minutes)))
+              (cond
              ((and (eq edge 'top) (not copying))
               (setq kind 'resize)
               (org-timegrid--set-absolute-range
                block (max 0 (min absolute-target
-                                 (- absolute-end org-timegrid-slot-minutes)))
+                                 (- absolute-end unit)))
                absolute-end))
              ((and (eq edge 'bottom) (not copying))
               (setq kind 'resize)
               (org-timegrid--set-absolute-range
                block absolute-start
                (min (* 7 1440)
-                    (max (+ absolute-target org-timegrid-slot-minutes)
-                         (+ absolute-start org-timegrid-slot-minutes)))))
+                    (max (+ absolute-target unit)
+                         (+ absolute-start unit)))))
              (t
               (setq kind (if copying copy-kind 'move))
               (let* ((grab-offset (- absolute-origin absolute-start))
                      (new-start (max 0 (min (- absolute-target grab-offset)
                                             (- (* 7 1440) duration)))))
                 (org-timegrid--set-absolute-range
-                 block new-start (+ new-start duration)))))
+                 block new-start (+ new-start duration))))))
             (setf (org-timegrid-block-preview block) t)
             (org-timegrid--operation-create
              :kind kind :block block
@@ -1674,7 +1684,51 @@ The ordering favours earlier and longer spans, then title and identity."
                 :font-size 10 :font-weight "600" :font-family font-family
                 :fill (plist-get palette :foreground)))
     (list :id (org-timegrid-block-id block) :lane (org-timegrid-block-rail-lane block)
-          :x x :y y :width (- right x) :height height)))
+          :x x :y y :width (- right x) :height height
+          :allow-left (not leftp) :allow-right (not rightp))))
+
+(defun org-timegrid--rail-edge-at (geometry x)
+  "Return resize endpoint for rail GEOMETRY at horizontal pixel X.
+The operation model calls the start and end endpoints `top' and `bottom';
+the rail presents those same endpoints as its left and right edges."
+  (let* ((left (plist-get geometry :x))
+         (right (+ left (plist-get geometry :width)))
+         (edge (min org-timegrid-edge-pixels
+                    (max 1 (/ (plist-get geometry :width) 2.0)))))
+    (cond ((and (plist-get geometry :allow-left)
+                (<= left x (+ left edge)))
+           'top)
+          ((and (plist-get geometry :allow-right)
+                (<= (- right edge) x right))
+           'bottom))))
+
+(defun org-timegrid--header-image-map ()
+  "Return move and horizontal-resize hotspots for all-day blocks."
+  (let (edges bodies)
+    (dolist (geometry org-timegrid--header-geometry)
+      (let* ((x (round (plist-get geometry :x)))
+             (y (round (plist-get geometry :y)))
+             (right (round (+ (plist-get geometry :x)
+                              (plist-get geometry :width))))
+             (bottom (round (+ (plist-get geometry :y)
+                               (plist-get geometry :height))))
+             (edge (min org-timegrid-edge-pixels
+                        (max 1 (floor (/ (- right x) 2.0))))))
+        (when (plist-get geometry :allow-left)
+          (push (list `(rect . ((,x . ,y) . (,(+ x edge) . ,bottom)))
+                      'calendar-rail-resize
+                      '(pointer hdrag help-echo "Drag to change the first day"))
+                edges))
+        (when (plist-get geometry :allow-right)
+          (push (list `(rect . ((,(- right edge) . ,y) . (,right . ,bottom)))
+                      'calendar-rail-resize
+                      '(pointer hdrag help-echo "Drag to change the last day"))
+                edges))
+        (push (list `(rect . ((,x . ,y) . (,right . ,bottom)))
+                    'calendar-rail-block
+                    '(pointer hand help-echo "Drag to move; double-click to open"))
+              bodies)))
+    (append edges bodies)))
 
 (defun org-timegrid--header-month-parts (week-start)
   "Return the visible month title for WEEK-START as (PRIMARY SECONDARY).
@@ -1856,13 +1910,15 @@ Sunday-starting calendar begins one day before the corresponding ISO week."
     (svg-line svg 0 (1- height) width (1- height)
               :stroke (plist-get palette :grid) :stroke-width 1)
     (setq-local org-timegrid--header-geometry geometry)
-    (propertize " "
+    (let ((map (org-timegrid--header-image-map)))
+      (propertize " "
                 ;; Header lines still use text baseline metrics for images.
                 ;; With zero ascent Emacs reserves a full text ascent above
                 ;; the SVG, which appears as an unexplained blank strip.
-                'display (svg-image svg :ascent 100)
+                'display (svg-image svg :ascent 100 :scale 1
+                                    :map map :original-map map)
                 'keymap org-timegrid--header-map
-                'help-echo "Click to select an all-day cell or event")))
+                'help-echo "Click to select an all-day cell or event"))))
 
 (defun org-timegrid--edge-height (geometry)
   "Return the pixel resize-zone height for GEOMETRY."
@@ -1913,7 +1969,7 @@ leave no central move target."
            (boundary-edge
             (push (list `(rect . ((,x . ,y) . (,right . ,bottom)))
                         'calendar-resize
-                        `(pointer vdrag
+                        `(pointer nhdrag
                                   help-echo ,(if (eq boundary-edge 'top)
                                                  "Drag into this day to change the start time"
                                                "Drag into this day to change the end time")))
@@ -1923,13 +1979,13 @@ leave no central move target."
               (push (list `(rect . ((,x . ,(max 0 (- y slop)))
                                     . (,right . ,(+ y edge))))
                           'calendar-resize
-                          '(pointer vdrag help-echo "Drag to change the start time"))
+                          '(pointer nhdrag help-echo "Drag to change the start time"))
                     edges))
             (when (plist-get geometry :allow-bottom)
               (push (list `(rect . ((,x . ,(- bottom edge))
                                     . (,right . ,(+ bottom slop))))
                           'calendar-resize
-                          '(pointer vdrag help-echo "Drag to change the end time"))
+                          '(pointer nhdrag help-echo "Drag to change the end time"))
                     edges))
             (push (list `(rect . ((,x . ,y) . (,right . ,bottom)))
                         'calendar-block
@@ -2409,6 +2465,7 @@ selects nothing.  The mouse and the keyboard drive one shared cursor."
         (list :surface 'rail
               :id (plist-get geometry :id)
               :block-id (plist-get geometry :id)
+              :edge (and geometry (org-timegrid--rail-edge-at geometry x))
               :day (min 6 (max 0 (floor
                                   (/ (- x left-offset
                                         org-timegrid--label-width)
@@ -2640,13 +2697,17 @@ Leave the first non-motion event for the gesture loop to process."
     (when (windowp window)
       (with-current-buffer (window-buffer window)
         (let* ((target (org-timegrid--target position))
-               (shape (cond ((plist-get target :edge) 'vdrag)
+               (shape (cond ((plist-get target :edge) 'nhdrag)
                             ((plist-get target :block-id) 'hand)))
                (point (posn-point position)))
           (when (integer-or-marker-p point)
             (unless (overlayp org-timegrid--pointer-overlay)
               (setq-local org-timegrid--pointer-overlay
                           (make-overlay point (1+ point))))
+            ;; Each hour tile is a separate display glyph.  Keeping this
+            ;; overlay on the first tile visited makes its pointer property
+            ;; appear to work only after unrelated selection redraws.
+            (move-overlay org-timegrid--pointer-overlay point (1+ point))
             (overlay-put org-timegrid--pointer-overlay
                          'pointer shape)
             (force-window-update window)))))))
@@ -3679,6 +3740,7 @@ where it was left.  Only an explicit refresh forgets it."
                 #'org-timegrid-press)
     (define-key map [mouse-1] #'org-timegrid-click)
     (define-key map [double-mouse-1] #'org-timegrid-visit)
+    (define-key map [mouse-movement] #'org-timegrid-pointer-feedback)
     (define-key map [header-line mouse-1] #'org-timegrid-header-click)
     (define-key map [header-line down-mouse-1] #'org-timegrid-header-press)
     (define-key map [header-line s-down-mouse-1] #'org-timegrid-header-press)
@@ -3695,6 +3757,8 @@ where it was left.  Only an explicit refresh forgets it."
                   #'org-timegrid-click)
       (define-key map (vector area 'double-mouse-1)
                   #'org-timegrid-visit)
+      (define-key map (vector area 'mouse-movement)
+                  #'org-timegrid-pointer-feedback)
       (dolist (wheel '(wheel-up double-wheel-up triple-wheel-up))
         (define-key map (vector area wheel)
                     #'org-timegrid-wheel-up))
@@ -3795,7 +3859,11 @@ where it was left.  Only an explicit refresh forgets it."
   (define-key org-timegrid-mode-map (vector area 's-down-mouse-1)
               #'org-timegrid-press)
   (define-key org-timegrid-mode-map (vector area 'S-down-mouse-1)
-              #'org-timegrid-press))
+              #'org-timegrid-press)
+  (define-key org-timegrid-mode-map (vector area 'mouse-movement)
+              #'org-timegrid-pointer-feedback))
+(define-key org-timegrid-mode-map [mouse-movement]
+            #'org-timegrid-pointer-feedback)
 (define-key org-timegrid-mode-map [header-line mouse-1]
             #'org-timegrid-header-click)
 (define-key org-timegrid-mode-map [header-line down-mouse-1]
