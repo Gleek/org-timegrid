@@ -57,6 +57,22 @@
   "Vertical SVG scale in pixels per minute."
   :type 'number)
 
+(defcustom org-timegrid-image-scale 1.0
+  "Zoom factor for the whole calendar image.
+The SVG is laid out in window pixels divided by this factor and then
+scaled back up on display, so the grid, the sticky header and the events
+grow together and the canvas still ends exactly at the window edge.
+
+Emacs' own `image-scaling-factor' is deliberately bypassed: when left at
+`auto' it stretches only the grid tiles by char-width/10, which pushes
+the columns away from the day labels by that factor on every column."
+  :type 'number)
+
+(defun org-timegrid--scale ()
+  "Return the calendar zoom factor, ignoring nonsensical settings."
+  (let ((scale org-timegrid-image-scale))
+    (if (and (numberp scale) (> scale 0)) (float scale) 1.0)))
+
 (defcustom org-timegrid-block-gap 1
   "Vertical gap in pixels between consecutive blocks."
   :type 'integer)
@@ -1076,7 +1092,7 @@ own."
         (svg-line svg label-width y width y
                   :stroke (plist-get palette :red) :stroke-width 2)
         (svg-circle svg label-width y 3 :fill (plist-get palette :red))))
-    (svg-image svg :scale 1 :ascent 'center)))
+    (svg-image svg :scale (org-timegrid--scale) :ascent 'center)))
 
 (defun org-timegrid--effective-blocks ()
   "Return per-day display segments with the current preview applied."
@@ -1109,9 +1125,11 @@ own."
          display-blocks)))))
 
 (defun org-timegrid--window-width ()
-  "Return the prototype window's body width in pixels."
+  "Return the prototype window's body width in SVG pixels.
+Real window pixels are divided by `org-timegrid-image-scale', because the
+image is scaled back up by that factor when it is displayed."
   (if-let ((window (get-buffer-window (current-buffer) t)))
-      (window-body-width window t)
+      (floor (/ (window-body-width window t) (org-timegrid--scale)))
     900))
 
 (defun org-timegrid--ensure-state ()
@@ -1420,11 +1438,16 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
         (fragment (concat fragment
                           (and (memq tile org-timegrid--clock-tiles)
                                org-timegrid--clock-fragment))))
+    ;; Scale explicitly, never through `image-scaling-factor': left at `auto'
+    ;; it stretches the grid tiles by char-width/10 while the header keeps its
+    ;; own factor, and the columns then drift away from the day labels by that
+    ;; much on every column.
     (if map
         (create-image (org-timegrid--tile-xml tile fragment) 'svg t
-                      :ascent 90 :map map :original-map map)
+                      :ascent 90 :scale (org-timegrid--scale)
+                      :map map :original-map map)
       (create-image (org-timegrid--tile-xml tile fragment) 'svg t
-                    :ascent 90))))
+                    :ascent 90 :scale (org-timegrid--scale)))))
 
 (defun org-timegrid--cache-static-tiles (&optional excluded-id)
   "Cache hour tiles, omitting EXCLUDED-ID from their static layer."
@@ -1782,7 +1805,12 @@ Sunday-starting calendar begins one day before the corresponding ISO week."
   "Return a pixel-aligned SVG header for the calendar."
   (org-timegrid--ensure-state)
   (let* ((window (get-buffer-window (current-buffer) t))
-         (left-offset (if window (or (car (window-fringes window)) 0) 0))
+         ;; The fringe is counted in real window pixels, but the SVG is laid
+         ;; out in scaled-down ones, so convert it before using it as an X.
+         (left-offset (if window
+                          (floor (/ (or (car (window-fringes window)) 0)
+                                    (org-timegrid--scale)))
+                        0))
          (canvas-width
           (max 560 (org-timegrid--window-width)))
          (width (+ left-offset canvas-width))
@@ -1919,7 +1947,8 @@ Sunday-starting calendar begins one day before the corresponding ISO week."
                 ;; Header lines still use text baseline metrics for images.
                 ;; With zero ascent Emacs reserves a full text ascent above
                 ;; the SVG, which appears as an unexplained blank strip.
-                'display (svg-image svg :ascent 100 :scale 1
+                'display (svg-image svg :ascent 100
+                                    :scale (org-timegrid--scale)
                                     :map map :original-map map)
                 'keymap org-timegrid--header-map
                 'help-echo "Click to select an all-day cell or event"))))
@@ -2107,13 +2136,18 @@ leave no central move target."
 
 (defun org-timegrid--window-resized (window)
   "Schedule a redraw when prototype WINDOW changes pixel width."
-  (let ((buffer (window-buffer window))
-        (width (window-body-width window t)))
+  (let ((buffer (window-buffer window)))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
+        ;; Compare like with like: `org-timegrid--last-width' is recorded in
+        ;; SVG pixels, so scale this measurement down as well.  Comparing it
+        ;; against raw window pixels would report a change on every single
+        ;; resize event whenever the zoom factor is not 1.
         (when (and (derived-mode-p 'org-timegrid-mode)
                    (or org-timegrid--stale
-                       (/= width (or org-timegrid--last-width -1))))
+                       (/= (floor (/ (window-body-width window t)
+                                     (org-timegrid--scale)))
+                           (or org-timegrid--last-width -1))))
           (setq-local org-timegrid--stale nil)
           (when (timerp org-timegrid--resize-timer)
             (cancel-timer org-timegrid--resize-timer))
@@ -2177,9 +2211,13 @@ reset the horizontal origin.  Add the tile offset to glyph-relative Y."
                              (get-text-property (1- point)
                                                 'org-timegrid-tile))))))
     (when (or window-xy object-xy)
-      (cons (or (car-safe window-xy) (car-safe object-xy))
-            (+ (* (or tile 0) (or org-timegrid--tile-height 0))
-               (or (cdr-safe object-xy) (cdr-safe window-xy)))))))
+      ;; Mouse coordinates arrive in real window pixels; the tile offset is
+      ;; already in SVG pixels, so only the reported position is unscaled.
+      (let ((scale (org-timegrid--scale)))
+        (cons (/ (or (car-safe window-xy) (car-safe object-xy)) scale)
+              (+ (* (or tile 0) (or org-timegrid--tile-height 0))
+                 (/ (or (cdr-safe object-xy) (cdr-safe window-xy))
+                    scale)))))))
 
 (defun org-timegrid--target (position)
   "Return calendar metadata at mouse POSITION in the SVG image."
@@ -2447,11 +2485,14 @@ selects nothing.  The mouse and the keyboard drive one shared cursor."
 (defun org-timegrid--header-target (position)
   "Return all-day rail metadata at header-line mouse POSITION."
   (let* ((xy (or (posn-object-x-y position) (posn-x-y position)))
-         (x (car-safe xy))
-         (y (cdr-safe xy))
+         (scale (org-timegrid--scale))
+         ;; Both the pointer position and the fringe come in real window
+         ;; pixels, while the rail geometry is stored in SVG ones.
+         (x (and (car-safe xy) (/ (car xy) scale)))
+         (y (and (cdr-safe xy) (/ (cdr xy) scale)))
          (window (posn-window position))
          (left-offset (if (window-live-p window)
-                          (or (car (window-fringes window)) 0)
+                          (/ (or (car (window-fringes window)) 0) scale)
                         0))
          (canvas-width (org-timegrid--window-width))
          (column-width (/ (- canvas-width org-timegrid--label-width) 7.0)))
@@ -2480,9 +2521,10 @@ selects nothing.  The mouse and the keyboard drive one shared cursor."
 
 (defun org-timegrid--mouse-position-xy (position)
   "Return comparable POSITION coordinates across the rail and time grid."
-  (let ((xy (or (posn-x-y position) (posn-object-x-y position))))
+  (let ((xy (or (posn-x-y position) (posn-object-x-y position)))
+        (scale (org-timegrid--scale)))
     (and xy (list (org-timegrid--mouse-surface position)
-                  (car xy) (cdr xy)))))
+                  (/ (car xy) scale) (/ (cdr xy) scale)))))
 
 (defun org-timegrid--rail-area-p (area)
   "Return non-nil when mouse AREA belongs to the all-day rail.
@@ -2537,7 +2579,9 @@ the block and backend range use an exclusive midnight endpoint."
 
 (defun org-timegrid--header-position-xy (position)
   "Return the SVG-local coordinates of header-line POSITION."
-  (or (posn-object-x-y position) (posn-x-y position)))
+  (when-let* ((xy (or (posn-object-x-y position) (posn-x-y position)))
+              (scale (org-timegrid--scale)))
+    (cons (/ (car xy) scale) (/ (cdr xy) scale))))
 
 (defun org-timegrid--track-drag-gesture
     (event position-function target-function proposal-function click-function)
