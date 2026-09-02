@@ -49,6 +49,66 @@ With [Elpaca](https://github.com/progfolio/elpaca):
 For a manual install, put the `.el` files on `load-path`, evaluate `(require
 'org-timegrid-org)`, then run `M-x org-timegrid-week`.
 
+### Complete example configuration
+
+The following is a self-contained Elpaca configuration that can be pasted into
+your Emacs configuration. It reads events from your existing
+`org-agenda-files`, writes entries created in the calendar to `calendar.org`
+inside `org-directory`, and enables the optional day strip in Org Agenda.
+
+```elisp
+(require 'org)
+
+(use-package org-timegrid
+  :ensure (:host github :repo "Gleek/org-timegrid")
+  :demand t
+  :bind (("C-c a c" . org-timegrid-week))
+  :init
+  ;; The symbol `agenda' means: read events from `org-agenda-files'.
+  (setq org-timegrid-org-files 'agenda
+        org-timegrid-org-capture-file
+        (expand-file-name "calendar.org" org-directory)
+        org-timegrid-org-capture-template
+        '(:target file
+          :template "* %{title}\n%{time-range}\n%?")
+
+        ;; Save Org buffers immediately after edits made in the calendar.
+        org-timegrid-org-auto-save t
+
+        ;; Set this to nil if repeating entries should be hidden.
+        org-timegrid-org-show-repeaters t
+
+        ;; The first matching tag supplies an event's colour.
+        org-timegrid-org-tag-color-alist
+        '(("work"     . indigo)
+          ("personal" . green)
+          ("reading"  . yellow)
+          ("errand"   . cyan)))
+  :config
+  (require 'org-timegrid-org))
+
+;; This is part of the same package. It adds a read-only day strip to Org
+;; Agenda; pressing RET on the strip opens the editable week view.
+(use-package org-timegrid-agenda
+  :ensure nil
+  :after org-agenda
+  :demand t
+  :init
+  ;; nil inserts the strip at the top. To place it after a particular custom
+  ;; agenda block, use a regexp matching that block's heading instead.
+  (setq org-timegrid-agenda-insert-after nil
+        org-timegrid-agenda-separator t
+        org-timegrid-agenda-minutes-before 180
+        org-timegrid-agenda-minutes-after 180)
+  :config
+  (org-timegrid-agenda-mode 1))
+```
+
+Change `org-timegrid-org-capture-file` if new entries should go somewhere
+else. The file does not need to be in `org-agenda-files`; org-timegrid always
+queries its capture file as well. If you do not want the Org Agenda strip,
+omit the second `use-package` form.
+
 ## What appears on the calendar
 
 The Org backend reads active timestamps with a start time. They may be plain
