@@ -85,6 +85,44 @@
        '(wheel-up nil nil nil (0.0 . 7.5)))
       (should (equal scrolled '(-7.5 calendar-window))))))
 
+(ert-deftest org-timegrid-test-scroll-ignores-trackpad-boundary-rebound ()
+  (with-temp-buffer
+    (org-timegrid-mode)
+    (setq-local org-timegrid--image-height 1000
+                org-timegrid--scroll-boundary '(top . 10.0))
+    (let (scrolled)
+      (cl-letf (((symbol-function 'window-live-p) (lambda (_window) t))
+                ((symbol-function 'window-buffer)
+                 (lambda (_window) (current-buffer)))
+                ((symbol-function 'window-body-height)
+                 (lambda (&rest _ignored) 500))
+                ((symbol-function 'org-timegrid--window-scroll-pixels)
+                 (lambda (_window) 0))
+                ((symbol-function 'org-timegrid--set-vscroll)
+                 (lambda (_window pixels) (setq scrolled pixels)))
+                ((symbol-function 'float-time) (lambda (&optional _time) 10.2)))
+        (org-timegrid-scroll 90 'calendar-window)
+        (should-not scrolled)))))
+
+(ert-deftest org-timegrid-test-scroll-allows-deliberate-boundary-reversal ()
+  (with-temp-buffer
+    (org-timegrid-mode)
+    (setq-local org-timegrid--image-height 1000
+                org-timegrid--scroll-boundary '(top . 10.0))
+    (let (scrolled)
+      (cl-letf (((symbol-function 'window-live-p) (lambda (_window) t))
+                ((symbol-function 'window-buffer)
+                 (lambda (_window) (current-buffer)))
+                ((symbol-function 'window-body-height)
+                 (lambda (&rest _ignored) 500))
+                ((symbol-function 'org-timegrid--window-scroll-pixels)
+                 (lambda (_window) 0))
+                ((symbol-function 'org-timegrid--set-vscroll)
+                 (lambda (_window pixels) (setq scrolled pixels)))
+                ((symbol-function 'float-time) (lambda (&optional _time) 10.4)))
+        (org-timegrid-scroll 90 'calendar-window)
+        (should (= scrolled 90))))))
+
 (ert-deftest org-timegrid-test-precision-scroll-overrides-global-mode-locally ()
   (with-temp-buffer
     (setq-local minor-mode-overriding-map-alist

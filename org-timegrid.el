@@ -340,6 +340,10 @@ The title stays fixed and the date row follows only the frame's base font."
 (defvar-local org-timegrid--stale nil)
 (defvar-local org-timegrid--saved-vscroll 0
   "Pixel scroll position restored when this calendar is shown again.")
+(defconst org-timegrid--scroll-rebound-seconds 0.35
+  "Seconds to suppress a reversed wheel event after hitting an edge.")
+(defvar-local org-timegrid--scroll-boundary nil
+  "Most recently hit scroll boundary as (SIDE . TIME).")
 (defvar-local org-timegrid--last-zoom-factor 1.0
   "Zoom factor used by the currently rendered SVG tiles.")
 (defvar-local org-timegrid--tile-height nil)
@@ -2958,14 +2962,30 @@ Leave the first non-motion event for the gesture loop to process."
       (with-current-buffer (window-buffer window)
         (when (and (derived-mode-p 'org-timegrid-mode)
                    (numberp org-timegrid--image-height))
-          (let* ((maximum
+          (let* ((now (float-time))
+                 (current (org-timegrid--window-scroll-pixels window))
+                 (maximum
                   (max 0 (- org-timegrid--image-height
                             (window-body-height window t))))
+                 (rebound
+                  (and org-timegrid--scroll-boundary
+                       (< (- now (cdr org-timegrid--scroll-boundary))
+                          org-timegrid--scroll-rebound-seconds)
+                       (or (and (eq (car org-timegrid--scroll-boundary) 'top)
+                                (> pixels 0))
+                           (and (eq (car org-timegrid--scroll-boundary) 'bottom)
+                                (< pixels 0)))))
                  (next
                   (max 0 (min maximum
-                              (+ (org-timegrid--window-scroll-pixels window)
-                                 pixels)))))
-            (org-timegrid--set-vscroll window next)))))))
+                              (+ current pixels)))))
+            (cond
+             ((and (zerop current) (< pixels 0))
+              (setq-local org-timegrid--scroll-boundary (cons 'top now)))
+             ((and (= current maximum) (> pixels 0))
+              (setq-local org-timegrid--scroll-boundary (cons 'bottom now)))
+             ((not rebound)
+              (setq-local org-timegrid--scroll-boundary nil)
+              (org-timegrid--set-vscroll window next)))))))))
 
 (defun org-timegrid--event-window (event)
   "Return the live calendar window associated with mouse EVENT."
