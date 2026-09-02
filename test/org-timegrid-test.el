@@ -26,7 +26,9 @@
       (cl-letf (((symbol-function 'org-timegrid--default-font-height)
                  (lambda (&optional _window) 36))
                 ((symbol-function 'org-timegrid--frame-font-factor)
-                 (lambda (&optional _window) 1)))
+                 (lambda (&optional _window) 1))
+                ((symbol-function 'org-timegrid--default-font-size)
+                 (lambda (&optional _window) 20)))
         (should (= (org-timegrid--zoom-factor) 2))
         (should (= (org-timegrid--pixels-per-minute) 1.8))
         (should (= (org-timegrid--font-size 10) 20))
@@ -40,8 +42,8 @@
           (org-timegrid-default-zoom 1.0))
       (cl-letf (((symbol-function 'org-timegrid--window-width)
                  (lambda () 700))
-                ((symbol-function 'org-timegrid--default-font-height)
-                 (lambda (&optional _window) 72)))
+                ((symbol-function 'org-timegrid--default-font-size)
+                 (lambda (&optional _window) 40)))
         (let ((rectangle
                (progn
                  (setq-local org-timegrid--state
@@ -70,11 +72,23 @@
 
 (ert-deftest org-timegrid-test-default-zoom-multiplies-frame-scale ()
   (with-temp-buffer
-    (let ((org-timegrid-default-zoom 1.25))
-      (cl-letf (((symbol-function 'org-timegrid--default-font-height)
-                 (lambda (&optional _window)
-                   org-timegrid--reference-font-height)))
-        (should (= (org-timegrid--zoom-factor) 1.25))))))
+    (cl-letf (((symbol-function 'org-timegrid--default-font-size)
+               (lambda (&optional _window) 12.5)))
+      (should (= (org-timegrid--zoom-factor) 1.25)))))
+
+(ert-deftest org-timegrid-test-fixed-header-factor-ignores-calendar-zoom ()
+  (let ((org-timegrid-default-zoom 3))
+    (cl-letf (((symbol-function 'frame-char-height)
+               (lambda (&optional _frame) org-timegrid--reference-font-height))
+              ((symbol-function 'org-timegrid--default-font-height)
+               (lambda (&optional _window) 72)))
+      (should (= (org-timegrid--frame-font-factor) 1)))))
+
+(ert-deftest org-timegrid-test-normal-svg-font-matches-default-face ()
+  (cl-letf (((symbol-function 'org-timegrid--default-font-size)
+             (lambda (&optional _window) 14)))
+    (should (= (org-timegrid--font-size 10) 14))
+    (should (< (abs (- (org-timegrid--font-size 8) 11.2)) 0.001))))
 
 (ert-deftest org-timegrid-test-compact-strip-uses-effective-zoom ()
   (with-temp-buffer

@@ -66,6 +66,10 @@ inside `org-directory`, and enables the optional day strip in Org Agenda.
   :init
   ;; The symbol `agenda' means: read events from `org-agenda-files'.
   (setq org-timegrid-org-files 'agenda
+
+        ;; Recommended compact scale; use 1.0 to match Emacs's default font.
+        org-timegrid-default-zoom 0.7
+
         org-timegrid-org-capture-file
         (expand-file-name "calendar.org" org-directory)
         org-timegrid-org-capture-template
@@ -288,21 +292,21 @@ priority, property, or file.
 
 ## Configuration
 
-| Variable                                            |    Default | Meaning                                  |
-|-----------------------------------------------------|-----------:|------------------------------------------|
-| `org-timegrid-days`                                 |        `7` | Consecutive days shown in the main view  |
-| `org-timegrid-start-hour` / `org-timegrid-end-hour` | `0` / `24` | Hours drawn                              |
-| `org-timegrid-pixels-per-minute`                    |      `0.9` | Week-view scale                          |
-| `org-timegrid-default-zoom`                         |      `1.0` | Initial calendar zoom multiplier         |
-| `org-timegrid-slot-minutes`                         |       `15` | Cursor and edit granularity              |
-| `org-timegrid-cursor-step-minutes`                  |       `15` | Normal keyboard step                     |
-| `org-timegrid-keyboard-commit-delay`                |     `0.25` | Idle delay before a moved block is saved |
-| `org-timegrid-default-duration-minutes`             |       `30` | Length used when no end is present       |
-| `org-timegrid-block-gap`                            |        `1` | Gap between blocks, in pixels            |
-| `org-timegrid-corner-radius`                        |        `0` | Block corner radius                      |
-| `org-timegrid-nesting-indent`                       |        `8` | Indent for contained events              |
-| `org-timegrid-title-clearance`                      |       `18` | Space a parent keeps for its title       |
-| `org-timegrid-data-refresh-seconds`                 |      `300` | Backend reload interval                  |
+| Variable                                            |    Default | Meaning                                               |
+|-----------------------------------------------------|-----------:|-------------------------------------------------------|
+| `org-timegrid-days`                                 |        `7` | Consecutive days shown in the main view               |
+| `org-timegrid-start-hour` / `org-timegrid-end-hour` | `0` / `24` | Hours drawn                                           |
+| `org-timegrid-pixels-per-minute`                    |      `0.9` | Week-view scale                                       |
+| `org-timegrid-default-zoom`                         |      `0.7` | Initial zoom; `1.0` matches Emacs's default font size |
+| `org-timegrid-slot-minutes`                         |       `15` | Cursor and edit granularity                           |
+| `org-timegrid-cursor-step-minutes`                  |       `15` | Normal keyboard step                                  |
+| `org-timegrid-keyboard-commit-delay`                |     `0.25` | Idle delay before a moved block is saved              |
+| `org-timegrid-default-duration-minutes`             |       `30` | Length used when no end is present                    |
+| `org-timegrid-block-gap`                            |        `1` | Gap between blocks, in pixels                         |
+| `org-timegrid-corner-radius`                        |        `0` | Block corner radius                                   |
+| `org-timegrid-nesting-indent`                       |        `8` | Indent for contained events                           |
+| `org-timegrid-title-clearance`                      |       `18` | Space a parent keeps for its title                    |
+| `org-timegrid-data-refresh-seconds`                 |      `300` | Backend reload interval                               |
 
 | Agenda variable                                 |       Default | Meaning                   |
 |-------------------------------------------------|--------------:|---------------------------|

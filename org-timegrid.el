@@ -80,7 +80,7 @@ ABSOLUTE-DATE."
   "Vertical SVG scale in pixels per minute."
   :type 'number)
 
-(defcustom org-timegrid-default-zoom 1.0
+(defcustom org-timegrid-default-zoom 0.7
   "Base zoom multiplier for scalable calendar content.
 The value must be a positive number.  Buffer-local text-scale commands apply
 on top of it and reset to this configured base."
@@ -218,8 +218,10 @@ half-hour block room for two lines of title."
 (defconst org-timegrid--header-date-height 30)
 (defconst org-timegrid--rail-top
   (+ org-timegrid--header-title-height org-timegrid--header-date-height))
+(defconst org-timegrid--reference-font-size 10
+  "Default-face pixel size for which the SVG's design sizes are specified.")
 (defconst org-timegrid--reference-font-height 18
-  "Default-face pixel height for which the SVG's design sizes are specified.")
+  "Frame character height for which the fixed header sizes are specified.")
 
 (defun org-timegrid--default-font-height (&optional window)
   "Return the rendered default-face height for WINDOW in pixels.
@@ -230,17 +232,37 @@ fallback for buffers that are not displayed."
         (window-font-height window 'default)
       (default-font-height))))
 
-(defun org-timegrid--zoom-factor (&optional window)
-  "Return the SVG scale implied by WINDOW's rendered default font."
+(defun org-timegrid--frame-font-size (&optional window)
+  "Return WINDOW's unscaled default-face font size in pixels."
+  (let* ((window (or window (get-buffer-window (current-buffer) t)))
+         (frame (and (window-live-p window) (window-frame window)))
+         (font (face-attribute 'default :font frame t))
+         (size (and (fontp font) (font-get font :size))))
+    (if (numberp size)
+        size
+      (/ (face-attribute 'default :height frame t) 10.0))))
+
+(defun org-timegrid--default-font-size (&optional window)
+  "Return WINDOW's effective default-face font size in SVG pixels."
   (unless (and (numberp org-timegrid-default-zoom)
                (> org-timegrid-default-zoom 0))
     (user-error "org-timegrid-default-zoom must be positive"))
-  (* org-timegrid-default-zoom
-     (/ (org-timegrid--default-font-height window)
-        (float org-timegrid--reference-font-height))))
+  (let* ((window (or window (get-buffer-window (current-buffer) t)))
+         (frame (and (window-live-p window) (window-frame window)))
+         (frame-height (frame-char-height frame)))
+    (* (org-timegrid--frame-font-size window)
+       org-timegrid-default-zoom
+       (/ (org-timegrid--default-font-height window)
+          (float frame-height)))))
+
+(defun org-timegrid--zoom-factor (&optional window)
+  "Return the unified SVG scale implied by WINDOW's default font.
+Typography and geometry share this factor so their alignment is preserved."
+  (/ (org-timegrid--default-font-size window)
+     (float org-timegrid--reference-font-size)))
 
 (defun org-timegrid--frame-font-factor (&optional window)
-  "Return WINDOW's frame-font scale without buffer-local text zoom."
+  "Return WINDOW's fixed-header scale without calendar or text zoom."
   (let* ((window (or window (get-buffer-window (current-buffer) t)))
          (frame (and (window-live-p window) (window-frame window))))
     (/ (frame-char-height frame)
@@ -259,7 +281,7 @@ fallback for buffers that are not displayed."
   (* org-timegrid-pixels-per-minute (org-timegrid--zoom-factor)))
 
 (defun org-timegrid--font-size (size)
-  "Return SVG font SIZE adjusted for the current buffer's text zoom."
+  "Return SVG font SIZE adjusted by the unified calendar zoom."
   (* size (org-timegrid--zoom-factor)))
 
 (defun org-timegrid--label-width ()
