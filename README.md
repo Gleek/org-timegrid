@@ -173,6 +173,7 @@ after redraws.
 | `C-v` / `M-v`, `SPC`      | Move by one screen                                                                   |
 | `C-a` / `C-e`             | Go to the first or last slot of the day                                              |
 | `C-l`                     | Center the view on the cursor                                                        |
+| `C-x +` / `C-x C--` / `C-x C-0` | Zoom in, zoom out, or reset zoom                                              |
 | `n` / `p`                 | Select the next or previous block                                                    |
 | `RET`                     | Visit the selected block, or create one at the cursor                                |
 | `C-g`                     | Hide the cursor / Cancel unsaved new block                                           |
@@ -292,6 +293,7 @@ priority, property, or file.
 | `org-timegrid-days`                                 |        `7` | Consecutive days shown in the main view  |
 | `org-timegrid-start-hour` / `org-timegrid-end-hour` | `0` / `24` | Hours drawn                              |
 | `org-timegrid-pixels-per-minute`                    |      `0.9` | Week-view scale                          |
+| `org-timegrid-default-zoom`                         |      `1.0` | Initial calendar zoom multiplier         |
 | `org-timegrid-slot-minutes`                         |       `15` | Cursor and edit granularity              |
 | `org-timegrid-cursor-step-minutes`                  |       `15` | Normal keyboard step                     |
 | `org-timegrid-keyboard-commit-delay`                |     `0.25` | Idle delay before a moved block is saved |

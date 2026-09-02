@@ -76,6 +76,8 @@ is what you want when the block below is the same day's untimed items."
 (defvar org-timegrid-agenda--theme-timer nil
   "Idle timer coalescing a burst of theme changes.")
 
+(defvar org-timegrid-agenda-mode nil)
+
 (defvar org-timegrid-agenda-map
   (let ((map (make-sparse-keymap)))
     (keymap-set map "RET" #'org-timegrid-agenda-open-week)
@@ -135,6 +137,8 @@ Suitable for `org-agenda-finalize-hook'; `org-timegrid-agenda-mode' is
 the usual way to install it."
   (when (and (derived-mode-p 'org-agenda-mode)
              (not (buffer-narrowed-p)))
+    (add-hook 'text-scale-mode-hook
+              #'org-timegrid-agenda--text-scale-changed nil t)
     (save-excursion
       (let* ((decoded (decode-time))
              (now (+ (* 60 (decoded-time-hour decoded))
@@ -211,6 +215,14 @@ disables another, so the work is deferred and coalesced."
                                              'org-timegrid-strip t))
                  (org-timegrid-agenda-insert))))))))
 
+(defun org-timegrid-agenda--text-scale-changed ()
+  "Redraw the compact strip after this Agenda buffer changes text scale."
+  (when (and org-timegrid-agenda-mode
+             (derived-mode-p 'org-agenda-mode)
+             (text-property-any (point-min) (point-max)
+                                'org-timegrid-strip t))
+    (org-timegrid-agenda-insert)))
+
 ;;;###autoload
 (define-minor-mode org-timegrid-agenda-mode
   "Show a compact one-day calendar strip in Org Agenda buffers.
@@ -229,7 +241,11 @@ as current as the buffer around it."
     (remove-hook 'enable-theme-functions
                  #'org-timegrid-agenda--theme-changed)
     (remove-hook 'disable-theme-functions
-                 #'org-timegrid-agenda--theme-changed)))
+                 #'org-timegrid-agenda--theme-changed)
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (remove-hook 'text-scale-mode-hook
+                     #'org-timegrid-agenda--text-scale-changed t)))))
 
 (provide 'org-timegrid-agenda)
 ;;; org-timegrid-agenda.el ends here

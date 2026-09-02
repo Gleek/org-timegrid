@@ -3,6 +3,99 @@
 (require 'ert)
 (require 'org-timegrid-org)
 
+(ert-deftest org-timegrid-test-text-scale-controls-svg-scale ()
+  (with-temp-buffer
+    (let ((org-timegrid-pixels-per-minute 0.9)
+          (org-timegrid-default-zoom 1.0))
+      (cl-letf (((symbol-function 'org-timegrid--default-font-height)
+                 (lambda (&optional _window) 36))
+                ((symbol-function 'org-timegrid--frame-font-factor)
+                 (lambda (&optional _window) 1)))
+        (should (= (org-timegrid--zoom-factor) 2))
+        (should (= (org-timegrid--pixels-per-minute) 1.8))
+        (should (= (org-timegrid--font-size 10) 20))
+        (should (= (org-timegrid--grid-top-inset) 12))
+        (should (= (org-timegrid--header-title-height) 44))
+        (should (= (org-timegrid--rail-top) 74))))))
+
+(ert-deftest org-timegrid-test-text-scale-keeps-svg-width-fixed ()
+  (with-temp-buffer
+    (let ((org-timegrid-days 7)
+          (org-timegrid-default-zoom 1.0))
+      (cl-letf (((symbol-function 'org-timegrid--window-width)
+                 (lambda () 700))
+                ((symbol-function 'org-timegrid--default-font-height)
+                 (lambda (&optional _window) 72)))
+        (let ((rectangle
+               (progn
+                 (setq-local org-timegrid--state
+                             (org-timegrid--calendar-state-create
+                              :week-start 100
+                              :cursor (org-timegrid--cursor-state-create
+                                       :surface 'grid :day 0 :minute 60)
+                              :cursor-visible t))
+                 (org-timegrid--cursor-rectangle))))
+          (should (= (plist-get rectangle :x)
+                     (1+ (* org-timegrid--label-width 4))))
+          (should (= (plist-get rectangle :width)
+                     (- (/ (- 700 (* org-timegrid--label-width 4)) 7.0) 2)))
+          (should (= (plist-get rectangle :height)
+                     (* org-timegrid-slot-minutes
+                        org-timegrid-pixels-per-minute 4))))))))
+
+(ert-deftest org-timegrid-test-label-gutter-has-frame-font-minimum ()
+  (with-temp-buffer
+    (cl-letf (((symbol-function 'org-timegrid--zoom-factor)
+               (lambda (&optional _window) 0.5))
+              ((symbol-function 'org-timegrid--frame-font-factor)
+               (lambda (&optional _window) 1)))
+      (should (= (org-timegrid--label-width)
+                 org-timegrid--label-width)))))
+
+(ert-deftest org-timegrid-test-default-zoom-multiplies-frame-scale ()
+  (with-temp-buffer
+    (let ((org-timegrid-default-zoom 1.25))
+      (cl-letf (((symbol-function 'org-timegrid--default-font-height)
+                 (lambda (&optional _window)
+                   org-timegrid--reference-font-height)))
+        (should (= (org-timegrid--zoom-factor) 1.25))))))
+
+(ert-deftest org-timegrid-test-compact-strip-uses-effective-zoom ()
+  (with-temp-buffer
+    (cl-letf (((symbol-function 'org-timegrid--zoom-factor)
+               (lambda (&optional _window) 2))
+              ((symbol-function 'org-timegrid--frame-font-factor)
+               (lambda (&optional _window) 1)))
+      (let ((data (plist-get (cdr (org-timegrid-day-image nil 0 60 400))
+                             :data)))
+        (should (string-match-p "height=\"114\"" data))
+        (should (string-match-p "font-size=\"22\"" data))))))
+
+(ert-deftest org-timegrid-test-plain-c-x-plus-zooms-calendar ()
+  (should (eq (lookup-key org-timegrid-mode-map (kbd "C-x +"))
+              #'text-scale-adjust)))
+
+(ert-deftest org-timegrid-test-precision-scroll-uses-calendar-pixels ()
+  (let (scrolled)
+    (cl-letf (((symbol-function 'org-timegrid--event-window)
+               (lambda (_event) 'calendar-window))
+              ((symbol-function 'org-timegrid-scroll)
+               (lambda (pixels window) (setq scrolled (list pixels window)))))
+      (org-timegrid-precision-scroll
+       '(wheel-up nil nil nil (0.0 . 7.5)))
+      (should (equal scrolled '(-7.5 calendar-window))))))
+
+(ert-deftest org-timegrid-test-precision-scroll-overrides-global-mode-locally ()
+  (with-temp-buffer
+    (setq-local minor-mode-overriding-map-alist
+                '((pixel-scroll-precision-mode . old-map)))
+    (org-timegrid--install-precision-scroll-override)
+    (should (eq (lookup-key
+                 (cdr (assq 'pixel-scroll-precision-mode
+                            minor-mode-overriding-map-alist))
+                 [remap pixel-scroll-precision])
+                #'org-timegrid-precision-scroll))))
+
 (ert-deftest org-timegrid-test-range-start-uses-week-start-when-visible ()
   (let ((org-timegrid-days 3)
         (calendar-week-start-day 0))
