@@ -319,5 +319,31 @@
       (should (eq (gethash 102 days) t))
       (should (eq (gethash 103 days) t)))))
 
+(ert-deftest org-timegrid-test-last-tile-absorbs-the-canvas-remainder ()
+  "A canvas that does not divide evenly must not end in a stub tile.
+A leftover strip still occupies a full text line on display, which reads as
+an unexplained blank band under the grid."
+  (let ((org-timegrid--tile-height 54)
+        ;; 24 hours at 0.9 px/minute plus the 6px top inset: 1302 = 24*54 + 6.
+        (org-timegrid--image-height 1302)
+        (org-timegrid--tile-count 24))
+    (let ((last (org-timegrid--tile-bounds (1- org-timegrid--tile-count))))
+      (should (= (car last) 1242))
+      (should (= (cdr last) 60))
+      ;; The tiles together cover the canvas exactly.
+      (should (= (+ (car last) (cdr last)) org-timegrid--image-height)))
+    (dotimes (tile org-timegrid--tile-count)
+      (should (>= (cdr (org-timegrid--tile-bounds tile))
+                  org-timegrid--tile-height)))))
+
+(ert-deftest org-timegrid-test-image-scale-guards-nonsense-values ()
+  "The zoom factor must stay positive whatever the user configures."
+  (dolist (probe '(1.3 2 0.5))
+    (let ((org-timegrid-image-scale probe))
+      (should (= (org-timegrid--scale) (float probe)))))
+  (dolist (probe '(0 -1 nil "big"))
+    (let ((org-timegrid-image-scale probe))
+      (should (= (org-timegrid--scale) 1.0)))))
+
 (provide 'org-timegrid-test)
 ;;; org-timegrid-test.el ends here
