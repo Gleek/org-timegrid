@@ -73,6 +73,12 @@ the columns away from the day labels by that factor on every column."
   (let ((scale org-timegrid-image-scale))
     (if (and (numberp scale) (> scale 0)) (float scale) 1.0)))
 
+(defun org-timegrid--display-y (y)
+  "Convert canvas coordinate Y into displayed window pixels.
+Scrolling works in window pixels while the calendar geometry is kept in
+canvas pixels, so every value crossing that border must be converted."
+  (round (* y (org-timegrid--scale))))
+
 (defcustom org-timegrid-block-gap 1
   "Vertical gap in pixels between consecutive blocks."
   :type 'integer)
@@ -257,6 +263,23 @@ half-hour block room for two lines of title."
 (defvar-local org-timegrid--tile-markers nil)
 (defvar-local org-timegrid--static-inner nil)
 (defvar-local org-timegrid--static-images nil)
+
+(defun org-timegrid--display-tile-height ()
+  "Return the on-screen height of a full hour tile, in window pixels."
+  (max 1 (org-timegrid--display-y (or org-timegrid--tile-height 0))))
+
+(defun org-timegrid--display-height ()
+  "Return the displayed height of the whole calendar, in window pixels.
+Sum the tiles instead of scaling the canvas in one go: every tile image is
+rounded to whole pixels on its own, and scrolling has to land on the same
+grid the display actually uses."
+  (if (and (numberp org-timegrid--tile-count)
+           (> org-timegrid--tile-count 0)
+           (numberp org-timegrid--tile-height))
+      (+ (* (1- org-timegrid--tile-count) (org-timegrid--display-tile-height))
+         (org-timegrid--display-y
+          (cdr (org-timegrid--tile-bounds (1- org-timegrid--tile-count)))))
+    (org-timegrid--display-y (or org-timegrid--image-height 0))))
 (defvar-local org-timegrid--dynamic-tiles nil)
 (defvar-local org-timegrid--clock-fragment nil)
 (defvar-local org-timegrid--clock-tiles nil)
@@ -2083,16 +2106,19 @@ leave no central move target."
       (redisplay t))))
 
 (defun org-timegrid--window-scroll-pixels (window)
-  "Return WINDOW's absolute pixel offset in the tiled calendar."
+  "Return WINDOW's absolute pixel offset in the tiled calendar.
+Measured in window pixels: `window-vscroll' reports displayed pixels, so
+the whole tiles above it are counted at their displayed height too."
   (let* ((start (window-start window))
          (tile (or (get-text-property start 'org-timegrid-tile) 0)))
-    (+ (* tile (or org-timegrid--tile-height 0))
+    (+ (* tile (org-timegrid--display-tile-height))
        (window-vscroll window t))))
 
 (defun org-timegrid--set-vscroll (window pixels)
-  "Set WINDOW's pixel scroll to PIXELS and remember it."
+  "Set WINDOW's pixel scroll to PIXELS and remember it.
+PIXELS is a window-pixel offset, matching `window-vscroll'."
   (let* ((pixels (max 0 (round pixels)))
-         (height (max 1 (or org-timegrid--tile-height 1)))
+         (height (org-timegrid--display-tile-height))
          (tile (min (max 0 (1- (or org-timegrid--tile-count 1)))
                     (floor pixels height)))
          (within (% pixels height)))
@@ -2875,12 +2901,18 @@ Leave the first non-motion event for the gesture loop to process."
               (window (get-buffer-window (current-buffer) t)))
     (let* ((scale org-timegrid-pixels-per-minute)
            (start-minute (* 60 org-timegrid-start-hour))
-           (top (+ org-timegrid--grid-top-inset
-                   (* (- (org-timegrid--cursor-state-minute cursor) start-minute) scale)))
-           (bottom (+ top (* org-timegrid-slot-minutes scale)))
+           ;; Canvas coordinates first, then converted to window pixels: the
+           ;; window scroll position is measured on the displayed image.
+           (top (org-timegrid--display-y
+                 (+ org-timegrid--grid-top-inset
+                    (* (- (org-timegrid--cursor-state-minute cursor)
+                          start-minute)
+                       scale))))
+           (bottom (+ top (org-timegrid--display-y
+                           (* org-timegrid-slot-minutes scale))))
            (body (window-body-height window t))
            (vscroll (org-timegrid--window-scroll-pixels window))
-           (maximum (max 0 (- (or org-timegrid--image-height 0) body))))
+           (maximum (max 0 (- (org-timegrid--display-height) body))))
       (cond
        ((< top vscroll)
         (org-timegrid--set-vscroll window (max 0 (min maximum top))))
@@ -2898,18 +2930,18 @@ the cursor never moves to satisfy the scroll."
         (window (get-buffer-window (current-buffer) t)))
     (when (window-live-p window)
       (let* ((scale org-timegrid-pixels-per-minute)
-             (top (+ org-timegrid--grid-top-inset
-                     (* (- (org-timegrid--cursor-state-minute cursor)
-                           (* 60 org-timegrid-start-hour))
-                        scale)))
+             (top (org-timegrid--display-y
+                   (+ org-timegrid--grid-top-inset
+                      (* (- (org-timegrid--cursor-state-minute cursor)
+                            (* 60 org-timegrid-start-hour))
+                         scale))))
+             (slot (org-timegrid--display-y
+                    (* org-timegrid-slot-minutes scale)))
              (body (window-body-height window t))
-             (maximum (max 0 (- (or org-timegrid--image-height 0) body))))
+             (maximum (max 0 (- (org-timegrid--display-height) body))))
         (org-timegrid--set-vscroll
          window
-         (max 0 (min maximum
-                     (round (- top (/ (- body (* org-timegrid-slot-minutes
-                                                scale))
-                                      2))))))))))
+         (max 0 (min maximum (round (- top (/ (- body slot) 2))))))))))
 
 (defun org-timegrid--move-cursor (minutes days)
   "Move the cursor by MINUTES and DAYS, revealing it first when hidden."
@@ -3075,11 +3107,13 @@ last lane, or where there is only one, it moves by a day."
 
 (defun org-timegrid--page-minutes (&optional window)
   "Return one screenful expressed in minutes for WINDOW."
-  (let ((window (or window (get-buffer-window (current-buffer) t))))
+  (let* ((window (or window (get-buffer-window (current-buffer) t)))
+         ;; A screenful is measured on screen but spent in canvas pixels.
+         (body (/ (if window (window-body-height window t) 400)
+                  (org-timegrid--scale))))
     (max org-timegrid-slot-minutes
          (org-timegrid--snap-minute
-          (/ (- (if window (window-body-height window t) 400) 40)
-             org-timegrid-pixels-per-minute)))))
+          (/ (- body 40) org-timegrid-pixels-per-minute)))))
 
 (defun org-timegrid-cursor-page-down (&optional count)
   "Move the cursor COUNT screenfuls later."
@@ -3988,10 +4022,14 @@ keyboard changes pass through the same damage-based renderer.
          (minute (+ (* 60 (decoded-time-hour now))
                     (decoded-time-minute now)))
          (start-minute (* 60 org-timegrid-start-hour))
-         (y (+ org-timegrid--grid-top-inset
-               (* (- minute start-minute)
-                  org-timegrid-pixels-per-minute)))
-         (target (max 0 (- y (/ (window-body-height window t) 2)))))
+         (y (org-timegrid--display-y
+             (+ org-timegrid--grid-top-inset
+                (* (- minute start-minute)
+                   org-timegrid-pixels-per-minute))))
+         (maximum (max 0 (- (org-timegrid--display-height)
+                            (window-body-height window t))))
+         (target (max 0 (min maximum
+                             (- y (/ (window-body-height window t) 2))))))
     (org-timegrid--set-vscroll window target)))
 
 ;;;###autoload
