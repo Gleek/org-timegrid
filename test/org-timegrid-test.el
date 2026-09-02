@@ -515,22 +515,95 @@
       (should (eq (gethash 102 days) t))
       (should (eq (gethash 103 days) t)))))
 
-(ert-deftest org-timegrid-test-last-tile-takes-the-remainder ()
-  "A canvas that does not divide evenly must not end in a tiny tile.
-A few leftover pixels still take a whole text line on screen, which looks
-like a blank band under the grid."
+(ert-deftest org-timegrid-test-tiles-partition-and-map-the-whole-canvas ()
+  "Tiles continuously partition the canvas and own every pixel."
   (let ((org-timegrid--tile-height 54)
         ;; 24 hours at 0.9 px per minute plus the 6px top inset.
         (org-timegrid--image-height 1302)
-        (org-timegrid--tile-count 24))
-    (let ((last (org-timegrid--tile-bounds (1- org-timegrid--tile-count))))
-      (should (= (car last) 1242))
-      (should (= (cdr last) 60))
-      ;; The tiles cover the canvas exactly.
-      (should (= (+ (car last) (cdr last)) org-timegrid--image-height)))
+        (org-timegrid--tile-count 24)
+        (bottom 0))
     (dotimes (tile org-timegrid--tile-count)
-      (should (>= (cdr (org-timegrid--tile-bounds tile))
-                  org-timegrid--tile-height)))))
+      (pcase-let ((`(,top . ,height) (org-timegrid--tile-bounds tile)))
+        (should (= top bottom))
+        (should (>= height org-timegrid--tile-height))
+        (setq bottom (+ top height))))
+    (should (= bottom org-timegrid--image-height))
+    (dotimes (pixel (ceiling org-timegrid--image-height))
+      (let* ((tile (org-timegrid--tile-at-pixel pixel))
+             (bounds (org-timegrid--tile-bounds tile)))
+        (should (<= (car bounds) pixel))
+        (should (< pixel (+ (car bounds) (cdr bounds))))
+        (should (equal (org-timegrid--tiles-intersecting pixel (1+ pixel))
+                       (list tile)))))))
+
+(ert-deftest org-timegrid-test-cursor-renders-on-every-cell ()
+  "Every valid grid and all-day cell renders exactly one cursor."
+  (with-temp-buffer
+    (let* ((org-timegrid-days 7)
+           (org-timegrid-start-hour 0)
+           (org-timegrid-end-hour 24)
+           (org-timegrid--tile-width 900)
+           (org-timegrid--tile-height 61)
+           ;; A fractional scale makes the final tile absorb more than one
+           ;; slot, exercising the same layout rule at every cursor position.
+           (org-timegrid--image-height 1458.72)
+           (org-timegrid--tile-count 23)
+           (org-timegrid-cursor-opacity 0.314159)
+           (org-timegrid--geometry nil)
+           (org-timegrid--state
+            (org-timegrid--calendar-state-create
+             :week-start 0 :blocks nil :cursor-visible t))
+           (original-svg-rectangle (symbol-function 'svg-rectangle))
+           reached-tiles)
+      (cl-labels
+          ((render-and-count-cursors
+            (function)
+            (let ((count 0)
+                  value)
+              (cl-letf
+                  (((symbol-function 'svg-rectangle)
+                    (lambda (svg x y width height &rest properties)
+                      (when (equal (plist-get properties :fill-opacity)
+                                   org-timegrid-cursor-opacity)
+                        (cl-incf count))
+                      (apply original-svg-rectangle
+                             svg x y width height properties))))
+                (setq value (funcall function)))
+              (cons count value))))
+        (cl-letf (((symbol-function 'org-timegrid--window-width)
+                   (lambda () 900))
+                  ((symbol-function 'org-timegrid--pixels-per-minute)
+                   (lambda () 1.008))
+                  ((symbol-function 'org-timegrid--grid-top-inset)
+                   (lambda () 6.72)))
+          ;; Every timed cell on every day must paint once into existing
+          ;; tiles.  Collecting the tiles also proves the whole canvas is
+          ;; reachable, including the enlarged final tile.
+          (dotimes (day org-timegrid-days)
+            (cl-loop for minute from 0 below 1440
+                     by org-timegrid-slot-minutes do
+                     (org-timegrid--set-cursor day minute 0)
+                     (pcase-let* ((`(,count . ,rendered)
+                                   (render-and-count-cursors
+                                    #'org-timegrid--dynamic-fragment))
+                                  (tiles (cdr rendered)))
+                       (should (= count 1))
+                       (should tiles)
+                       (dolist (tile tiles)
+                         (should (<= 0 tile (1- org-timegrid--tile-count)))
+                         (cl-pushnew tile reached-tiles)))))
+          (should (equal (sort reached-tiles #'<)
+                         (number-sequence 0 (1- org-timegrid--tile-count))))
+          ;; With no all-day events, lane zero is the one valid rail cell for
+          ;; each day.  It must paint once in the header and nowhere else.
+          (dotimes (day org-timegrid-days)
+            (org-timegrid--set-all-day-cursor day 0)
+            (pcase-let ((`(,count . ,_)
+                         (render-and-count-cursors
+                          (lambda ()
+                            (org-timegrid--dynamic-fragment)
+                            (org-timegrid--header)))))
+              (should (= count 1)))))))))
 
 (provide 'org-timegrid-test)
 ;;; org-timegrid-test.el ends here

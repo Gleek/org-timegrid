@@ -1522,16 +1522,7 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
     (setq-local org-timegrid--clock-fragment
                 (and y (org-timegrid--svg-inner-xml svg))
                 org-timegrid--clock-tiles
-                (and y
-                     (let ((first
-                            (max 0 (floor (- y 7)
-                                          org-timegrid--tile-height)))
-                           (last
-                            (min (1- org-timegrid--tile-count)
-                                 (floor (min (1- org-timegrid--image-height)
-                                             (+ y 7))
-                                        org-timegrid--tile-height))))
-                       (number-sequence first last))))))
+                (and y (org-timegrid--tiles-intersecting (- y 7) (+ y 7))))))
 
 (defun org-timegrid--tile-bounds (tile)
   "Return TILE's (TOP . HEIGHT) inside the canvas, in canvas pixels.
@@ -1544,6 +1535,29 @@ band under the grid."
                      (- org-timegrid--image-height top)
                    org-timegrid--tile-height)))
     (cons top (max 0 height))))
+
+(defun org-timegrid--tile-at-pixel (pixel)
+  "Return the tile containing canvas PIXEL, clamped to the canvas."
+  (when (and (numberp org-timegrid--tile-count)
+             (> org-timegrid--tile-count 0))
+    (let ((pixel (max 0 (min pixel (1- org-timegrid--image-height)))))
+      (cl-loop for tile from 0 below org-timegrid--tile-count
+               for bounds = (org-timegrid--tile-bounds tile)
+               when (< pixel (+ (car bounds) (cdr bounds)))
+               return tile
+               finally return (1- org-timegrid--tile-count)))))
+
+(defun org-timegrid--tiles-intersecting (top bottom)
+  "Return the tiles intersecting the canvas interval TOP to BOTTOM."
+  (let ((top (max 0 top))
+        (bottom (min org-timegrid--image-height bottom)))
+    (when (< top bottom)
+      (cl-loop for tile from 0 below org-timegrid--tile-count
+               for bounds = (org-timegrid--tile-bounds tile)
+               for tile-top = (car bounds)
+               for tile-bottom = (+ tile-top (cdr bounds))
+               when (and (< tile-top bottom) (< top tile-bottom))
+               collect tile))))
 
 (defun org-timegrid--tile-xml (tile &optional fragment)
   "Return the complete SVG document for TILE and dynamic FRAGMENT."
@@ -1636,16 +1650,11 @@ band under the grid."
 
 (defun org-timegrid--geometry-tiles (geometry &optional margin)
   "Return tiles intersected by GEOMETRY and its visual MARGIN."
-  (let* ((margin (or margin 0))
-         (top (max 0 (- (plist-get geometry :y) margin)))
-         (bottom (min org-timegrid--image-height
-                      (+ (plist-get geometry :y)
-                         (plist-get geometry :height) margin)))
-         (first (max 0 (floor top org-timegrid--tile-height)))
-         (last (min (1- org-timegrid--tile-count)
-                    (floor (- bottom 0.001)
-                           org-timegrid--tile-height))))
-    (number-sequence first last)))
+  (let ((margin (or margin 0))
+        (top (plist-get geometry :y)))
+    (org-timegrid--tiles-intersecting
+     (- top margin)
+     (+ top (plist-get geometry :height) margin))))
 
 (defun org-timegrid--dynamic-fragment ()
   "Return dynamic SVG XML followed by the tiles it intersects."
@@ -2253,16 +2262,22 @@ Keep the same calendar minute at the vertical center of the window."
   "Return WINDOW's absolute pixel offset in the tiled calendar."
   (let* ((start (window-start window))
          (tile (or (get-text-property start 'org-timegrid-tile) 0)))
-    (+ (* tile (or org-timegrid--tile-height 0))
+    (+ (if org-timegrid--tile-count
+           (car (org-timegrid--tile-bounds tile))
+         0)
        (window-vscroll window t))))
 
 (defun org-timegrid--set-vscroll (window pixels)
   "Set WINDOW's pixel scroll to PIXELS and remember it."
   (let* ((pixels (max 0 (round pixels)))
-         (height (max 1 (or org-timegrid--tile-height 1)))
-         (tile (min (max 0 (1- (or org-timegrid--tile-count 1)))
-                    (floor pixels height)))
-         (within (% pixels height)))
+         (pixels (if (numberp org-timegrid--image-height)
+                     (min pixels (1- (ceiling org-timegrid--image-height)))
+                   pixels))
+         (tile (or (org-timegrid--tile-at-pixel pixels) 0))
+         (top (if org-timegrid--tile-count
+                  (car (org-timegrid--tile-bounds tile))
+                0))
+         (within (- pixels top)))
     (when (and (vectorp org-timegrid--tile-markers)
                (< tile (length org-timegrid--tile-markers)))
       (let ((marker (aref org-timegrid--tile-markers tile)))
@@ -2400,7 +2415,9 @@ reset the horizontal origin.  Add the tile offset to glyph-relative Y."
                                                 'org-timegrid-tile))))))
     (when (or window-xy object-xy)
       (cons (or (car-safe window-xy) (car-safe object-xy))
-            (+ (* (or tile 0) (or org-timegrid--tile-height 0))
+            (+ (if (and tile org-timegrid--tile-count)
+                   (car (org-timegrid--tile-bounds tile))
+                 0)
                (or (cdr-safe object-xy) (cdr-safe window-xy)))))))
 
 (defun org-timegrid--target (position)
