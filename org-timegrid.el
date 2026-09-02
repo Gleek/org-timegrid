@@ -53,6 +53,29 @@
   "Hour at the bottom edge of the week canvas."
   :type 'integer)
 
+(defcustom org-timegrid-days 7
+  "Number of consecutive days displayed in the calendar.
+The initial range ends today unless the current week's first day falls
+within that range; in that case it starts on the week's first day.
+The value must be a positive integer."
+  :type '(integer :tag "Days"))
+
+(defun org-timegrid--last-day-index ()
+  "Return the zero-based index of the final visible day."
+  (1- org-timegrid-days))
+
+(defun org-timegrid--range-start (&optional absolute-date)
+  "Return the first visible day for a range containing ABSOLUTE-DATE.
+Prefer the configured start of the week when it lies among the trailing
+`org-timegrid-days' dates.  Otherwise end that trailing range on
+ABSOLUTE-DATE."
+  (let* ((absolute (or absolute-date
+                       (calendar-absolute-from-gregorian
+                        (calendar-current-date))))
+         (week-start (org-timegrid-week-start absolute))
+         (trailing-start (- absolute (org-timegrid--last-day-index))))
+    (max week-start trailing-start)))
+
 (defcustom org-timegrid-pixels-per-minute 0.9
   "Vertical SVG scale in pixels per minute."
   :type 'number)
@@ -288,7 +311,8 @@ half-hour block room for two lines of title."
   "Load renderer state for WEEK-START from the current backend."
   (let* ((events (org-timegrid-backend-list
                   org-timegrid--backend
-                  (* week-start 1440) (* (+ week-start 7) 1440)))
+                  (* week-start 1440)
+                  (* (+ week-start org-timegrid-days) 1440)))
          (blocks (org-timegrid-events-to-blocks events week-start)))
     ;; The cursor has a remembered position and a separate visibility, so
     ;; hiding it with C-g keeps the place, and block selection can record a
@@ -302,7 +326,7 @@ It sits on the current fifteen-minute slot when today is visible, and on
 the first visible day at the configured start hour otherwise."
   (let* ((today (calendar-absolute-from-gregorian (calendar-current-date)))
          (offset (- today week-start)))
-    (if (<= 0 offset 6)
+    (if (<= 0 offset (org-timegrid--last-day-index))
         (let ((now (decode-time)))
           (org-timegrid--cursor-state-create
            :surface 'grid :day offset
@@ -362,7 +386,8 @@ cursor it draws and this agree."
   (when-let* (((org-timegrid--cursor-visible-p))
               (cursor (org-timegrid--cursor)))
     (let* ((canvas (max 560 (org-timegrid--window-width)))
-           (column (/ (- canvas org-timegrid--label-width) 7.0))
+           (column (/ (- canvas org-timegrid--label-width)
+                      (float org-timegrid-days)))
            (selected (org-timegrid--selected-id))
            (lane (and selected
                       (cl-find-if
@@ -411,7 +436,7 @@ also moving it, so its position is visible before it is used."
 (defun org-timegrid--set-cursor (day minute &optional lane)
   "Move the cursor to DAY and MINUTE, clamped to the visible week.
 LANE picks between blocks sharing that start, and defaults to zero."
-  (let* ((day (max 0 (min 6 day)))
+  (let* ((day (max 0 (min (org-timegrid--last-day-index) day)))
          (minute (org-timegrid--snap-minute minute))
          (lane (or lane 0))
          (candidates (org-timegrid--blocks-starting-at day minute))
@@ -473,7 +498,7 @@ visible week.  Timed ranges remain clamped to the visible week."
          (end (+ (* (org-timegrid-block-day block) 1440)
                  (org-timegrid-block-end block)))
          (duration (- end start))
-         (week-end (* 7 1440)))
+         (week-end (* org-timegrid-days 1440)))
     (pcase edge
       ('top
        (setq start (min (+ start delta) (- end minimum)))
@@ -576,14 +601,14 @@ or `add-occurrence' for another time on the source entry."
               (setq kind 'resize)
               (org-timegrid--set-absolute-range
                block absolute-start
-               (min (* 7 1440)
+               (min (* org-timegrid-days 1440)
                     (max (+ absolute-target unit)
                          (+ absolute-start unit)))))
              (t
               (setq kind (if copying copy-kind 'move))
               (let* ((grab-offset (- absolute-origin absolute-start))
                      (new-start (max 0 (min (- absolute-target grab-offset)
-                                            (- (* 7 1440) duration)))))
+                                            (- (* org-timegrid-days 1440) duration)))))
                 (org-timegrid--set-absolute-range
                  block new-start (+ new-start duration))))))
             (setf (org-timegrid-block-preview block) t)
@@ -880,7 +905,7 @@ works without the palette having to know it in advance."
          (absolute-start (+ (* source-day 1440) source-start))
          (absolute-end (+ (* source-day 1440) source-end))
          segments)
-    (dotimes (day 7)
+    (dotimes (day org-timegrid-days)
       (let* ((day-start (* day 1440))
              (day-end (+ day-start 1440))
              (segment-start (max absolute-start day-start))
@@ -901,7 +926,7 @@ works without the palette having to know it in advance."
     ;; A range ending exactly at midnight needs a small bottom-edge target at
     ;; the top of the next day so it can be extended forward.
     (when (and (= (% absolute-end 1440) 0)
-               (< 0 absolute-end (* 7 1440)))
+               (< 0 absolute-end (* org-timegrid-days 1440)))
       (let* ((day (/ absolute-end 1440))
              (grip (copy-org-timegrid-block block)))
         (setf (org-timegrid-block-source-day grip) source-day
@@ -918,7 +943,7 @@ works without the palette having to know it in advance."
     ;; A range starting exactly at midnight gets its top-edge target at the
     ;; bottom of the preceding day so it can be extended backward.
     (when (and (= (% absolute-start 1440) 0)
-               (< 0 absolute-start (* 7 1440)))
+               (< 0 absolute-start (* org-timegrid-days 1440)))
       (let* ((day (1- (/ absolute-start 1440)))
              (grip (copy-org-timegrid-block block)))
         (setf (org-timegrid-block-source-day grip) source-day
@@ -1121,7 +1146,7 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                (numberp (org-timegrid--calendar-state-week-start
                          org-timegrid--state)))
     (setq-local org-timegrid--state
-                (org-timegrid--load-state (org-timegrid-week-start))))
+                (org-timegrid--load-state (org-timegrid--range-start))))
   org-timegrid--state)
 
 (defun org-timegrid--draw-block
@@ -1214,7 +1239,7 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
          (today-day (- today (org-timegrid--calendar-state-week-start org-timegrid--state)))
          (now-minute (+ (* 60 (decoded-time-hour now))
                         (decoded-time-minute now))))
-    (when (and (<= 0 today-day 6)
+    (when (and (<= 0 today-day (org-timegrid--last-day-index))
                (<= start-minute now-minute
                    (* 60 org-timegrid-end-hour)))
       (let* ((y (+ org-timegrid--grid-top-inset
@@ -1256,7 +1281,7 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
          (height (+ org-timegrid--grid-top-inset
                     (ceiling (* (- end-minute start-minute) scale))))
          (column-width (/ (- width org-timegrid--label-width)
-                          7.0))
+                          (float org-timegrid-days)))
          (svg (svg-create width height :stroke-width 0))
          (palette (org-timegrid--palette))
          (font-family (let ((family (face-attribute 'default :family nil t)))
@@ -1266,13 +1291,13 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
           (- (calendar-absolute-from-gregorian (calendar-current-date))
              week-start))
          (blocks (org-timegrid--effective-blocks))
-         (day-blocks (make-vector 7 nil))
+         (day-blocks (make-vector org-timegrid-days nil))
          geometry)
     (setq-local org-timegrid--image-height height)
     (svg-rectangle svg 0 0 width height :fill (plist-get palette :background))
     (svg-rectangle svg 0 0 org-timegrid--label-width height
                    :fill (plist-get palette :time-background))
-    (dotimes (day 7)
+    (dotimes (day org-timegrid-days)
       (let* ((x (+ org-timegrid--label-width
                    (* day column-width)))
              (weekday
@@ -1304,7 +1329,7 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                            :x 5 :y (+ y 11) :font-size 10
                            :font-family font-family
                            :fill (plist-get palette :time-label)))))
-    (dotimes (day 7)
+    (dotimes (day org-timegrid-days)
       (dolist (block (aref day-blocks day))
         (push (org-timegrid--draw-block
                svg block height start-minute scale column-width
@@ -1365,7 +1390,7 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
          (start-minute (* 60 org-timegrid-start-hour))
          (column-width (/ (- org-timegrid--tile-width
                              org-timegrid--label-width)
-                          7.0))
+                          (float org-timegrid-days)))
          (y (org-timegrid--draw-current-time
              svg org-timegrid--tile-width org-timegrid--image-height
              column-width palette font-family start-minute
@@ -1456,7 +1481,7 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
          (selected (and (null preview) (org-timegrid--selected-id)))
          (blocks (org-timegrid--effective-blocks)))
     (when (or preview selected)
-      (cl-loop for day from 0 below 7
+      (cl-loop for day from 0 below org-timegrid-days
                append
                (cl-remove-if-not
                 (lambda (block)
@@ -1489,7 +1514,7 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
          (start-minute (* 60 org-timegrid-start-hour))
          (column-width (/ (- org-timegrid--tile-width
                              org-timegrid--label-width)
-                          7.0))
+                          (float org-timegrid-days)))
          (preview (org-timegrid--calendar-state-preview org-timegrid--state))
          (selected (and (null preview) (org-timegrid--selected-id)))
          geometry tiles)
@@ -1590,7 +1615,7 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
 (defun org-timegrid--all-day-layout ()
   "Return visible all-day blocks annotated with stable rail lanes.
 The ordering favours earlier and longer spans, then title and identity."
-  (let* ((week-end (* 7 1440))
+  (let* ((week-end (* org-timegrid-days 1440))
          (preview (org-timegrid--calendar-state-preview org-timegrid--state))
          (preview-block (and preview (org-timegrid--operation-block preview)))
          (replace-id (and preview
@@ -1746,7 +1771,8 @@ the rail presents those same endpoints as its left and right edges."
 SECONDARY is the final year and is drawn with lighter weight.  PRIMARY
 includes both month names when the visible week crosses a boundary."
   (let* ((first (calendar-gregorian-from-absolute week-start))
-         (last (calendar-gregorian-from-absolute (+ week-start 6)))
+         (last (calendar-gregorian-from-absolute
+                (+ week-start (org-timegrid--last-day-index))))
          (first-month (calendar-month-name (nth 0 first)))
          (last-month (calendar-month-name (nth 0 last)))
          (first-year (nth 2 first))
@@ -1769,14 +1795,13 @@ includes both month names when the visible week crosses a boundary."
 
 (defun org-timegrid--week-label (absolute-date)
   "Return the ISO week label that best represents the visible week.
-ABSOLUTE-DATE is the first displayed day.  Use its midpoint because a
-Sunday-starting calendar begins one day before the corresponding ISO week."
-  (org-timegrid--iso-week-format (+ absolute-date 3) "W%V"))
+ABSOLUTE-DATE is the first displayed day."
+  (org-timegrid--iso-week-format
+   (+ absolute-date (floor org-timegrid-days 2)) "W%V"))
 
 (defun org-timegrid--week-current-p (week-start today)
-  "Return non-nil when WEEK-START's displayed ISO week contains TODAY."
-  (equal (org-timegrid--iso-week-format (+ week-start 3) "%G-%V")
-         (org-timegrid--iso-week-format today "%G-%V")))
+  "Return non-nil when the range starting at WEEK-START contains TODAY."
+  (<= week-start today (+ week-start (org-timegrid--last-day-index))))
 
 (defun org-timegrid--header ()
   "Return a pixel-aligned SVG header for the calendar."
@@ -1794,7 +1819,7 @@ Sunday-starting calendar begins one day before the corresponding ISO week."
                     (* rail-rows org-timegrid-all-day-lane-height)))
          (column-width (/ (- canvas-width
                              org-timegrid--label-width)
-                          7.0))
+                          (float org-timegrid-days)))
          (palette (org-timegrid--palette))
          (font-family (let ((family (face-attribute 'default :family nil t)))
                         (if (stringp family) family "monospace")))
@@ -1824,7 +1849,7 @@ Sunday-starting calendar begins one day before the corresponding ISO week."
                                (if (org-timegrid--week-current-p week-start today)
                                    :red
                                  :secondary-text)))
-    (dotimes (day 7)
+    (dotimes (day org-timegrid-days)
       (let* ((absolute (+ week-start day))
              (date (calendar-gregorian-from-absolute absolute))
              (day-name (calendar-day-name date t))
@@ -1862,7 +1887,7 @@ Sunday-starting calendar begins one day before the corresponding ISO week."
               :y (+ org-timegrid--rail-top 15)
               :font-size 9 :font-family font-family
               :fill (plist-get palette :secondary-text))
-    (dotimes (day 7)
+    (dotimes (day org-timegrid-days)
       (let ((x (+ left-offset org-timegrid--label-width (* day column-width))))
         (svg-line svg x org-timegrid--rail-top x height
                   :stroke (plist-get palette :grid) :stroke-width 1)))
@@ -1894,7 +1919,7 @@ Sunday-starting calendar begins one day before the corresponding ISO week."
                        :stroke (plist-get palette :cursor)
                        :stroke-width 1
                        :rx org-timegrid-corner-radius)))
-    (dotimes (day 7)
+    (dotimes (day org-timegrid-days)
       (let ((hidden
              (seq-count
               (lambda (block)
@@ -2188,13 +2213,14 @@ reset the horizontal origin.  Add the tile offset to glyph-relative Y."
          (y (and xy (cdr xy)))
          (width (org-timegrid--window-width))
          (column-width (/ (- width org-timegrid--label-width)
-                          7.0))
+                          (float org-timegrid-days)))
          (start-minute (* 60 org-timegrid-start-hour)))
     (when (and (numberp x) (numberp y)
                (>= x org-timegrid--label-width)
                (< x width) (>= y 0)
                (< y org-timegrid--image-height))
-      (let* ((day (min 6 (floor (/ (- x org-timegrid--label-width)
+      (let* ((day (min (org-timegrid--last-day-index)
+                       (floor (/ (- x org-timegrid--label-width)
                                     column-width))))
              (minute (+ start-minute
                         (* org-timegrid-slot-minutes
@@ -2454,7 +2480,8 @@ selects nothing.  The mouse and the keyboard drive one shared cursor."
                           (or (car (window-fringes window)) 0)
                         0))
          (canvas-width (org-timegrid--window-width))
-         (column-width (/ (- canvas-width org-timegrid--label-width) 7.0)))
+         (column-width (/ (- canvas-width org-timegrid--label-width)
+                          (float org-timegrid-days))))
     (when (and (numberp x) (numberp y) (>= y org-timegrid--rail-top)
                (>= x (+ left-offset org-timegrid--label-width))
                (< x (+ left-offset canvas-width)))
@@ -2470,7 +2497,7 @@ selects nothing.  The mouse and the keyboard drive one shared cursor."
               :id (plist-get geometry :id)
               :block-id (plist-get geometry :id)
               :edge (and geometry (org-timegrid--rail-edge-at geometry x))
-              :day (min 6 (max 0 (floor
+              :day (min (org-timegrid--last-day-index) (max 0 (floor
                                   (/ (- x left-offset
                                         org-timegrid--label-width)
                                      column-width))))
@@ -2966,8 +2993,9 @@ last lane, or where there is only one, it moves by a day."
       (cond
        ((eq (org-timegrid--cursor-state-surface cursor) 'rail)
         (let* ((target (+ (org-timegrid--cursor-state-day cursor) count))
-               (week-offset (* 7 (floor target 7)))
-               (day (mod target 7)))
+               (week-offset (* org-timegrid-days
+                               (floor target org-timegrid-days)))
+               (day (mod target org-timegrid-days)))
           (when (/= week-offset 0)
             (org-timegrid--reload-state
              (+ (org-timegrid--calendar-state-week-start org-timegrid--state) week-offset)))
@@ -2980,8 +3008,9 @@ last lane, or where there is only one, it moves by a day."
                                   (org-timegrid--cursor-state-minute cursor) (1- lane)))
        (t
         (let* ((target (+ (org-timegrid--cursor-state-day cursor) count))
-               (week-offset (* 7 (floor target 7)))
-               (day (mod target 7))
+               (week-offset (* org-timegrid-days
+                               (floor target org-timegrid-days)))
+               (day (mod target org-timegrid-days))
                (minute (org-timegrid--cursor-state-minute cursor)))
           (when (/= week-offset 0)
             (org-timegrid--reload-state
@@ -3047,7 +3076,7 @@ occurs once, at its first visible date."
                  (lambda (block) (not (org-timegrid-block-preview block)))
                  (org-timegrid--timed-blocks)))
          result)
-    (dotimes (day-index 7)
+    (dotimes (day-index org-timegrid-days)
       (let (day-all-day day-timed)
         (dolist (block all-day)
           (when (and (= day-index
@@ -3079,7 +3108,8 @@ occurs once, at its first visible date."
   "Move the cursor to BLOCK's own first slot, which selects it.
 The lane records which of several blocks sharing that start is meant, so
 co-starting entries stay individually reachable."
-  (let* ((day (max 0 (min 6 (org-timegrid-block-day block))))
+  (let* ((day (max 0 (min (org-timegrid--last-day-index)
+                          (org-timegrid-block-day block))))
          (start (org-timegrid-block-start block)))
     (if (org-timegrid-block-all-day-p block)
         (let ((laid-out
@@ -3146,7 +3176,7 @@ search starts from the cursor."
 (defun org-timegrid--move-selection-across-week (direction)
   "Move one week in DIRECTION and select its first or last block."
   (let* ((week-start (+ (org-timegrid--calendar-state-week-start org-timegrid--state)
-                        (* direction 7)))
+                        (* direction org-timegrid-days)))
          (state (org-timegrid--load-state week-start))
          (blocks (let ((org-timegrid--state state))
                    (org-timegrid--ordered-blocks))))
@@ -3223,7 +3253,8 @@ lane after an edit changes its layout."
   (if-let ((block (org-timegrid--block id)))
       (org-timegrid--goto-block block)
     (if all-day
-        (org-timegrid--set-all-day-cursor (max 0 (min 6 day)) 0)
+        (org-timegrid--set-all-day-cursor
+         (max 0 (min (org-timegrid--last-day-index) day)) 0)
       (org-timegrid--set-cursor day minute 0))
     (setf (org-timegrid--calendar-state-cursor-visible org-timegrid--state) t)
     (org-timegrid--cursor-moved)))
@@ -3329,7 +3360,7 @@ changes its end.  The cursor follows, so the key can be held down."
                              :key (lambda (candidate)
                                     (org-timegrid-block-id candidate))
                              :test #'equal))
-                   (day (max 0 (min 6 (floor
+                   (day (max 0 (min (org-timegrid--last-day-index) (floor
                                       (or (and laid-out
                                                (org-timegrid-block-rail-start
                                                 laid-out))
@@ -3363,7 +3394,7 @@ consecutive days instead of stacking every copy on the same one."
          (start (org-timegrid-block-start block))
          (day (+ (org-timegrid-block-day block) (or count 1)))
          (title (org-timegrid-block-title block)))
-    (unless (<= 0 day 6)
+    (unless (<= 0 day (org-timegrid--last-day-index))
       (user-error "That day is outside the visible week"))
     (let ((copy (copy-org-timegrid-block block)))
       (setf (org-timegrid-block-day copy) day)
@@ -3656,7 +3687,7 @@ the duration is asked for separately, prefilled with the current one."
          (answer (org-timegrid--read-timestamp
                    cursor-absolute org-timegrid-slot-minutes))
          (absolute (floor (car answer) 1440)))
-    (org-timegrid--reload-state (org-timegrid-week-start absolute))
+    (org-timegrid--reload-state (org-timegrid--range-start absolute))
     (org-timegrid--set-cursor
      (- absolute (org-timegrid--calendar-state-week-start org-timegrid--state))
      (% (car answer) 1440))
@@ -3670,7 +3701,7 @@ since jumping dates should not conjure a cursor nobody asked for."
   (interactive)
   (let ((today (calendar-absolute-from-gregorian (calendar-current-date)))
         (visible (and (org-timegrid--cursor) t)))
-    (org-timegrid--reload-state (org-timegrid-week-start today))
+    (org-timegrid--reload-state (org-timegrid--range-start today))
     (setf (org-timegrid--calendar-state-cursor org-timegrid--state)
           (and visible
                (org-timegrid--default-cursor
@@ -3718,12 +3749,12 @@ where it was left.  Only an explicit refresh forgets it."
 (defun org-timegrid-previous-week ()
   "Show the previous week."
   (interactive)
-  (org-timegrid-shift-week -7))
+  (org-timegrid-shift-week (- org-timegrid-days)))
 
 (defun org-timegrid-next-week ()
   "Show the next week."
   (interactive)
-  (org-timegrid-shift-week 7))
+  (org-timegrid-shift-week org-timegrid-days))
 
 (defun org-timegrid-backward-day ()
   "Move the seven-day calendar backward by one day."
@@ -3942,7 +3973,7 @@ Revisiting an existing calendar retains its pixel scroll position."
          (buffer (or existing
                      (get-buffer-create org-timegrid-buffer-name)))
          (requested-week (and absolute-date
-                              (org-timegrid-week-start absolute-date)))
+                              (org-timegrid--range-start absolute-date)))
          refreshp)
     (if existing
         (with-current-buffer buffer
@@ -3962,7 +3993,7 @@ Revisiting an existing calendar retains its pixel scroll position."
         (setq-local org-timegrid--backend backend)
         (setq-local org-timegrid--state
                     (org-timegrid--load-state
-                     (org-timegrid-week-start absolute-date)))
+                     (org-timegrid--range-start absolute-date)))
         (let ((owner buffer))
           (setq-local
            org-timegrid--clock-timer

@@ -3,6 +3,37 @@
 (require 'ert)
 (require 'org-timegrid-org)
 
+(ert-deftest org-timegrid-test-range-start-uses-week-start-when-visible ()
+  (let ((org-timegrid-days 3)
+        (calendar-week-start-day 0))
+    ;; Tuesday's trailing three-day range includes Sunday.
+    (let ((tuesday (calendar-absolute-from-gregorian '(9 1 2026))))
+      (should (= (org-timegrid--range-start tuesday)
+                 (calendar-absolute-from-gregorian '(8 30 2026)))))))
+
+(ert-deftest org-timegrid-test-range-start-falls-back-to-trailing-days ()
+  (let ((org-timegrid-days 3)
+        (calendar-week-start-day 0))
+    ;; By Wednesday, Sunday is outside the trailing three-day range.
+    (let ((wednesday (calendar-absolute-from-gregorian '(9 2 2026))))
+      (should (= (org-timegrid--range-start wednesday)
+                 (calendar-absolute-from-gregorian '(8 31 2026)))))))
+
+(ert-deftest org-timegrid-test-load-state-honours-visible-day-count ()
+  (let* ((org-timegrid-days 3)
+         requested-start requested-end
+         (org-timegrid--backend
+          (org-timegrid-backend-create
+           :name "test"
+           :list-function
+           (lambda (start end)
+             (setq requested-start start
+                   requested-end end)
+             nil))))
+    (org-timegrid--load-state 100)
+    (should (= requested-start (* 100 1440)))
+    (should (= requested-end (* 103 1440)))))
+
 (ert-deftest org-timegrid-test-event-kind-survives-block-conversion ()
   (let* ((event (org-timegrid-event-create
                  :id 'date-only :title "Holiday" :start 14400 :end 15840
@@ -74,7 +105,8 @@
     (should called)))
 
 (ert-deftest org-timegrid-test-mixed-kind-render-smoke ()
-  (let* ((week 100)
+  (let* ((org-timegrid-days 3)
+         (week 100)
          (timed-event (org-timegrid-event-create
                        :id 'timed :title "Meeting"
                        :start (+ (* week 1440) 600)

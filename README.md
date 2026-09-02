@@ -230,6 +230,7 @@ priority, property, or file.
 
 | Variable                                            |    Default | Meaning                                  |
 |-----------------------------------------------------|-----------:|------------------------------------------|
+| `org-timegrid-days`                                 |        `7` | Consecutive days shown in the main view  |
 | `org-timegrid-start-hour` / `org-timegrid-end-hour` | `0` / `24` | Hours drawn                              |
 | `org-timegrid-pixels-per-minute`                    |      `0.9` | Week-view scale                          |
 | `org-timegrid-slot-minutes`                         |       `15` | Cursor and edit granularity              |
