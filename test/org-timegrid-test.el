@@ -3,6 +3,22 @@
 (require 'ert)
 (require 'org-timegrid-org)
 
+(ert-deftest org-timegrid-test-svg-color-normalizes-x11-name ()
+  (should (equal (org-timegrid--svg-color "Red1") "#ff0000")))
+
+(ert-deftest org-timegrid-test-svg-color-normalizes-short-hex ()
+  (should (equal (org-timegrid--svg-color "#abc") "#aabbcc")))
+
+(ert-deftest org-timegrid-test-svg-color-uses-fallback ()
+  (should (equal (org-timegrid--svg-color "not-a-color" "#3a5fcd")
+                 "#3a5fcd")))
+
+(ert-deftest org-timegrid-test-face-color-is-svg-safe ()
+  (cl-letf (((symbol-function 'face-attribute)
+             (lambda (&rest _ignored) "Red1")))
+    (should (equal (org-timegrid--face-color 'error :foreground "#d94b4b")
+                   "#ff0000"))))
+
 (ert-deftest org-timegrid-test-text-scale-controls-svg-scale ()
   (with-temp-buffer
     (let ((org-timegrid-pixels-per-minute 0.9)

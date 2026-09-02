@@ -729,7 +729,16 @@ Buffer-local face remapping wins, so the drawing matches the buffer it is
 drawn into rather than the frame's idea of the face."
   (let ((value (or (org-timegrid--remapped-color face attribute)
                    (face-attribute face attribute nil t))))
-    (if (and (stringp value) (color-name-to-rgb value)) value fallback)))
+    (org-timegrid--svg-color value fallback)))
+
+(defun org-timegrid--svg-color (color &optional fallback)
+  "Return COLOR as an SVG-safe six-digit hexadecimal string.
+Emacs accepts X11 names such as `Red1' that SVG does not.  Resolve every
+color through Emacs before handing it to the SVG renderer.  Use FALLBACK
+when COLOR cannot be resolved."
+  (when-let ((rgb (or (org-timegrid--rgb color)
+                      (org-timegrid--rgb fallback))))
+    (apply #'color-rgb-to-hex (append rgb '(2)))))
 
 (defun org-timegrid--blend (foreground background amount)
   "Blend FOREGROUND into BACKGROUND by AMOUNT."
@@ -965,10 +974,11 @@ COLOR is a name in `org-timegrid-colors', any colour string, or nil for
 `org-timegrid-default-color'.  An unknown name falls back to the theme's
 own accent rather than drawing nothing."
   (let ((color (or color org-timegrid-default-color)))
-    (or (and (symbolp color) (cdr (assq color org-timegrid-colors)))
-        (and (stringp color) (color-defined-p color) color)
-        (cdr (assq org-timegrid-default-color org-timegrid-colors))
-        (plist-get palette :blue))))
+    (org-timegrid--svg-color
+     (or (and (symbolp color) (cdr (assq color org-timegrid-colors)))
+         (and (stringp color) (color-defined-p color) color)
+         (cdr (assq org-timegrid-default-color org-timegrid-colors)))
+     (plist-get palette :blue))))
 
 (defun org-timegrid--accent (block palette)
   "Return the accent color for BLOCK from PALETTE."
