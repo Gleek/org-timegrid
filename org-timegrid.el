@@ -1555,11 +1555,15 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
         (fragment (concat fragment
                           (and (memq tile org-timegrid--clock-tiles)
                                org-timegrid--clock-fragment))))
+    ;; Pass `:scale 1' like the header image does.  Without it Emacs scales
+    ;; the tile by `image-scaling-factor', which is `char-width / 10' by
+    ;; default.  The header would keep its size and the grid would not, so the
+    ;; columns drift away from the day names.
     (if map
         (create-image (org-timegrid--tile-xml tile fragment) 'svg t
-                      :ascent 90 :map map :original-map map)
+                      :ascent 90 :scale 1 :map map :original-map map)
       (create-image (org-timegrid--tile-xml tile fragment) 'svg t
-                    :ascent 90))))
+                    :ascent 90 :scale 1))))
 
 (defun org-timegrid--cache-static-tiles (&optional excluded-id)
   "Cache hour tiles, omitting EXCLUDED-ID from their static layer."
