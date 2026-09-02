@@ -260,6 +260,23 @@
   (dolist (area '(nil calendar-block calendar-resize))
     (should-not (org-timegrid--rail-area-p area))))
 
+(ert-deftest org-timegrid-test-double-click-does-not-enter-drag-tracker ()
+  (should (eq (lookup-key org-timegrid-mode-map [down-mouse-1])
+              #'org-timegrid-press))
+  (should (eq (lookup-key org-timegrid-mode-map [double-down-mouse-1])
+              #'org-timegrid-ignore-double-press))
+  (should (eq (lookup-key org-timegrid-mode-map [double-mouse-1])
+              #'org-timegrid-visit))
+  (should (eq (lookup-key org-timegrid-mode-map
+                          [calendar-block double-down-mouse-1])
+              #'org-timegrid-ignore-double-press))
+  (should (eq (lookup-key org-timegrid--header-map
+                          [calendar-rail-block double-down-mouse-1])
+              #'org-timegrid-ignore-double-press))
+  (should (eq (lookup-key org-timegrid--header-map
+                          [calendar-rail-block double-mouse-1])
+              #'org-timegrid-header-visit)))
+
 (ert-deftest org-timegrid-test-cross-surface-preview-does-not-resize-drag-rail ()
   (let* ((source (org-timegrid-block-create
                   :id 'meeting :day 1 :start 600 :end 660

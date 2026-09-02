@@ -220,6 +220,8 @@ half-hour block room for two lines of title."
 (defvar org-timegrid--header-map
   (let ((map (make-sparse-keymap)))
     (define-key map [header-line down-mouse-1] #'org-timegrid-header-press)
+    (define-key map [header-line double-down-mouse-1]
+                #'org-timegrid-ignore-double-press)
     (define-key map [header-line mouse-1] #'org-timegrid-header-click)
     (define-key map [header-line double-mouse-1] #'org-timegrid-header-visit)
     map)
@@ -229,12 +231,16 @@ half-hour block room for two lines of title."
 ;; through the image string's `keymap' property, so support both forms.
 (define-key org-timegrid--header-map [down-mouse-1]
             #'org-timegrid-header-press)
+(define-key org-timegrid--header-map [double-down-mouse-1]
+            #'org-timegrid-ignore-double-press)
 (define-key org-timegrid--header-map [mouse-1]
             #'org-timegrid-header-click)
 (define-key org-timegrid--header-map [double-mouse-1]
             #'org-timegrid-header-visit)
 (define-key org-timegrid--header-map [header-line down-mouse-1]
             #'org-timegrid-header-press)
+(define-key org-timegrid--header-map [header-line double-down-mouse-1]
+            #'org-timegrid-ignore-double-press)
 (define-key org-timegrid--header-map [header-line mouse-1]
             #'org-timegrid-header-click)
 (define-key org-timegrid--header-map [header-line double-mouse-1]
@@ -242,6 +248,8 @@ half-hour block room for two lines of title."
 (dolist (area '(calendar-rail-block calendar-rail-resize))
   (define-key org-timegrid--header-map (vector area 'down-mouse-1)
               #'org-timegrid-header-press)
+  (define-key org-timegrid--header-map (vector area 'double-down-mouse-1)
+              #'org-timegrid-ignore-double-press)
   (define-key org-timegrid--header-map (vector area 'mouse-1)
               #'org-timegrid-header-click)
   (define-key org-timegrid--header-map (vector area 'double-mouse-1)
@@ -2677,6 +2685,11 @@ Pressing an existing block retains ordinary click-to-select behavior."
                         org-timegrid--backend)))
     (funcall visitor calendar-event)))
 
+(defun org-timegrid-ignore-double-press (_event)
+  "Ignore the second button press so its double-click release can visit.
+The first press still follows the ordinary click-or-drag path."
+  (interactive "e"))
+
 (defun org-timegrid-visit (event)
   "Visit the source event under double-click mouse EVENT."
   (interactive "@e")
@@ -3787,6 +3800,8 @@ where it was left.  Only an explicit refresh forgets it."
     (set-keymap-parent map special-mode-map)
     (define-key map [down-mouse-1]
                 #'org-timegrid-press)
+    (define-key map [double-down-mouse-1]
+                #'org-timegrid-ignore-double-press)
     (define-key map [s-down-mouse-1]
                 #'org-timegrid-press)
     (define-key map [S-down-mouse-1]
@@ -3796,12 +3811,16 @@ where it was left.  Only an explicit refresh forgets it."
     (define-key map [mouse-movement] #'org-timegrid-pointer-feedback)
     (define-key map [header-line mouse-1] #'org-timegrid-header-click)
     (define-key map [header-line down-mouse-1] #'org-timegrid-header-press)
+    (define-key map [header-line double-down-mouse-1]
+                #'org-timegrid-ignore-double-press)
     (define-key map [header-line s-down-mouse-1] #'org-timegrid-header-press)
     (define-key map [header-line S-down-mouse-1] #'org-timegrid-header-press)
     (define-key map [header-line double-mouse-1] #'org-timegrid-header-visit)
     (dolist (area '(calendar-block calendar-resize))
       (define-key map (vector area 'down-mouse-1)
                   #'org-timegrid-press)
+      (define-key map (vector area 'double-down-mouse-1)
+                  #'org-timegrid-ignore-double-press)
       (define-key map (vector area 's-down-mouse-1)
                   #'org-timegrid-press)
       (define-key map (vector area 'S-down-mouse-1)
@@ -3908,11 +3927,15 @@ where it was left.  Only an explicit refresh forgets it."
             #'org-timegrid-press)
 (define-key org-timegrid-mode-map [S-down-mouse-1]
             #'org-timegrid-press)
+(define-key org-timegrid-mode-map [double-down-mouse-1]
+            #'org-timegrid-ignore-double-press)
 (dolist (area '(calendar-block calendar-resize))
   (define-key org-timegrid-mode-map (vector area 's-down-mouse-1)
               #'org-timegrid-press)
   (define-key org-timegrid-mode-map (vector area 'S-down-mouse-1)
               #'org-timegrid-press)
+  (define-key org-timegrid-mode-map (vector area 'double-down-mouse-1)
+              #'org-timegrid-ignore-double-press)
   (define-key org-timegrid-mode-map (vector area 'mouse-movement)
               #'org-timegrid-pointer-feedback))
 (define-key org-timegrid-mode-map [mouse-movement]
@@ -3921,6 +3944,8 @@ where it was left.  Only an explicit refresh forgets it."
             #'org-timegrid-header-click)
 (define-key org-timegrid-mode-map [header-line down-mouse-1]
             #'org-timegrid-header-press)
+(define-key org-timegrid-mode-map [header-line double-down-mouse-1]
+            #'org-timegrid-ignore-double-press)
 (define-key org-timegrid-mode-map [header-line s-down-mouse-1]
             #'org-timegrid-header-press)
 (define-key org-timegrid-mode-map [header-line S-down-mouse-1]

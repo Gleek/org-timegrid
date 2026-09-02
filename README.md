@@ -129,14 +129,13 @@ The last heading appears even though it has no TODO keyword. A timed active
 timestamp is enough to put a heading on the calendar. A timestamp without an
 end uses `org-timegrid-default-duration-minutes`, which defaults to 30 minutes.
 
-Date-only and inactive timestamps do not appear on the time grid. A separate
-date-only rail is planned.
+Inactive timestamps do not appear on the time grid.
+A separate date-only rail appears for active timestamp entries with no day times
 
 Repeaters are expanded into dated occurrences for display. Moving or resizing
 one occurrence edits the series anchor and preserves its repeater and warning
 modifiers. Edits leave source buffers modified but unsaved, like Org Agenda
-commands. Press `u` in the calendar to undo the edit in the Org buffer it
-changed.
+commands.
 
 Set `org-timegrid-org-show-repeaters` to nil to omit repeating timestamps and
 all of their occurrences.
@@ -163,40 +162,40 @@ drag. Press `C-g` before releasing to cancel it.
 
 ### Keyboard
 
-The calendar has one cursor. A block is selected when the cursor sits on the
+The calendar has one cursor (point). A block is selected when the cursor sits on the
 slot where that block begins. This keeps keyboard and mouse selection in sync
 after redraws.
 
 | Key                       | Action                                                                               |
 |---------------------------|--------------------------------------------------------------------------------------|
-| `C-n` / `C-p`, up/down    | Move the cursor by 15 minutes                                                        |
+| `C-n` / `C-p`, up/down    | Move the cursor by 15 minutes (configurable)                                         |
 | `C-f` / `C-b`, left/right | Move through overlapping lanes, then days                                            |
 | `C-v` / `M-v`, `SPC`      | Move by one screen                                                                   |
 | `C-a` / `C-e`             | Go to the first or last slot of the day                                              |
 | `C-l`                     | Center the view on the cursor                                                        |
 | `n` / `p`                 | Select the next or previous block                                                    |
 | `RET`                     | Visit the selected block, or create one at the cursor                                |
-| `C-g`                     | Hide the cursor                                                                      |
+| `C-g`                     | Hide the cursor / Cancel unsaved new block                                           |
 | `M-down` / `M-up`         | Move the selected block by 15 minutes                                                |
 | `M-right` / `M-left`      | Move the block by one day                                                            |
 | `S-down` / `S-up`         | Move the end time                                                                    |
 | `C-S-up` / `C-S-down`     | Move the start time                                                                  |
 | `t`                       | Enter a new time or range                                                            |
 | `e`                       | Rename the heading                                                                   |
-| `d`, Delete               | Remove its time, then optionally delete the heading                                  |
-| `M-w`, then `C-y`          | Duplicate the block as an independent entry                  |
-| `C-w`, then `C-y`          | Move the block by cutting and restoring its timestamp        |
-| `C-u C-y`                  | Paste by adding another time to the copied entry              |
-| `u`, `C-/`, `C-x u`       | Undo the last calendar edit                                                          |
-| `:`, `C-c C-q`            | Change the selected entry's tags                                                      |
-| `C-c C-t`                 | Change the selected entry's TODO state                                                |
-| `,`, `C-c ,`              | Set the selected entry's priority                                                     |
-| `i`                       | Clock in to the selected entry                                                        |
-| `O`                       | Clock out                                                                             |
-| `z`, `C-c C-z`            | Add a note to the selected entry                                                      |
-| `C-c C-x e`               | Set the selected entry's effort                                                       |
-| `C-c C-w`                 | Refile the selected entry                                                             |
-| `$`                       | Archive the selected entry                                                            |
+| `d`, backspace            | Remove its time, then optionally delete the heading                                  |
+| `M-w`, then `C-y`         | Duplicate the block as an independent entry                                          |
+| `C-w`, then `C-y`         | Move the block by cutting and restoring its timestamp                                |
+| `C-u C-y`                 | Paste by adding another time to the copied entry                                     |
+| `C-/`, `C-x u`            | Undo the last calendar edit                                                          |
+| `:`, `C-c C-q`            | Change the selected entry's tags                                                     |
+| `C-c C-t`                 | Change the selected entry's TODO state                                               |
+| `,`, `C-c ,`              | Set the selected entry's priority                                                    |
+| `i`                       | Clock in to the selected entry                                                       |
+| `O`                       | Clock out                                                                            |
+| `z`, `C-c C-z`            | Add a note to the selected entry                                                     |
+| `C-c C-x e`               | Set the selected entry's effort                                                      |
+| `C-c C-w`                 | Refile the selected entry                                                            |
+| `$`                       | Archive the selected entry                                                           |
 | `b` / `f`, `M-b` / `M-f`  | Shift by a day or week                                                               |
 | `j` / `.`                 | Jump to a date or today                                                              |
 | `g`                       | Reload the week from the backend                                                     |
