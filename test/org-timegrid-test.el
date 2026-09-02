@@ -461,5 +461,22 @@
       (should (eq (gethash 102 days) t))
       (should (eq (gethash 103 days) t)))))
 
+(ert-deftest org-timegrid-test-last-tile-takes-the-remainder ()
+  "A canvas that does not divide evenly must not end in a tiny tile.
+A few leftover pixels still take a whole text line on screen, which looks
+like a blank band under the grid."
+  (let ((org-timegrid--tile-height 54)
+        ;; 24 hours at 0.9 px per minute plus the 6px top inset.
+        (org-timegrid--image-height 1302)
+        (org-timegrid--tile-count 24))
+    (let ((last (org-timegrid--tile-bounds (1- org-timegrid--tile-count))))
+      (should (= (car last) 1242))
+      (should (= (cdr last) 60))
+      ;; The tiles cover the canvas exactly.
+      (should (= (+ (car last) (cdr last)) org-timegrid--image-height)))
+    (dotimes (tile org-timegrid--tile-count)
+      (should (>= (cdr (org-timegrid--tile-bounds tile))
+                  org-timegrid--tile-height)))))
+
 (provide 'org-timegrid-test)
 ;;; org-timegrid-test.el ends here

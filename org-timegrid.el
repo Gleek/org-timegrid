@@ -1519,11 +1519,23 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                                         org-timegrid--tile-height))))
                        (number-sequence first last))))))
 
+(defun org-timegrid--tile-bounds (tile)
+  "Return TILE's (TOP . HEIGHT) inside the canvas, in canvas pixels.
+The last tile takes whatever is left over.  A leftover of a few pixels
+would still take a whole text line on screen, and that looks like a blank
+band under the grid."
+  (let* ((top (* tile org-timegrid--tile-height))
+         (lastp (>= tile (1- org-timegrid--tile-count)))
+         (height (if lastp
+                     (- org-timegrid--image-height top)
+                   org-timegrid--tile-height)))
+    (cons top (max 0 height))))
+
 (defun org-timegrid--tile-xml (tile &optional fragment)
   "Return the complete SVG document for TILE and dynamic FRAGMENT."
-  (let* ((y (* tile org-timegrid--tile-height))
-         (height (min org-timegrid--tile-height
-                      (- org-timegrid--image-height y))))
+  (let* ((bounds (org-timegrid--tile-bounds tile))
+         (y (car bounds))
+         (height (cdr bounds)))
     (format
      (concat "<svg width=\"%s\" height=\"%s\" viewBox=\"0 %s %s %s\" "
              "version=\"1.1\" xmlns=\"http://www.w3.org/2000/svg\" "
@@ -1533,9 +1545,9 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
 
 (defun org-timegrid--tile-image-map (tile)
   "Return the production image map clipped and translated for TILE."
-  (let* ((top (* tile org-timegrid--tile-height))
-         (bottom (min org-timegrid--image-height
-                      (+ top org-timegrid--tile-height)))
+  (let* ((bounds (org-timegrid--tile-bounds tile))
+         (top (car bounds))
+         (bottom (min org-timegrid--image-height (+ top (cdr bounds))))
          translated)
     (dolist (entry (org-timegrid--image-map))
       (pcase-let* ((`(,shape ,id ,properties) entry)
@@ -1579,8 +1591,11 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                   org-timegrid--tile-height
                   (ceiling (* 60 (org-timegrid--pixels-per-minute)))
                   org-timegrid--tile-count
-                  (ceiling (/ (float org-timegrid--image-height)
-                              (ceiling (* 60 (org-timegrid--pixels-per-minute)))))
+                  ;; Round down: the remainder goes to the last tile in
+                  ;; `org-timegrid--tile-bounds' instead of becoming a tile of
+                  ;; its own that is only a few pixels tall.
+                  (max 1 (floor org-timegrid--image-height
+                                (ceiling (* 60 (org-timegrid--pixels-per-minute)))))
                   org-timegrid--base-excluded-id excluded-id)))
   (org-timegrid--update-clock-fragment)
   (setq-local org-timegrid--static-images
@@ -1708,7 +1723,10 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                             'help-echo
                             "Drag empty time to create; drag blocks to move or resize"
                             'display (aref org-timegrid--static-images tile)))
-        (insert "\n")))
+        ;; No newline after the last tile.  It would leave an empty final
+        ;; line, which shows up as blank space under the calendar.
+        (when (< tile (1- org-timegrid--tile-count))
+          (insert "\n"))))
     (setq-local org-timegrid--dynamic-tiles nil)
     (set-buffer-modified-p nil)))
 
