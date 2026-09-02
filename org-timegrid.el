@@ -68,6 +68,20 @@ Emacs' own `image-scaling-factor' is deliberately bypassed: when left at
 the columns away from the day labels by that factor on every column."
   :type 'number)
 
+(defcustom org-timegrid-scroll-style 'minimal
+  "How the view follows the cursor.
+
+`minimal' scrolls only when the cursor slot would otherwise leave the
+window, so the view stays put as long as it can; after a long run of
+motion the cursor ends up sitting at an edge.
+
+`center' keeps the cursor slot in the middle of the window whenever there
+is room left to scroll, which costs a moving view but makes the cursor's
+position on screen predictable.  `org-timegrid-recenter' does the same
+thing once, on demand."
+  :type '(choice (const :tag "Scroll as little as possible" minimal)
+                 (const :tag "Keep the cursor centred" center)))
+
 (defun org-timegrid--scale ()
   "Return the calendar zoom factor, ignoring nonsensical settings."
   (let ((scale org-timegrid-image-scale))
@@ -2895,53 +2909,58 @@ Leave the first non-motion event for the gesture loop to process."
   (org-timegrid--render-ui-change)
   (org-timegrid--scroll-cursor-into-view))
 
+(defun org-timegrid--cursor-slot-top (cursor)
+  "Return the displayed Y of CURSOR's slot, in window pixels."
+  (org-timegrid--display-y
+   (+ org-timegrid--grid-top-inset
+      (* (- (org-timegrid--cursor-state-minute cursor)
+            (* 60 org-timegrid-start-hour))
+         org-timegrid-pixels-per-minute))))
+
+(defun org-timegrid--slot-display-height ()
+  "Return the displayed height of one cursor slot, in window pixels."
+  (org-timegrid--display-y
+   (* org-timegrid-slot-minutes org-timegrid-pixels-per-minute)))
+
+(defun org-timegrid--center-cursor (window cursor)
+  "Scroll WINDOW so CURSOR's slot sits in the middle, as far as it can."
+  (let* ((top (org-timegrid--cursor-slot-top cursor))
+         (slot (org-timegrid--slot-display-height))
+         (body (window-body-height window t))
+         (maximum (max 0 (- (org-timegrid--display-height) body))))
+    (org-timegrid--set-vscroll
+     window
+     (max 0 (min maximum (round (- top (/ (- body slot) 2))))))))
+
 (defun org-timegrid--scroll-cursor-into-view ()
-  "Scroll the minimum amount that makes the whole cursor slot visible."
+  "Keep the cursor slot visible, per `org-timegrid-scroll-style'."
   (when-let* ((cursor (org-timegrid--cursor))
               (window (get-buffer-window (current-buffer) t)))
-    (let* ((scale org-timegrid-pixels-per-minute)
-           (start-minute (* 60 org-timegrid-start-hour))
-           ;; Canvas coordinates first, then converted to window pixels: the
-           ;; window scroll position is measured on the displayed image.
-           (top (org-timegrid--display-y
-                 (+ org-timegrid--grid-top-inset
-                    (* (- (org-timegrid--cursor-state-minute cursor)
-                          start-minute)
-                       scale))))
-           (bottom (+ top (org-timegrid--display-y
-                           (* org-timegrid-slot-minutes scale))))
-           (body (window-body-height window t))
-           (vscroll (org-timegrid--window-scroll-pixels window))
-           (maximum (max 0 (- (org-timegrid--display-height) body))))
-      (cond
-       ((< top vscroll)
-        (org-timegrid--set-vscroll window (max 0 (min maximum top))))
-       ((> bottom (+ vscroll body))
-        (org-timegrid--set-vscroll
-         window (max 0 (min maximum (- bottom body)))))))))
+    (if (eq org-timegrid-scroll-style 'center)
+        (org-timegrid--center-cursor window cursor)
+      (let* ((top (org-timegrid--cursor-slot-top cursor))
+             (bottom (+ top (org-timegrid--slot-display-height)))
+             (body (window-body-height window t))
+             (vscroll (org-timegrid--window-scroll-pixels window))
+             (maximum (max 0 (- (org-timegrid--display-height) body))))
+        (cond
+         ((< top vscroll)
+          (org-timegrid--set-vscroll window (max 0 (min maximum top))))
+         ((> bottom (+ vscroll body))
+          (org-timegrid--set-vscroll
+           window (max 0 (min maximum (- bottom body))))))))))
 
 (defun org-timegrid-recenter ()
   "Scroll the cursor's slot to the middle of the window, leaving it put.
-Ordinary motion scrolls only as far as it must, which keeps the cursor at
-an edge after a long run; this is the view half of that on its own, so
-the cursor never moves to satisfy the scroll."
+With the default `org-timegrid-scroll-style' motion scrolls only as far as
+it must, which keeps the cursor at an edge after a long run; this is the
+view half of that on its own, so the cursor never moves to satisfy the
+scroll."
   (interactive)
   (let ((cursor (org-timegrid--ensure-cursor))
         (window (get-buffer-window (current-buffer) t)))
     (when (window-live-p window)
-      (let* ((scale org-timegrid-pixels-per-minute)
-             (top (org-timegrid--display-y
-                   (+ org-timegrid--grid-top-inset
-                      (* (- (org-timegrid--cursor-state-minute cursor)
-                            (* 60 org-timegrid-start-hour))
-                         scale))))
-             (slot (org-timegrid--display-y
-                    (* org-timegrid-slot-minutes scale)))
-             (body (window-body-height window t))
-             (maximum (max 0 (- (org-timegrid--display-height) body))))
-        (org-timegrid--set-vscroll
-         window
-         (max 0 (min maximum (round (- top (/ (- body slot) 2))))))))))
+      (org-timegrid--center-cursor window cursor))))
 
 (defun org-timegrid--move-cursor (minutes days)
   "Move the cursor by MINUTES and DAYS, revealing it first when hidden."
