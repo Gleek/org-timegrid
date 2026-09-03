@@ -562,5 +562,17 @@
                             (org-timegrid--header)))))
               (should (= count 1))))))))))
 
+(ert-deftest org-timegrid-test-scroll-margin-follows-emacs-variables ()
+  "The scroll margin is counted in cursor slots and capped like in Emacs."
+  (let ((scroll-margin 10)
+        (maximum-scroll-margin 0.25))
+    ;; Ten slots of 14px is 140px, and a quarter of an 800px window is 200px,
+    ;; so the margin is the smaller one.
+    (should (= (org-timegrid--scroll-margin-pixels 800 14) 140))
+    ;; In a short window the cap wins instead.
+    (should (= (org-timegrid--scroll-margin-pixels 200 14) 50)))
+  (let ((scroll-margin 0))
+    (should (= (org-timegrid--scroll-margin-pixels 800 14) 0))))
+
 (provide 'org-timegrid-test)
 ;;; org-timegrid-test.el ends here
