@@ -23,9 +23,16 @@ jobs:
       - uses: d12frosted/setup-emacs@v1
         with:
           version: 31.1
-      - uses: leotaku/elisp-check@v1.4.1
+      - name: Check package metadata and style
+        uses: leotaku/elisp-check@v1.4.1
         with:
           check: melpa
+          file: org-timegrid.el
+          warnings_as_errors: false
+      - name: Byte-compile every library
+        uses: leotaku/elisp-check@v1.4.1
+        with:
+          check: byte-compile
           file: "[!.]*.el"
           warnings_as_errors: false
 
