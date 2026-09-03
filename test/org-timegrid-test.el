@@ -3,6 +3,21 @@
 (require 'ert)
 (require 'org-timegrid-org)
 
+(defun org-timegrid-test--svg-image-spec (svg &rest properties)
+  "Return an image spec for SVG without invoking an image backend."
+  (append (list 'image :type 'svg :data
+                (with-temp-buffer
+                  (svg-print svg)
+                  (buffer-string)))
+          properties))
+
+(defmacro org-timegrid-test--with-svg-data (&rest body)
+  "Run BODY with `svg-image' exposing its XML without rendering it."
+  (declare (indent 0) (debug t))
+  `(cl-letf (((symbol-function 'svg-image)
+              #'org-timegrid-test--svg-image-spec))
+     ,@body))
+
 (ert-deftest org-timegrid-test-svg-colors-are-normalized ()
   (dolist (case '(("Red1" nil "#ff0000")
                   ("#abc" nil "#aabbcc")
@@ -78,14 +93,15 @@
 
 (ert-deftest org-timegrid-test-compact-strip-uses-effective-zoom ()
   (with-temp-buffer
-    (cl-letf (((symbol-function 'org-timegrid--zoom-factor)
-               (lambda (&optional _window) 2))
-              ((symbol-function 'org-timegrid--frame-font-factor)
-               (lambda (&optional _window) 1)))
-      (let ((data (plist-get (cdr (org-timegrid-day-image nil 0 60 400))
-                             :data)))
-        (should (string-match-p "height=\"114\"" data))
-        (should (string-match-p "font-size=\"22\"" data))))))
+    (org-timegrid-test--with-svg-data
+      (cl-letf (((symbol-function 'org-timegrid--zoom-factor)
+                 (lambda (&optional _window) 2))
+                ((symbol-function 'org-timegrid--frame-font-factor)
+                 (lambda (&optional _window) 1)))
+        (let ((data (plist-get (cdr (org-timegrid-day-image nil 0 60 400))
+                               :data)))
+          (should (string-match-p "height=\"114\"" data))
+          (should (string-match-p "font-size=\"22\"" data)))))))
 
 (ert-deftest org-timegrid-test-plain-c-x-plus-zooms-calendar ()
   (should (eq (lookup-key org-timegrid-mode-map (kbd "C-x +"))
@@ -239,8 +255,9 @@
                    :week-start week
                    :events (list timed-event all-day-event)
                    :blocks blocks))
-      (should (eq (car (org-timegrid--svg)) 'svg))
-      (should (stringp (org-timegrid--header)))
+      (org-timegrid-test--with-svg-data
+        (should (eq (car (org-timegrid--svg)) 'svg))
+        (should (stringp (org-timegrid--header))))
       (should (= (length (org-timegrid--timed-blocks)) 1))
       (should (= (length (org-timegrid--all-day-blocks)) 1)))))
 
@@ -267,10 +284,10 @@
           (should (org-timegrid-event-all-day event))
           (org-timegrid-org--update-event-range
            event start (+ start 30) nil 'timed)
-          (goto-char (point-min))
-          (should (re-search-forward "00:00-00:30" nil t))
-          (should-not (org-timegrid-event-all-day
-                       (car (org-timegrid-org--buffer-events "test.org")))))))))
+          (let ((event (car (org-timegrid-org--buffer-events "test.org"))))
+            (should-not (org-timegrid-event-all-day event))
+            (should (= (org-timegrid-event-start event) start))
+            (should (= (org-timegrid-event-end event) (+ start 30)))))))))
 
 (ert-deftest org-timegrid-test-drag-proposal-transition-matrix ()
   (let ((org-timegrid-default-duration-minutes 45)
@@ -476,23 +493,24 @@
 (ert-deftest org-timegrid-test-cursor-renders-on-every-cell ()
   "Every valid grid and all-day cell renders exactly one cursor."
   (with-temp-buffer
-    (let* ((org-timegrid-days 7)
-           (org-timegrid-start-hour 0)
-           (org-timegrid-end-hour 24)
-           (org-timegrid--tile-width 900)
-           (org-timegrid--tile-height 61)
-           ;; A fractional scale makes the final tile absorb more than one
-           ;; slot, exercising the same layout rule at every cursor position.
-           (org-timegrid--image-height 1458.72)
-           (org-timegrid--tile-count 23)
-           (org-timegrid-cursor-opacity 0.314159)
-           (org-timegrid--geometry nil)
-           (org-timegrid--state
-            (org-timegrid--calendar-state-create
-             :week-start 0 :blocks nil :cursor-visible t))
-           (original-svg-rectangle (symbol-function 'svg-rectangle))
-           reached-tiles)
-      (cl-labels
+    (org-timegrid-test--with-svg-data
+      (let* ((org-timegrid-days 7)
+             (org-timegrid-start-hour 0)
+             (org-timegrid-end-hour 24)
+             (org-timegrid--tile-width 900)
+             (org-timegrid--tile-height 61)
+             ;; A fractional scale makes the final tile absorb more than one
+             ;; slot, exercising the same layout rule at every cursor position.
+             (org-timegrid--image-height 1458.72)
+             (org-timegrid--tile-count 23)
+             (org-timegrid-cursor-opacity 0.314159)
+             (org-timegrid--geometry nil)
+             (org-timegrid--state
+              (org-timegrid--calendar-state-create
+               :week-start 0 :blocks nil :cursor-visible t))
+             (original-svg-rectangle (symbol-function 'svg-rectangle))
+             reached-tiles)
+        (cl-labels
           ((render-and-count-cursors
             (function)
             (let ((count 0)
@@ -540,7 +558,7 @@
                           (lambda ()
                             (org-timegrid--dynamic-fragment)
                             (org-timegrid--header)))))
-              (should (= count 1)))))))))
+              (should (= count 1))))))))))
 
 (provide 'org-timegrid-test)
 ;;; org-timegrid-test.el ends here
