@@ -12,11 +12,13 @@
           properties))
 
 (defmacro org-timegrid-test--with-svg-data (&rest body)
-  "Run BODY with `svg-image' exposing its XML without rendering it."
+  "Run BODY with real SVG support or an XML-only image substitute."
   (declare (indent 0) (debug t))
-  `(cl-letf (((symbol-function 'svg-image)
-              #'org-timegrid-test--svg-image-spec))
-     ,@body))
+  `(if (image-type-available-p 'svg)
+       (progn ,@body)
+     (cl-letf (((symbol-function 'svg-image)
+                #'org-timegrid-test--svg-image-spec))
+       ,@body)))
 
 (ert-deftest org-timegrid-test-svg-colors-are-normalized ()
   (dolist (case '(("Red1" nil "#ff0000")

@@ -55,3 +55,25 @@ jobs:
           -l ./org-timegrid.el
           -l test/org-timegrid-test.el
           -f ert-run-tests-batch-and-exit
+
+  svg-integration:
+    name: Real SVG integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SVG-capable Emacs
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes emacs-gtk librsvg2-2
+      - name: Require SVG support
+        run: >-
+          emacs -Q --batch
+          --eval "(unless (image-type-available-p 'svg)
+          (error \"This Emacs lacks SVG support\"))"
+      - name: Run ERT suite with real SVG rendering
+        run: >-
+          emacs -Q --batch -L .
+          -l ./org-timegrid.el
+          -l test/org-timegrid-test.el
+          -f ert-run-tests-batch-and-exit
