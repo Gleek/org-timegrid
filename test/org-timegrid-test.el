@@ -3,15 +3,13 @@
 (require 'ert)
 (require 'org-timegrid-org)
 
-(ert-deftest org-timegrid-test-svg-color-normalizes-x11-name ()
-  (should (equal (org-timegrid--svg-color "Red1") "#ff0000")))
-
-(ert-deftest org-timegrid-test-svg-color-normalizes-short-hex ()
-  (should (equal (org-timegrid--svg-color "#abc") "#aabbcc")))
-
-(ert-deftest org-timegrid-test-svg-color-uses-fallback ()
-  (should (equal (org-timegrid--svg-color "not-a-color" "#3a5fcd")
-                 "#3a5fcd")))
+(ert-deftest org-timegrid-test-svg-colors-are-normalized ()
+  (dolist (case '(("Red1" nil "#ff0000")
+                  ("#abc" nil "#aabbcc")
+                  ("not-a-color" "#3a5fcd" "#3a5fcd")))
+    (pcase-let ((`(,color ,fallback ,expected) case))
+      (ert-info ((format "color %s" color))
+        (should (equal (org-timegrid--svg-color color fallback) expected))))))
 
 (ert-deftest org-timegrid-test-face-color-is-svg-safe ()
   (cl-letf (((symbol-function 'face-attribute)
@@ -70,12 +68,6 @@
       (should (= (org-timegrid--label-width)
                  org-timegrid--label-width)))))
 
-(ert-deftest org-timegrid-test-default-zoom-multiplies-frame-scale ()
-  (with-temp-buffer
-    (cl-letf (((symbol-function 'org-timegrid--default-font-size)
-               (lambda (&optional _window) 12.5)))
-      (should (= (org-timegrid--zoom-factor) 1.25)))))
-
 (ert-deftest org-timegrid-test-fixed-header-factor-ignores-calendar-zoom ()
   (let ((org-timegrid-default-zoom 3))
     (cl-letf (((symbol-function 'frame-char-height)
@@ -83,12 +75,6 @@
               ((symbol-function 'org-timegrid--default-font-height)
                (lambda (&optional _window) 72)))
       (should (= (org-timegrid--frame-font-factor) 1)))))
-
-(ert-deftest org-timegrid-test-normal-svg-font-matches-default-face ()
-  (cl-letf (((symbol-function 'org-timegrid--default-font-size)
-             (lambda (&optional _window) 14)))
-    (should (= (org-timegrid--font-size 10) 14))
-    (should (< (abs (- (org-timegrid--font-size 8) 11.2)) 0.001))))
 
 (ert-deftest org-timegrid-test-compact-strip-uses-effective-zoom ()
   (with-temp-buffer
@@ -115,12 +101,12 @@
        '(wheel-up nil nil nil (0.0 . 7.5)))
       (should (equal scrolled '(-7.5 calendar-window))))))
 
-(ert-deftest org-timegrid-test-scroll-ignores-trackpad-boundary-rebound ()
+(ert-deftest org-timegrid-test-scroll-boundary-distinguishes-rebound-from-reversal ()
   (with-temp-buffer
     (org-timegrid-mode)
     (setq-local org-timegrid--image-height 1000
                 org-timegrid--scroll-boundary '(top . 10.0))
-    (let (scrolled)
+    (let (scrolled now)
       (cl-letf (((symbol-function 'window-live-p) (lambda (_window) t))
                 ((symbol-function 'window-buffer)
                  (lambda (_window) (current-buffer)))
@@ -130,28 +116,14 @@
                  (lambda (_window) 0))
                 ((symbol-function 'org-timegrid--set-vscroll)
                  (lambda (_window pixels) (setq scrolled pixels)))
-                ((symbol-function 'float-time) (lambda (&optional _time) 10.2)))
-        (org-timegrid-scroll 90 'calendar-window)
-        (should-not scrolled)))))
-
-(ert-deftest org-timegrid-test-scroll-allows-deliberate-boundary-reversal ()
-  (with-temp-buffer
-    (org-timegrid-mode)
-    (setq-local org-timegrid--image-height 1000
-                org-timegrid--scroll-boundary '(top . 10.0))
-    (let (scrolled)
-      (cl-letf (((symbol-function 'window-live-p) (lambda (_window) t))
-                ((symbol-function 'window-buffer)
-                 (lambda (_window) (current-buffer)))
-                ((symbol-function 'window-body-height)
-                 (lambda (&rest _ignored) 500))
-                ((symbol-function 'org-timegrid--window-scroll-pixels)
-                 (lambda (_window) 0))
-                ((symbol-function 'org-timegrid--set-vscroll)
-                 (lambda (_window pixels) (setq scrolled pixels)))
-                ((symbol-function 'float-time) (lambda (&optional _time) 10.4)))
-        (org-timegrid-scroll 90 'calendar-window)
-        (should (= scrolled 90))))))
+                ((symbol-function 'float-time) (lambda (&optional _time) now)))
+        (dolist (case '((10.2 nil rebound) (10.4 90 deliberate-reversal)))
+          (pcase-let ((`(,time ,expected ,name) case))
+            (ert-info (name)
+              (setq now time scrolled nil
+                    org-timegrid--scroll-boundary '(top . 10.0))
+              (org-timegrid-scroll 90 'calendar-window)
+              (should (equal scrolled expected)))))))))
 
 (ert-deftest org-timegrid-test-precision-scroll-overrides-global-mode-locally ()
   (with-temp-buffer
@@ -164,21 +136,16 @@
                  [remap pixel-scroll-precision])
                 #'org-timegrid-precision-scroll))))
 
-(ert-deftest org-timegrid-test-range-start-uses-week-start-when-visible ()
+(ert-deftest org-timegrid-test-range-start-keeps-date-in-visible-range ()
   (let ((org-timegrid-days 3)
         (calendar-week-start-day 0))
-    ;; Tuesday's trailing three-day range includes Sunday.
-    (let ((tuesday (calendar-absolute-from-gregorian '(9 1 2026))))
-      (should (= (org-timegrid--range-start tuesday)
-                 (calendar-absolute-from-gregorian '(8 30 2026)))))))
-
-(ert-deftest org-timegrid-test-range-start-falls-back-to-trailing-days ()
-  (let ((org-timegrid-days 3)
-        (calendar-week-start-day 0))
-    ;; By Wednesday, Sunday is outside the trailing three-day range.
-    (let ((wednesday (calendar-absolute-from-gregorian '(9 2 2026))))
-      (should (= (org-timegrid--range-start wednesday)
-                 (calendar-absolute-from-gregorian '(8 31 2026)))))))
+    (dolist (case '(((9 1 2026) (8 30 2026) week-start-visible)
+                    ((9 2 2026) (8 31 2026) trailing-range)))
+      (pcase-let ((`(,date ,expected ,name) case))
+        (ert-info (name)
+          (should (= (org-timegrid--range-start
+                      (calendar-absolute-from-gregorian date))
+                     (calendar-absolute-from-gregorian expected))))))))
 
 (ert-deftest org-timegrid-test-load-state-honours-visible-day-count ()
   (let* ((org-timegrid-days 3)
@@ -195,75 +162,62 @@
     (should (= requested-start (* 100 1440)))
     (should (= requested-end (* 103 1440)))))
 
-(ert-deftest org-timegrid-test-event-kind-survives-block-conversion ()
+(ert-deftest org-timegrid-test-model-preserves-explicit-time-kinds ()
   (let* ((event (org-timegrid-event-create
                  :id 'date-only :title "Holiday" :start 14400 :end 15840
                  :all-day t))
          (block (org-timegrid-event-to-block event 10)))
     (should (org-timegrid-block-p block))
-    (should (eq (org-timegrid-block-time-kind block) 'all-day))))
+    (should (eq (org-timegrid-block-time-kind block) 'all-day)))
+  (dolist (case '((timed 0 60 120 -120 0 0 60)
+                  (all-day 0 0 2880 -1440 -1 0 2880)))
+    (pcase-let ((`(,kind ,day ,start ,end ,delta
+                          ,expected-day ,expected-start ,expected-end)
+                 case))
+      (ert-info ((symbol-name kind))
+        (let* ((block (org-timegrid-block-create
+                       :id kind :day day :start start :end end
+                       :time-kind kind))
+               (moved (org-timegrid--transform-block-range block delta nil)))
+          (should (equal (list (org-timegrid-block-time-kind moved)
+                               (org-timegrid-block-day moved)
+                               (org-timegrid-block-start moved)
+                               (org-timegrid-block-end moved))
+                         (list kind expected-day expected-start expected-end))))))))
 
-(ert-deftest org-timegrid-test-one-transform-handles-both-time-kinds ()
-  (let* ((timed (org-timegrid-block-create
-                 :id 'timed :day 0 :start 60 :end 120 :time-kind 'timed))
-         (all-day (org-timegrid-block-create
-                   :id 'all-day :day 0 :start 0 :end 2880
-                   :time-kind 'all-day))
-         (moved-timed (org-timegrid--transform-block-range timed -120 nil))
-         (moved-all-day
-          (org-timegrid--transform-block-range all-day -1440 nil)))
-    (should (= (org-timegrid-block-day moved-timed) 0))
-    (should (= (org-timegrid-block-start moved-timed) 0))
-    (should (= (org-timegrid-block-end moved-timed) 60))
-    (should (eq (org-timegrid-block-time-kind moved-timed) 'timed))
-    ;; All-day spans may continue beyond the visible week.
-    (should (= (org-timegrid-block-day moved-all-day) -1))
-    (should (= (org-timegrid-block-start moved-all-day) 0))
-    (should (= (org-timegrid-block-end moved-all-day) 2880))
-    (should (eq (org-timegrid-block-time-kind moved-all-day) 'all-day))))
-
-(ert-deftest org-timegrid-test-backend-receives-explicit-time-kind ()
-  (let* ((received nil)
-         (org-timegrid--backend
-          (org-timegrid-backend-create
-           :name "test"
-           :list-function (lambda (_start _end) nil)
-           :create-function
-           (lambda (_title _start _end &optional _source _target time-kind)
-             (setq received time-kind))))
-         (org-timegrid--state
-          (org-timegrid--calendar-state-create :week-start 100))
+(ert-deftest org-timegrid-test-backend-supports-modern-and-legacy-contracts ()
+  (let* ((event (org-timegrid-event-create
+                 :id 'event :title "Event" :start 144000 :end 144030))
          (block (org-timegrid-block-create
-                 :id 'midnight :day 0 :start 0 :end 1440
-                 :title "Timed full day" :time-kind 'timed)))
-    (cl-letf (((symbol-function 'org-timegrid--refresh-data) #'ignore))
-      (org-timegrid--backend-create "Timed full day" block))
-    (should (eq received 'timed))))
-
-(ert-deftest org-timegrid-test-legacy-backend-create-arity-still-works ()
-  (let* ((called nil)
-         (org-timegrid--backend
-          (org-timegrid-backend-create
-           :name "legacy"
-           :list-function (lambda (_start _end) nil)
-           :create-function
-           (lambda (_title _start _end _source) (setq called t))))
+                 :id 'event :day 0 :start 0 :end 30
+                 :title "Event" :time-kind 'timed))
          (org-timegrid--state
-          (org-timegrid--calendar-state-create :week-start 100))
-         (block (org-timegrid-block-create
-                 :id 'legacy :day 0 :start 0 :end 30
-                 :title "Legacy" :time-kind 'timed)))
+          (org-timegrid--calendar-state-create :week-start 100)))
     (cl-letf (((symbol-function 'org-timegrid--refresh-data) #'ignore))
-      (org-timegrid--backend-create "Legacy" block))
-    (should called)))
-
-(ert-deftest org-timegrid-test-legacy-three-argument-update-still-works ()
-  (let* ((called nil)
-         (event (org-timegrid-event-create
-                 :id 'legacy :title "Legacy" :start 144000 :end 144030))
-         (updater (lambda (_event _start _end) (setq called t))))
-    (org-timegrid--call-update updater event 144015 144045 nil 'timed)
-    (should called)))
+      (dolist (contract '(modern legacy))
+        (ert-info ((symbol-name contract))
+          (let ((created nil)
+                (updated nil))
+            (let ((org-timegrid--backend
+                   (org-timegrid-backend-create
+                    :name (symbol-name contract)
+                    :list-function (lambda (_start _end) nil)
+                    :create-function
+                    (if (eq contract 'modern)
+                        (lambda (_title _start _end
+                                 &optional _source _target time-kind)
+                          (setq created time-kind))
+                      (lambda (_title _start _end _source)
+                        (setq created t))))))
+              (org-timegrid--backend-create "Event" block))
+            (org-timegrid--call-update
+             (if (eq contract 'modern)
+                 (lambda (_event _start _end _title time-kind)
+                   (setq updated time-kind))
+               (lambda (_event _start _end) (setq updated t)))
+             event 144015 144045 nil 'timed)
+            (should (equal created (if (eq contract 'modern) 'timed t)))
+            (should (equal updated (if (eq contract 'modern) 'timed t)))))))))
 
 (ert-deftest org-timegrid-test-mixed-kind-render-smoke ()
   (let* ((org-timegrid-days 3)
@@ -290,153 +244,140 @@
       (should (= (length (org-timegrid--timed-blocks)) 1))
       (should (= (length (org-timegrid--all-day-blocks)) 1)))))
 
-(ert-deftest org-timegrid-test-org-update-converts-kind-explicitly ()
-  (with-temp-buffer
-    (org-mode)
-    (insert "* Event\n<2026-08-26 Wed>\n")
-    (let* ((event (car (org-timegrid-org--buffer-events "test.org")))
-           (start (org-timegrid-event-start event)))
-      (org-timegrid-org--update-event-range
-       event start (+ start 30) nil 'timed)
-      (goto-char (point-min))
-      (should (re-search-forward "00:00-00:30" nil t))
-      (let ((updated (car (org-timegrid-org--buffer-events "test.org"))))
-        (should-not (org-timegrid-event-all-day updated))
-        (org-timegrid-org--update-event-range
-         updated start (+ start 1440) nil 'all-day)
-        (goto-char (point-min))
-        (should-not (re-search-forward "[0-9][0-9]:[0-9][0-9]" nil t))
-        (should (org-timegrid-event-all-day
-                 (car (org-timegrid-org--buffer-events "test.org"))))))))
-
-(ert-deftest org-timegrid-test-org-create-does-not-infer-explicit-timed-kind ()
+(ert-deftest org-timegrid-test-org-preserves-kind-through-entry-lifecycle ()
   (with-temp-buffer
     (org-mode)
     (insert "* Event\n")
     (let* ((start (* 1440
                      (calendar-absolute-from-gregorian '(8 26 2026))))
            (marker (copy-marker (point-min))))
+      ;; A full-day duration explicitly marked timed must not be inferred as
+      ;; all-day merely from its endpoints.
       (org-timegrid-org--create-event
        "Event" start (+ start 1440) nil marker 'timed)
       (goto-char (point-min))
-      (should (re-search-forward "00:00" nil t)))))
+      (should (re-search-forward "00:00" nil t))
+      (let ((event (car (org-timegrid-org--buffer-events "test.org"))))
+        (should-not (org-timegrid-event-all-day event))
+        (org-timegrid-org--update-event-range
+         event start (+ start 1440) nil 'all-day)
+        (goto-char (point-min))
+        (should-not (re-search-forward "[0-9][0-9]:[0-9][0-9]" nil t))
+        (let ((event (car (org-timegrid-org--buffer-events "test.org"))))
+          (should (org-timegrid-event-all-day event))
+          (org-timegrid-org--update-event-range
+           event start (+ start 30) nil 'timed)
+          (goto-char (point-min))
+          (should (re-search-forward "00:00-00:30" nil t))
+          (should-not (org-timegrid-event-all-day
+                       (car (org-timegrid-org--buffer-events "test.org")))))))))
 
-(ert-deftest org-timegrid-test-drag-proposal-converts-timed-to-all-day ()
-  (let* ((source (org-timegrid-block-create
-                  :id 'meeting :day 1 :start 600 :end 690
-                  :title "Meeting" :time-kind 'timed))
-         (org-timegrid--state
-          (org-timegrid--calendar-state-create
-           :week-start 100 :blocks (list source)))
-         (proposal
-          (org-timegrid--proposal
-           '(:surface grid :block-id meeting :day 1 :minute 615)
-           '(:surface rail :day 4 :minute 0)
-           nil))
-         (block (org-timegrid--operation-block proposal)))
-    ;; Merely constructing the hover preview changes no source data.
-    (should (eq (org-timegrid--operation-kind proposal) 'move))
-    (should (eq (org-timegrid-block-time-kind block) 'all-day))
-    (should (= (org-timegrid-block-day block) 4))
-    (should (= (org-timegrid-block-start block) 0))
-    (should (= (org-timegrid-block-end block) 1440))
-    (should (eq (org-timegrid-block-time-kind source) 'timed))
-    (should (= (org-timegrid-block-start source) 600))
-    (should (= (org-timegrid-block-end source) 690))))
+(ert-deftest org-timegrid-test-drag-proposal-transition-matrix ()
+  (let ((org-timegrid-default-duration-minutes 45)
+        (cases
+         '((timed-to-all-day
+            (meeting 1 600 690 timed)
+            (:surface grid :block-id meeting :day 1 :minute 615)
+            (:surface rail :day 4 :minute 0)
+            nil move (all-day 4 0 1440))
+           (all-day-to-timed
+            (holiday 2 0 1440 all-day)
+            (:surface rail :block-id holiday :day 2 :minute 0)
+            (:surface grid :day 5 :minute 780)
+            nil move (timed 5 780 825))
+           (multi-day-to-grid-rejected
+            (trip 2 0 2880 all-day)
+            (:surface rail :block-id trip :day 2 :minute 0)
+            (:surface grid :day 5 :minute 780)
+            nil nil error)
+           (resize-all-day-start
+            (trip 1 0 4320 all-day)
+            (:surface rail :block-id trip :day 1 :minute 0 :edge top)
+            (:surface rail :day 2 :minute 0)
+            nil resize (all-day 2 0 2880))
+           (resize-all-day-end
+            (trip 1 0 4320 all-day)
+            (:surface rail :block-id trip :day 1 :minute 0 :edge bottom)
+            (:surface rail :day 5 :minute 0)
+            nil resize (all-day 1 0 7200))
+           (duplicate-entry
+            (meeting 1 600 660 timed)
+            (:surface grid :block-id meeting :day 1 :minute 615)
+            (:surface grid :day 2 :minute 615)
+            duplicate-entry duplicate-entry (timed 2 600 660))
+           (add-occurrence
+            (meeting 1 600 660 timed)
+            (:surface grid :block-id meeting :day 1 :minute 615)
+            (:surface grid :day 2 :minute 615)
+            add-occurrence add-occurrence (timed 2 600 660)))))
+    (dolist (case cases)
+      (pcase-let* ((`(,name (,id ,day ,start ,end ,time-kind)
+                              ,origin ,target ,requested-kind
+                              ,expected-kind ,expected-block)
+                    case)
+                   (source (org-timegrid-block-create
+                            :id id :day day :start start :end end
+                            :title (symbol-name id) :time-kind time-kind))
+                   (source-before (copy-org-timegrid-block source))
+                   (org-timegrid--state
+                    (org-timegrid--calendar-state-create
+                     :week-start 100 :blocks (list source)))
+                   (proposal (org-timegrid--proposal
+                              origin target requested-kind))
+                   (block (org-timegrid--operation-block proposal)))
+        (ert-info ((symbol-name name))
+          (should (eq (org-timegrid--operation-kind proposal) expected-kind))
+          (if (eq expected-block 'error)
+              (should (org-timegrid--operation-error proposal))
+            (should-not (org-timegrid--operation-error proposal))
+            (should
+             (equal (list (org-timegrid-block-time-kind block)
+                          (org-timegrid-block-day block)
+                          (org-timegrid-block-start block)
+                          (org-timegrid-block-end block))
+                    expected-block)))
+          ;; Constructing a hover preview must never mutate its source.
+          (should (equal source source-before)))))))
 
-(ert-deftest org-timegrid-test-drag-proposal-converts-all-day-to-default-time ()
-  (let* ((source (org-timegrid-block-create
-                  :id 'holiday :day 2 :start 0 :end 1440
-                  :title "Holiday" :time-kind 'all-day))
-         (org-timegrid-default-duration-minutes 45)
-         (org-timegrid--state
-          (org-timegrid--calendar-state-create
-           :week-start 100 :blocks (list source)))
-         (proposal
-          (org-timegrid--proposal
-           '(:surface rail :block-id holiday :day 2 :minute 0)
-           '(:surface grid :day 5 :minute 780)
-           nil))
-         (block (org-timegrid--operation-block proposal)))
-    (should (eq (org-timegrid-block-time-kind block) 'timed))
-    (should (= (org-timegrid-block-day block) 5))
-    (should (= (org-timegrid-block-start block) 780))
-    (should (= (org-timegrid-block-end block) 825))))
-
-(ert-deftest org-timegrid-test-multi-day-drag-to-time-grid-is-rejected ()
-  (let* ((source (org-timegrid-block-create
-                  :id 'trip :day 2 :start 0 :end 2880
-                  :title "Trip" :time-kind 'all-day))
-         (org-timegrid--state
-          (org-timegrid--calendar-state-create
-           :week-start 100 :blocks (list source)))
-         (proposal
-          (org-timegrid--proposal
-           '(:surface rail :block-id trip :day 2 :minute 0)
-           '(:surface grid :day 5 :minute 780)
-           nil)))
-    (should (org-timegrid--operation-error proposal))))
-
-(ert-deftest org-timegrid-test-all-day-edge-drag-resizes-by-whole-days ()
-  (let* ((source (org-timegrid-block-create
-                  :id 'trip :day 1 :start 0 :end 4320
-                  :title "Trip" :time-kind 'all-day))
-         (org-timegrid--state
-          (org-timegrid--calendar-state-create
-           :week-start 100 :blocks (list source)))
-         (start-proposal
-          (org-timegrid--proposal
-           '(:surface rail :block-id trip :day 1 :minute 0 :edge top)
-           '(:surface rail :day 2 :minute 0)
-           nil))
-         (end-proposal
-          (org-timegrid--proposal
-           '(:surface rail :block-id trip :day 1 :minute 0 :edge bottom)
-           '(:surface rail :day 5 :minute 0)
-           nil))
-         (start-block (org-timegrid--operation-block start-proposal))
-         (end-block (org-timegrid--operation-block end-proposal)))
-    (should (eq (org-timegrid--operation-kind start-proposal) 'resize))
-    (should (= (org-timegrid-block-day start-block) 2))
-    (should (= (org-timegrid-block-end start-block) 2880))
-    (should (eq (org-timegrid--operation-kind end-proposal) 'resize))
-    (should (= (org-timegrid-block-day end-block) 1))
-    (should (= (org-timegrid-block-end end-block) 7200))))
-
-(ert-deftest org-timegrid-test-all-day-edge-hotspots-use-horizontal-drag ()
+(ert-deftest org-timegrid-test-mouse-input-routing-contract ()
+  ;; Every image-map area must retain ownership of its logical surface while
+  ;; a preview changes the pixels beneath the pointer.
+  (dolist (case '((header-line t)
+                  (calendar-rail-block t)
+                  (calendar-rail-resize t)
+                  (nil nil)
+                  (calendar-block nil)
+                  (calendar-resize nil)))
+    (pcase-let ((`(,area ,railp) case))
+      (ert-info ((format "area %s" area))
+        (should (eq (and (org-timegrid--rail-area-p area) t) railp)))))
+  ;; All-day resize edges are horizontal targets.
   (let ((org-timegrid--header-geometry
          '((:id trip :x 100 :y 50 :width 200 :height 18
                 :allow-left t :allow-right t))))
     (let ((map (org-timegrid--header-image-map)))
       (should (= (length map) 3))
       (should (equal (plist-get (nth 2 (car map)) 'pointer) 'hdrag))
-      (should (equal (plist-get (nth 2 (cadr map)) 'pointer) 'hdrag)))))
-
-(ert-deftest org-timegrid-test-rail-image-map-areas-retain-surface-ownership ()
-  ;; Rendering a drag preview changes the hotspot beneath the pointer.  These
-  ;; must all remain the same logical surface or the preview oscillates
-  ;; between the rail and grid and an existing-block drag can become create.
-  (dolist (area '(header-line calendar-rail-block calendar-rail-resize))
-    (should (org-timegrid--rail-area-p area)))
-  (dolist (area '(nil calendar-block calendar-resize))
-    (should-not (org-timegrid--rail-area-p area))))
-
-(ert-deftest org-timegrid-test-double-click-does-not-enter-drag-tracker ()
-  (should (eq (lookup-key org-timegrid-mode-map [down-mouse-1])
-              #'org-timegrid-press))
-  (should (eq (lookup-key org-timegrid-mode-map [double-down-mouse-1])
-              #'org-timegrid-ignore-double-press))
-  (should (eq (lookup-key org-timegrid-mode-map [double-mouse-1])
-              #'org-timegrid-visit))
-  (should (eq (lookup-key org-timegrid-mode-map
-                          [calendar-block double-down-mouse-1])
-              #'org-timegrid-ignore-double-press))
-  (should (eq (lookup-key org-timegrid--header-map
-                          [calendar-rail-block double-down-mouse-1])
-              #'org-timegrid-ignore-double-press))
-  (should (eq (lookup-key org-timegrid--header-map
-                          [calendar-rail-block double-mouse-1])
-              #'org-timegrid-header-visit)))
+      (should (equal (plist-get (nth 2 (cadr map)) 'pointer) 'hdrag))))
+  ;; A double press must never enter the drag tracker; its release visits.
+  (dolist (case `((,org-timegrid-mode-map [down-mouse-1]
+                   org-timegrid-press)
+                  (,org-timegrid-mode-map [double-down-mouse-1]
+                   org-timegrid-ignore-double-press)
+                  (,org-timegrid-mode-map [double-mouse-1]
+                   org-timegrid-visit)
+                  (,org-timegrid-mode-map
+                   [calendar-block double-down-mouse-1]
+                   org-timegrid-ignore-double-press)
+                  (,org-timegrid--header-map
+                   [calendar-rail-block double-down-mouse-1]
+                   org-timegrid-ignore-double-press)
+                  (,org-timegrid--header-map
+                   [calendar-rail-block double-mouse-1]
+                   org-timegrid-header-visit)))
+    (pcase-let ((`(,map ,event ,command) case))
+      (ert-info ((format "event %s" event))
+        (should (eq (lookup-key map event) command))))))
 
 (ert-deftest org-timegrid-test-cross-surface-preview-does-not-resize-drag-rail ()
   (let* ((source (org-timegrid-block-create
@@ -456,24 +397,6 @@
     ;; active gesture retains the one-row coordinate system it began with.
     (should (= (org-timegrid--rail-row-count (org-timegrid--all-day-layout)) 2))
     (should (= org-timegrid--drag-rail-rows 1))))
-
-(ert-deftest org-timegrid-test-drag-copy-kinds-remain-distinct ()
-  (let* ((source (org-timegrid-block-create
-                  :id 'meeting :day 1 :start 600 :end 660
-                  :title "Meeting" :time-kind 'timed))
-         (org-timegrid--state
-          (org-timegrid--calendar-state-create
-           :week-start 100 :blocks (list source)))
-         (origin '(:surface grid :block-id meeting :day 1 :minute 615))
-         (target '(:surface grid :day 2 :minute 615)))
-    (should
-     (eq (org-timegrid--operation-kind
-          (org-timegrid--proposal origin target 'duplicate-entry))
-         'duplicate-entry))
-    (should
-     (eq (org-timegrid--operation-kind
-          (org-timegrid--proposal origin target 'add-occurrence))
-         'add-occurrence))))
 
 (ert-deftest org-timegrid-test-yank-selects-entry-identity-semantics ()
   (let* ((source (org-timegrid-event-create

@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: d12frosted/setup-emacs@v1
+        with:
+          version: 31.1
+      - uses: leotaku/elisp-check@v1.4.1
+        with:
+          check: melpa
+          file: "[!.]*.el"
+          warnings_as_errors: false
+
+  test:
+    name: Emacs ${{ matrix.emacs }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        emacs: ["29.4", "30.2", "31.1"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: d12frosted/setup-emacs@v1
+        with:
+          version: ${{ matrix.emacs }}
+      - name: Run ERT suite
+        run: >-
+          emacs -Q --batch -L .
+          -l ./org-timegrid.el
+          -l test/org-timegrid-test.el
+          -f ert-run-tests-batch-and-exit
