@@ -173,29 +173,10 @@ future keyboard creation and navigation."
 The default matches `org-timegrid-slot-minutes'."
   :type 'integer)
 
-(defcustom org-timegrid-compact-font-size 11
-  "Point size of text in a compact one-day strip.
-Everything else in the strip is derived from it: the line height, how many
-characters fit across a block, and therefore how many lines of title a
-block of a given length can hold."
-  :type 'integer)
-
 (defcustom org-timegrid-compact-shadow-pixels 10
   "Height of the shadow at the edges of a compact viewport.
 An edge is shaded only when the day holds something past it, so a shadow
 means \"more this way\" rather than merely marking where the window stops."
-  :type 'integer)
-
-(defcustom org-timegrid-compact-pixels-per-minute 0.95
-  "Vertical scale of a compact one-day strip, in pixels per minute.
-This trades detail for reach: a lower value fits more hours into the same
-height, at the cost of how much title a short block can show.  The
-default puts six hours in about eighteen text lines and still leaves a
-half-hour block room for two lines of title."
-  :type 'number)
-
-(defcustom org-timegrid-compact-label-width 40
-  "Width in pixels of the time-label gutter in a compact one-day strip."
   :type 'integer)
 
 (defcustom org-timegrid-data-refresh-seconds 300
@@ -1082,12 +1063,11 @@ works without the palette having to know it in advance."
     (nreverse segments)))
 
 (defun org-timegrid-day-blocks (backend absolute-day)
-  "Return BACKEND blocks on ABSOLUTE-DAY, clipped to it and given lanes.
+  "Return BACKEND blocks on ABSOLUTE-DAY, clipped to that day.
 Coordinates are minutes within that day, so a range running past midnight
 arrives clipped at 1440 rather than spilling into a day that is not being
-drawn.  Overlaps get plain side-by-side lanes: the Week view nests a child
-inside its parent, which needs more height than one compact row has.
-Date-only events are omitted: compact day images have no all-day rail, and
+drawn.  Layout belongs to the shared renderer used by both calendar views.
+Date-only events are omitted: day images have no all-day rail, and
 rendering them as midnight-to-midnight timed blocks would be misleading."
   (let* ((start (* absolute-day 1440))
          (events
@@ -1108,7 +1088,7 @@ rendering them as midnight-to-midnight timed blocks would be misleading."
               :done (eq (org-timegrid-event-state event) 'done)
               :event event))
            events)))
-    (org-timegrid-basic-layout-day blocks 0)))
+    blocks))
 
 (defun org-timegrid--draw-edge-shadow (svg x y width direction palette)
   "Shade WIDTH pixels of SVG inward from X and Y, going DIRECTION.
@@ -1135,6 +1115,46 @@ size and need no gradient definition."
                      ;; dissolves into the edge instead of stopping at it.
                      :fill-opacity (max 0.04 (- 0.5 (* index 0.11)))))))
 
+(defun org-timegrid--draw-timed-background
+    (svg width height column-width palette font-family start-minute end-minute
+         scale days today-column &optional week-start)
+  "Draw the shared timed-grid background into SVG.
+DAYS and TODAY-COLUMN control columns; WEEK-START enables weekend shading."
+  (svg-rectangle svg 0 0 width height :fill (plist-get palette :background))
+  (svg-rectangle svg 0 0 (org-timegrid--label-width) height
+                 :fill (plist-get palette :time-background))
+  (dotimes (day days)
+    (let* ((x (+ (org-timegrid--label-width) (* day column-width)))
+           (weekday (and week-start
+                         (calendar-day-of-week
+                          (calendar-gregorian-from-absolute
+                           (+ week-start day))))))
+      (svg-rectangle svg x 0 column-width height
+                     :fill (cond ((= day today-column)
+                                  (plist-get palette :today))
+                                 ((memq weekday '(0 6))
+                                  (plist-get palette :weekend))
+                                 (t (plist-get palette :background))))
+      (svg-line svg x 0 x height
+                :stroke (plist-get palette :grid) :stroke-width 1)))
+  (svg-line svg width 0 width height
+            :stroke (plist-get palette :grid) :stroke-width 1)
+  (cl-loop for minute from (* 30 (ceiling start-minute 30))
+           to end-minute by 30 do
+           (let* ((y (+ (org-timegrid--grid-top-inset)
+                        (* (- minute start-minute) scale)))
+                  (hourp (zerop (% minute 60))))
+             (svg-line svg (org-timegrid--label-width) y width y
+                       :stroke (plist-get palette
+                                          (if hourp :grid :half-grid))
+                       :stroke-width 1)
+             (when (and hourp (< minute end-minute))
+               (svg-text svg (format "%02d:00" (/ minute 60))
+                         :x 5 :y (+ y (org-timegrid--scale-pixels 11))
+                         :font-size (org-timegrid--font-size 10)
+                         :font-family font-family
+                         :fill (plist-get palette :time-label))))))
+
 (defun org-timegrid-day-image (blocks start-minute end-minute width
                                       &optional now)
   "Return an SVG image of BLOCKS between START-MINUTE and END-MINUTE.
@@ -1142,77 +1162,25 @@ WIDTH is in pixels.  NOW, a minute of the day, draws a current time line.
 This is a read-only strip: one day, no cursor, and no hit-test geometry,
 which is what makes it safe to drop into a buffer the calendar does not
 own."
-  (let* ((zoom (org-timegrid--zoom-factor))
-         (scale (* org-timegrid-compact-pixels-per-minute zoom))
-         (font-size (* org-timegrid-compact-font-size zoom))
-         (line-height (+ font-size (* 2 zoom)))
-         ;; Roughly the advance width of a digit at this size, which is what
-         ;; decides how much of a title fits before it has to wrap.
-         (character-width (* font-size 0.6))
+  (let* ((org-timegrid-days 1)
+         (org-timegrid--static-render t)
+         (scale (org-timegrid--pixels-per-minute))
          (span (max 60 (- end-minute start-minute)))
-         (height (ceiling (* span scale)))
-         (label-width
-          (max (* org-timegrid-compact-label-width zoom)
-               (org-timegrid--frame-scale-pixels
-                org-timegrid-compact-label-width)))
-         (column (max 40 (- width label-width 2)))
+         (height (+ (org-timegrid--grid-top-inset)
+                    (ceiling (* span scale))))
+         (column (- width (org-timegrid--label-width)))
          (palette (org-timegrid--palette))
          (font-family (let ((family (face-attribute 'default :family nil t)))
                         (if (stringp family) family "monospace")))
          (svg (svg-create width height :stroke-width 0)))
-    (svg-rectangle svg 0 0 width height
-                   :fill (plist-get palette :background))
-    ;; Hour rules, with the half hours a shade lighter, as in the Week view.
-    (cl-loop for minute from (* 60 (ceiling start-minute 60))
-             to end-minute by 30 do
-             (let ((y (* (- minute start-minute) scale))
-                   (hourp (zerop (% minute 60))))
-               (svg-line svg label-width y width y
-                         :stroke (plist-get palette
-                                            (if hourp :grid :half-grid))
-                         :stroke-width 1)
-               (when hourp
-                 (svg-text svg (org-timegrid--format-minute minute)
-                           :x 2
-                           :y (min (- height (* 2 zoom))
-                                   (+ y (- line-height (* 2 zoom))))
-                           :font-size font-size :font-family font-family
-                           :fill (plist-get palette :time-label)))))
-    (dolist (block blocks)
-      (let* ((lanes (max 1 (or (org-timegrid-block-lanes block) 1)))
-             (lane (or (org-timegrid-block-lane block) 0))
-             (lane-gap (* org-timegrid--lane-gap zoom))
-             (lane-width (/ (- column (* (1- lanes) lane-gap))
-                            (float lanes)))
-             (x (+ label-width 1 (* lane (+ lane-width lane-gap))))
-             ;; Clipped to the viewport, so a block that began before it
-             ;; still shows the part that has not happened yet.
-             (top (max start-minute (org-timegrid-block-start block)))
-             (bottom (min end-minute (org-timegrid-block-end block)))
-             (y (* (- top start-minute) scale))
-             (block-height (max 3 (- (* (- bottom top) scale)
-                                     (* org-timegrid-block-gap zoom))))
-             (characters (max 1 (floor (/ (- lane-width 8) character-width))))
-             (lines (unless (< (org-timegrid-block-start block) start-minute)
-                      (org-timegrid--wrap-title
-                       (org-timegrid-block-title block) characters
-                       (max 1 (floor (/ block-height line-height)))))))
-        (when (> bottom top)
-          (svg-rectangle svg x y lane-width block-height
-                         :rx org-timegrid-corner-radius
-                         :ry org-timegrid-corner-radius
-                         :fill (org-timegrid--color block palette))
-          (svg-rectangle svg (+ x 1) (+ y 1) 2 (max 1 (- block-height 2))
-                         :fill (org-timegrid--accent block palette))
-          (cl-loop for line in lines
-                   for index from 0 do
-                   (svg-text svg line
-                             :x (+ x 6)
-                             :y (+ y (- line-height 2) (* index line-height))
-                             :font-size font-size :font-family font-family
-                             :fill (if (org-timegrid-block-done block)
-                                       (plist-get palette :muted)
-                                     (plist-get palette :foreground)))))))
+    (org-timegrid--draw-timed-background
+     svg width height column palette font-family start-minute end-minute
+     scale 1 0)
+    (dolist (block (org-timegrid--layout-day blocks 0))
+      (when (and (> (org-timegrid-block-end block) start-minute)
+                 (< (org-timegrid-block-start block) end-minute))
+        (org-timegrid--draw-block svg block height start-minute scale column
+                                  palette font-family)))
     ;; Shade an edge only when the day has something past it.  A shadow over
     ;; an empty evening claims there is more to see, and there is not.
     (when (and (> start-minute 0)
@@ -1227,11 +1195,8 @@ own."
       (org-timegrid--draw-edge-shadow svg 0 height width -1 palette))
     ;; Last, so the shadows never dim the one line that says where now is.
     (when (and now (<= start-minute now end-minute))
-      (let ((y (* (- now start-minute) scale)))
-        (svg-line svg label-width y width y
-                  :stroke (plist-get palette :red) :stroke-width 2)
-        (svg-circle svg label-width y (* 3 zoom)
-                    :fill (plist-get palette :red))))
+      (org-timegrid--draw-current-time
+       svg width height column palette font-family start-minute scale now 0))
     (svg-image svg :scale 1 :ascent 'center)))
 
 (defun org-timegrid--effective-blocks ()
@@ -1373,15 +1338,19 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
           :boundary-edge boundary-edge)))
 
 (defun org-timegrid--draw-current-time
-    (svg width height column-width palette font-family start-minute scale)
+    (svg width height column-width palette font-family start-minute scale
+         &optional now-minute today-day)
   "Draw the current time marker on SVG with WIDTH and PALETTE.
 HEIGHT, COLUMN-WIDTH, FONT-FAMILY, START-MINUTE and SCALE determine its
 geometry.  Return the marker's Y coordinate."
   (let* ((now (decode-time))
          (today (calendar-absolute-from-gregorian (calendar-current-date)))
-         (today-day (- today (org-timegrid--calendar-state-week-start org-timegrid--state)))
-         (now-minute (+ (* 60 (decoded-time-hour now))
-                        (decoded-time-minute now))))
+         (today-day (or today-day
+                        (- today (org-timegrid--calendar-state-week-start
+                                  org-timegrid--state))))
+         (now-minute (or now-minute
+                         (+ (* 60 (decoded-time-hour now))
+                            (decoded-time-minute now)))))
     (when (and (<= 0 today-day (org-timegrid--last-day-index))
                (<= start-minute now-minute
                    (* 60 org-timegrid-end-hour)))
@@ -1442,42 +1411,11 @@ geometry.  Return the marker's Y coordinate."
          (day-blocks (make-vector org-timegrid-days nil))
          geometry)
     (setq-local org-timegrid--image-height height)
-    (svg-rectangle svg 0 0 width height :fill (plist-get palette :background))
-    (svg-rectangle svg 0 0 (org-timegrid--label-width) height
-                   :fill (plist-get palette :time-background))
+    (org-timegrid--draw-timed-background
+     svg width height column-width palette font-family start-minute end-minute
+     scale org-timegrid-days today-column week-start)
     (dotimes (day org-timegrid-days)
-      (let* ((x (+ (org-timegrid--label-width)
-                   (* day column-width)))
-             (weekday
-              (calendar-day-of-week
-               (calendar-gregorian-from-absolute (+ week-start day)))))
-        (svg-rectangle svg x 0 column-width height
-                       :fill (cond ((= day today-column) (plist-get palette :today))
-                                   ((memq weekday '(0 6))
-                                    (plist-get palette :weekend))
-                                   (t (plist-get palette :background))))
-        (svg-line svg x 0 x height
-                  :stroke (plist-get palette :grid) :stroke-width 1)
-        (aset day-blocks day
-              (org-timegrid--layout-day blocks day))))
-    (svg-line svg width 0 width height
-              :stroke (plist-get palette :grid) :stroke-width 1)
-    (cl-loop for minute from start-minute to end-minute by 30 do
-             (let* ((y (+ (org-timegrid--grid-top-inset)
-                          (* (- minute start-minute) scale)))
-                    (hourp (= (% minute 60) 0)))
-               (svg-line svg (org-timegrid--label-width) y
-                         width y
-                         :stroke (if hourp
-                                     (plist-get palette :grid)
-                                   (plist-get palette :half-grid))
-                         :stroke-width 1)
-               (when (and hourp (< minute end-minute))
-                 (svg-text svg (format "%02d:00" (/ minute 60))
-                           :x 5 :y (+ y (org-timegrid--scale-pixels 11))
-                           :font-size (org-timegrid--font-size 10)
-                           :font-family font-family
-                           :fill (plist-get palette :time-label)))))
+      (aset day-blocks day (org-timegrid--layout-day blocks day)))
     (dotimes (day org-timegrid-days)
       (dolist (block (aref day-blocks day))
         (push (org-timegrid--draw-block

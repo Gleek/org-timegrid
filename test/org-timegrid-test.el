@@ -93,7 +93,7 @@
                (lambda (&optional _window) 72)))
       (should (= (org-timegrid--frame-font-factor) 1)))))
 
-(ert-deftest org-timegrid-test-compact-strip-uses-effective-zoom ()
+(ert-deftest org-timegrid-test-agenda-strip-uses-timegrid-scale ()
   (with-temp-buffer
     (org-timegrid-test--with-svg-data
       (cl-letf (((symbol-function 'org-timegrid--zoom-factor)
@@ -102,8 +102,15 @@
                  (lambda (&optional _window) 1)))
         (let ((data (plist-get (cdr (org-timegrid-day-image nil 0 60 400))
                                :data)))
-          (should (string-match-p "height=\"114\"" data))
-          (should (string-match-p "font-size=\"22\"" data)))))))
+          (should (string-match-p "height=\"120\"" data))
+          (should (string-match-p "font-size=\"20\"" data)))))))
+
+(ert-deftest org-timegrid-test-agenda-strip-labels-unaligned-window ()
+  (with-temp-buffer
+    (org-timegrid-test--with-svg-data
+      (let ((data (plist-get (cdr (org-timegrid-day-image nil 557 617 400))
+                             :data)))
+        (should (string-match-p ">10:00</text>" data))))))
 
 (ert-deftest org-timegrid-test-plain-c-x-plus-zooms-calendar ()
   (should (eq (lookup-key org-timegrid-mode-map (kbd "C-x +"))
