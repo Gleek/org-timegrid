@@ -2,8 +2,8 @@
 
 ;; Copyright (C) 2026 Umar Ahmad
 
-;; Author: Umar Ahmad
-;; Maintainer: Umar Ahmad
+;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
+;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Version: 0.1.0
 ;; Keywords: calendar, outlines, convenience
 ;; URL: https://github.com/Gleek/org-timegrid
@@ -85,7 +85,7 @@ is what you want when the block below is the same day's untimed items."
   "Keymap active on the inserted strip.")
 
 (defun org-timegrid-agenda-open-week ()
-  "Open the standalone Week calendar on the day the strip shows."
+  "Open the standalone Week calendar on the strip's displayed day."
   (interactive)
   (org-timegrid-week))
 
@@ -196,7 +196,7 @@ the usual way to install it."
         (put-text-property start (point) 'org-timegrid-strip t)))))
 
 (defun org-timegrid-agenda--theme-changed (&rest _ignored)
-  "Redraw inserted strips after Emacs changes theme faces.
+  "Redraw inserted strips after an Emacs theme face change.
 A calendar buffer redraws itself; a strip is a finished image sitting in
 someone else's buffer, so it has to be replaced.  Enabling one theme
 disables another, so the work is deferred and coalesced."
@@ -215,7 +215,7 @@ disables another, so the work is deferred and coalesced."
                  (org-timegrid-agenda-insert))))))))
 
 (defun org-timegrid-agenda--text-scale-changed ()
-  "Redraw the compact strip after this Agenda buffer changes text scale."
+  "Redraw the compact strip after an Agenda buffer text-scale change."
   (when (and org-timegrid-agenda-mode
              (derived-mode-p 'org-agenda-mode)
              (text-property-any (point-min) (point-max)

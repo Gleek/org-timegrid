@@ -1,12 +1,27 @@
 ;;; org-timegrid-isearch.el --- Incremental title search for org-timegrid -*- lexical-binding: t; -*-
 
-;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Copyright (C) 2026 Umar Ahmad
 
-;; Author: Umar Ahmad
-;; Maintainer: Umar Ahmad
+;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
+;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Version: 0.1.0
 ;; Keywords: calendar, outlines, convenience
 ;; URL: https://github.com/Gleek/org-timegrid
+
+;; This file is not part of GNU Emacs.
+
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
@@ -82,7 +97,7 @@ When REPEAT is non-nil, move past the current match and wrap if needed."
       nil)))
 
 (defun org-timegrid-isearch--update ()
-  "Update the calendar after the minibuffer search text changes."
+  "Update the calendar after a minibuffer search-text change."
   (let ((query (minibuffer-contents-no-properties)))
     (unless (equal query org-timegrid-isearch--query)
       (setq org-timegrid-isearch--query query

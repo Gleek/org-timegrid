@@ -2,13 +2,26 @@
 
 ;; Copyright (C) 2026 Umar Ahmad
 
-;; Author: Umar Ahmad
-;; Maintainer: Umar Ahmad
+;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
+;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Version: 0.1.0
 ;; Keywords: calendar, outlines, convenience
 ;; URL: https://github.com/Gleek/org-timegrid
 
 ;; This file is not part of GNU Emacs.
+
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
@@ -68,7 +81,7 @@ END-DAY is exclusive."
     days))
 
 (defun org-timegrid-calendar--refresh (backend)
-  "Redraw standard Calendar marks from BACKEND."
+  "Redraw standard Calendar date decorations from BACKEND."
   (mapc #'delete-overlay org-timegrid-calendar--overlays)
   (setq org-timegrid-calendar--overlays nil)
   (when org-timegrid-calendar-highlight-dates

@@ -2,8 +2,8 @@
 
 ;; Copyright (C) 2026 Umar Ahmad
 
-;; Author: Umar Ahmad
-;; Maintainer: Umar Ahmad
+;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
+;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Version: 0.1.0
 ;; Keywords: calendar, outlines, convenience
 ;; URL: https://github.com/Gleek/org-timegrid
@@ -193,7 +193,8 @@ symbols."
 
 (defun org-timegrid-org--duplicate-entry-string
     (source title start end &optional all-day)
-  "Return a top-level copy of SOURCE using TITLE and range START through END."
+  "Return a top-level copy of SOURCE using TITLE and range START through END.
+When ALL-DAY is non-nil, write the range without times."
   (let* ((source-data (org-timegrid-event-source source))
          (marker (plist-get source-data :marker))
          subtree)
@@ -335,6 +336,7 @@ clock times and END is treated as an exclusive midnight bound."
 (defun org-timegrid-org--insert-capture-template
     (title start end &optional all-day)
   "Insert a new entry for TITLE and range START through END.
+When ALL-DAY is non-nil, write the range without times.
 Return markers for its beginning and the position selected by `%?'."
   (let* ((target (or (plist-get org-timegrid-org-capture-template :target)
                      'file))
@@ -437,7 +439,7 @@ distinguishes date-only values from midnight-aligned timed values."
 
 (defun org-timegrid-org--headline-has-timed-range-p (headline)
   "Return non-nil when HEADLINE's own section has a timed Org range."
-  (when-let ((section (seq-find
+  (when-let* ((section (seq-find
                        (lambda (element)
                          (eq (org-element-type element) 'section))
                        (org-element-contents headline))))
@@ -773,6 +775,7 @@ still have no place on a time grid."
 
 (defun org-timegrid-org--timestamp-all-day-minutes (timestamp endp)
   "Return the exclusive absolute-minute bounds of date-only TIMESTAMP.
+ENDP selects the end rather than the start of a timestamp range.
 Org writes an inclusive final date, whereas the renderer uses a half-open
 interval.  Thus an Org range through August 27 ends internally at the start
 of August 28, without displaying or writing an August 28 occurrence."
@@ -839,7 +842,8 @@ with no end time gets `org-timegrid-default-duration-minutes'."
 
 (defun org-timegrid-org--event
     (file headline timestamp kind &optional all-day)
-  "Create a calendar event for FILE HEADLINE TIMESTAMP of KIND."
+  "Create a calendar event for FILE HEADLINE TIMESTAMP of KIND.
+ALL-DAY records that the timestamp has dates but no times."
   (let* ((todo (org-element-property :todo-keyword headline))
          (done (and todo (member todo org-done-keywords)))
          (begin (org-timegrid-org--timestamp-position
@@ -932,7 +936,7 @@ with no end time gets `org-timegrid-default-duration-minutes'."
 
 (defun org-timegrid-org--buffer-events (&optional file)
   "Extract explicit timed ranges from the current Org buffer.
-FILE defaults to `buffer-file-name'."
+FILE defaults to the variable `buffer-file-name'."
   (let* ((file (or file buffer-file-name (buffer-name)))
          (tree (org-element-parse-buffer))
          events seen)
@@ -1068,13 +1072,13 @@ When HEADING is non-nil, move to the containing Org heading first."
     (org-timegrid-org--run-at command buffer position)))
 
 (defun org-timegrid-org-command (command)
-  "Return an interactive wrapper that runs Org COMMAND on the selected entry."
+  "Return an interactive wrapper to run Org COMMAND on the selected entry."
   (lambda ()
     (interactive)
     (org-timegrid-org--run-selected-command command)))
 
 (defun org-timegrid-org-agenda-command (command)
-  "Return an interactive wrapper that runs Agenda COMMAND on the selected entry."
+  "Return an interactive wrapper to run Agenda COMMAND on the selected entry."
   (lambda ()
     (interactive)
     (org-timegrid-org--run-selected-agenda-command command)))

@@ -2,8 +2,8 @@
 
 ;; Copyright (C) 2026 Umar Ahmad
 
-;; Author: Umar Ahmad
-;; Maintainer: Umar Ahmad
+;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
+;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Version: 0.1.0
 ;; Keywords: calendar, outlines, convenience
 ;; URL: https://github.com/Gleek/org-timegrid
