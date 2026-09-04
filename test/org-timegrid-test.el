@@ -110,7 +110,7 @@
     (org-timegrid-test--with-svg-data
       (let ((data (plist-get (cdr (org-timegrid-day-image nil 557 617 400))
                              :data)))
-        (should (string-match-p ">10:00</text>" data))))))
+        (should (string-match-p ">[[:space:]]*10:00</text>" data))))))
 
 (ert-deftest org-timegrid-test-plain-c-x-plus-zooms-calendar ()
   (should (eq (lookup-key org-timegrid-mode-map (kbd "C-x +"))
