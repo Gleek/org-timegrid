@@ -60,6 +60,10 @@ within that range; in that case it starts on the week's first day.
 The value must be a positive integer."
   :type '(integer :tag "Days"))
 
+(defcustom org-timegrid-highlight-current-day nil
+  "Non-nil means tint today's column in the timed grid."
+  :type 'boolean)
+
 (defun org-timegrid--last-day-index ()
   "Return the zero-based index of the final visible day."
   (1- org-timegrid-days))
@@ -1117,20 +1121,25 @@ size and need no gradient definition."
 
 (defun org-timegrid--draw-timed-background
     (svg width height column-width palette font-family start-minute end-minute
-         scale days today-column &optional week-start)
+         scale days &optional week-start)
   "Draw the shared timed-grid background into SVG.
-DAYS and TODAY-COLUMN control columns; WEEK-START enables weekend shading."
+DAYS controls the columns; WEEK-START enables weekend shading."
   (svg-rectangle svg 0 0 width height :fill (plist-get palette :background))
   (svg-rectangle svg 0 0 (org-timegrid--label-width) height
                  :fill (plist-get palette :time-background))
   (dotimes (day days)
     (let* ((x (+ (org-timegrid--label-width) (* day column-width)))
+           (absolute (and week-start (+ week-start day)))
            (weekday (and week-start
                          (calendar-day-of-week
                           (calendar-gregorian-from-absolute
-                           (+ week-start day))))))
+                           absolute)))))
       (svg-rectangle svg x 0 column-width height
-                     :fill (cond ((= day today-column)
+                     :fill (cond ((and org-timegrid-highlight-current-day
+                                       absolute
+                                       (= absolute
+                                          (calendar-absolute-from-gregorian
+                                           (calendar-current-date))))
                                   (plist-get palette :today))
                                  ((memq weekday '(0 6))
                                   (plist-get palette :weekend))
@@ -1175,7 +1184,7 @@ own."
          (svg (svg-create width height :stroke-width 0)))
     (org-timegrid--draw-timed-background
      svg width height column palette font-family start-minute end-minute
-     scale 1 0)
+     scale 1)
     (dolist (block (org-timegrid--layout-day blocks 0))
       (when (and (> (org-timegrid-block-end block) start-minute)
                  (< (org-timegrid-block-start block) end-minute))
@@ -1404,16 +1413,13 @@ geometry.  Return the marker's Y coordinate."
          (font-family (let ((family (face-attribute 'default :family nil t)))
                         (if (stringp family) family "monospace")))
          (week-start (org-timegrid--calendar-state-week-start org-timegrid--state))
-         (today-column
-          (- (calendar-absolute-from-gregorian (calendar-current-date))
-             week-start))
          (blocks (org-timegrid--effective-blocks))
          (day-blocks (make-vector org-timegrid-days nil))
          geometry)
     (setq-local org-timegrid--image-height height)
     (org-timegrid--draw-timed-background
      svg width height column-width palette font-family start-minute end-minute
-     scale org-timegrid-days today-column week-start)
+     scale org-timegrid-days week-start)
     (dotimes (day org-timegrid-days)
       (aset day-blocks day (org-timegrid--layout-day blocks day)))
     (dotimes (day org-timegrid-days)
