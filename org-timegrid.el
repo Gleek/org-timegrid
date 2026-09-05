@@ -1932,11 +1932,22 @@ ABSOLUTE-DATE is the first displayed day."
   "Return non-nil when the range starting at WEEK-START includes TODAY."
   (<= week-start today (+ week-start (org-timegrid--last-day-index))))
 
+(defun org-timegrid--header-left-offset (window)
+  "Return the gap between WINDOW's left edge and its text area.
+The header line starts at the window edge, but the tiles are text, so they
+start after the fringe, the margin and a left-hand scroll bar.  Measure the
+gap instead of counting the fringe alone, or the header sits to the left of
+the grid by the width of whatever else is there."
+  (if (window-live-p window)
+      (max 0 (- (nth 0 (window-edges window t nil t))
+                (nth 0 (window-edges window nil nil t))))
+    0))
+
 (defun org-timegrid--header ()
   "Return a pixel-aligned SVG header for the calendar."
   (org-timegrid--ensure-state)
   (let* ((window (get-buffer-window (current-buffer) t))
-         (left-offset (if window (or (car (window-fringes window)) 0) 0))
+         (left-offset (org-timegrid--header-left-offset window))
          (canvas-width
           (max 560 (org-timegrid--window-width)))
          (width (+ left-offset canvas-width))
@@ -2663,9 +2674,7 @@ selects nothing.  The mouse and the keyboard drive one shared cursor."
          (x (car-safe xy))
          (y (cdr-safe xy))
          (window (posn-window position))
-         (left-offset (if (window-live-p window)
-                          (or (car (window-fringes window)) 0)
-                        0))
+         (left-offset (org-timegrid--header-left-offset window))
          (canvas-width (org-timegrid--window-width))
          (column-width (/ (- canvas-width (org-timegrid--label-width))
                           (float org-timegrid-days))))
