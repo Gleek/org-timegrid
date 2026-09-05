@@ -190,7 +190,7 @@ after redraws.
 | `d`, backspace            | Remove its time, then optionally delete the heading                                  |
 | `M-w`, then `C-y`         | Duplicate the block as an independent entry                                          |
 | `C-w`, then `C-y`         | Move the block by cutting and restoring its timestamp                                |
-| `C-u C-y`                 | Paste by adding another time to the copied entry                                     |
+| `M-w`, then `C-u C-y`     | Add the pasted timestamp to the existing entry instead of duplicating it             |
 | `C-/`, `C-x u`            | Undo the last calendar edit                                                          |
 | `:`, `C-c C-q`            | Change the selected entry's tags                                                     |
 | `C-c C-t`                 | Change the selected entry's TODO state                                               |
@@ -316,14 +316,19 @@ priority, property, or file.
 | `org-timegrid-compact-pixels-per-minute`        |        `0.95` | Strip scale               |
 | `org-timegrid-compact-font-size`                |          `11` | Strip text size           |
 
-| Org variable                        |                                  Default | Meaning                                              |
-|-------------------------------------|-----------------------------------------:|------------------------------------------------------|
-| `org-timegrid-org-files`            |                                 `agenda` | Files to query; a list is literal                    |
-| `org-timegrid-org-capture-file`     | `calendar.org` in `user-emacs-directory` | Target for new entries; always queried               |
-| `org-timegrid-org-capture-template` |           top-level title and time range | Structure and location inside the capture file       |
-| `org-timegrid-org-auto-save`        |                                    `nil` | Save the affected Org file after every calendar edit |
-| `org-timegrid-org-show-repeaters`   |                                      `t` | Show timestamps with repeaters                       |
-| `org-timegrid-org-tag-color-alist`  |                                    `nil` | Tag-to-colour mapping                                |
+| Org variable                             |                                  Default | Meaning                                                               |
+|------------------------------------------|-----------------------------------------:|-----------------------------------------------------------------------|
+| `org-timegrid-org-files`                 |                                 `agenda` | Files to query; a list is literal                                     |
+| `org-timegrid-org-capture-file`          | `calendar.org` in `user-emacs-directory` | Target for new entries; always queried                                |
+| `org-timegrid-org-capture-template`      |           top-level title and time range | Structure and location inside the capture file                        |
+| `org-timegrid-org-auto-save`             |                                    `nil` | Save the affected Org file after every calendar edit                  |
+| `org-timegrid-org-show-done`             |                                      `t` | Show timestamps belonging to headings in a done state                 |
+| `org-timegrid-org-show-repeaters`        |                                      `t` | Show repeater anchors and their generated occurrences                 |
+| `org-timegrid-org-exclude-tags`          |                                    `nil` | Hide headings carrying any listed tag                                 |
+| `org-timegrid-org-exclude-todo-states`   |                                    `nil` | Hide headings whose TODO keyword is listed                            |
+| `org-timegrid-org-exclude-properties`    |                                    `nil` | Hide headings matching `(PROPERTY . VALUE)`; nil matches any value    |
+| `org-timegrid-org-filter-function`       | `org-timegrid-org-default-filter`        | Keep-predicate called with headline and timestamp Org elements        |
+| `org-timegrid-org-tag-color-alist`       |                                    `nil` | Tag-to-colour mapping                                                 |
 
 On an empty slot, `RET` and mouse-drag creation complete against unfinished
 TODO headings in the configured Org files. Choosing one adds the new time

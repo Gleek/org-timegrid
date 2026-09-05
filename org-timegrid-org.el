@@ -86,6 +86,58 @@ When nil, the calendar omits both the anchor and generated occurrences of
 timestamps with an Org repeater."
   :type 'boolean)
 
+(defcustom org-timegrid-org-show-done t
+  "Whether timestamps belonging to done Org headings appear."
+  :type 'boolean)
+
+(defcustom org-timegrid-org-exclude-tags nil
+  "Org tags whose headings should not appear on the calendar.
+A heading is excluded when it has any tag in this list."
+  :type '(repeat string))
+
+(defcustom org-timegrid-org-exclude-todo-states nil
+  "TODO keywords whose headings should not appear on the calendar."
+  :type '(repeat string))
+
+(defcustom org-timegrid-org-exclude-properties nil
+  "Org property values whose headings should not appear on the calendar.
+Each entry is (PROPERTY . VALUE).  PROPERTY and VALUE are strings.  A nil
+VALUE matches any non-nil value of PROPERTY."
+  :type '(alist :key-type (string :tag "Property")
+                :value-type (choice (const :tag "Any value" nil)
+                                    (string :tag "Value"))))
+
+(defcustom org-timegrid-org-filter-function
+  #'org-timegrid-org-default-filter
+  "Function deciding whether an eligible Org timestamp appears.
+The function receives the headline and timestamp `org-element' objects and
+returns non-nil to keep the timestamp.  Timestamp eligibility itself (an
+active date, with or without a time) is always enforced before this function
+runs.  The default function observes all Org filtering options in this group."
+  :type 'function)
+
+(defun org-timegrid-org-default-filter (headline timestamp)
+  "Return non-nil when HEADLINE's TIMESTAMP passes the standard filters."
+  (let ((todo (org-element-property :todo-keyword headline)))
+    (and (or org-timegrid-org-show-done
+             (not (member todo org-done-keywords)))
+         (or org-timegrid-org-show-repeaters
+             (not (org-element-property :repeater-type timestamp)))
+         (not (seq-intersection org-timegrid-org-exclude-tags
+                                (org-element-property :tags headline)))
+         (not (member todo org-timegrid-org-exclude-todo-states))
+         (not
+          (seq-some
+           (lambda (property)
+             (let ((actual
+                    (save-excursion
+                      (goto-char (org-element-property :begin headline))
+                      (org-entry-get nil (car property)))))
+               (and actual
+                    (or (null (cdr property))
+                        (equal actual (cdr property))))))
+           org-timegrid-org-exclude-properties)))))
+
 (defcustom org-timegrid-org-auto-save nil
   "Whether calendar edits immediately save their affected Org files.
 When non-nil, creating, moving, resizing, renaming, copying, deleting,
@@ -947,8 +999,11 @@ FILE defaults to the variable `buffer-file-name'."
                             (deadline . ,(org-element-property
                                           :deadline headline))))
           (let ((timestamp (cdr planning)))
-            (when (or (org-timegrid-org--timestamp-timed-p timestamp)
-                      (org-timegrid-org--timestamp-all-day-p timestamp))
+            (when (and
+                   (or (org-timegrid-org--timestamp-timed-p timestamp)
+                       (org-timegrid-org--timestamp-all-day-p timestamp))
+                   (funcall org-timegrid-org-filter-function
+                            headline timestamp))
               (push (org-element-property :begin timestamp) seen)
               (push (org-timegrid-org--event
                      file headline timestamp (car planning)
@@ -964,6 +1019,8 @@ FILE defaults to the variable `buffer-file-name'."
                 (when (and
                        (or (org-timegrid-org--timestamp-timed-p timestamp)
                            (org-timegrid-org--timestamp-all-day-p timestamp))
+                       (funcall org-timegrid-org-filter-function
+                                headline timestamp)
                        (not (memq (org-element-property :begin timestamp) seen)))
                   (push (org-timegrid-org--event
                          file headline timestamp 'timestamp
@@ -978,12 +1035,7 @@ FILE defaults to the variable `buffer-file-name'."
            (with-current-buffer (find-file-noselect file)
              (org-with-wide-buffer
               (mapcan (lambda (event)
-                        (let ((metadata (org-timegrid-event-metadata event)))
-                          (unless (and
-                                   (not org-timegrid-org-show-repeaters)
-                                   (plist-get metadata :repeater-type))
-                            (org-timegrid-org--expand-event
-                             event start end))))
+                        (org-timegrid-org--expand-event event start end))
                       (org-timegrid-org--buffer-events file))))))
 
 (defun org-timegrid-org--visit-event (event)

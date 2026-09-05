@@ -20,6 +20,38 @@
                 #'org-timegrid-test--svg-image-spec))
        ,@body)))
 
+(ert-deftest org-timegrid-test-org-default-filter ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "* DONE Hidden :private:\n:PROPERTIES:\n:CALENDAR: no\n:END:\n<2026-09-05 Sat 10:00 +1w>\n")
+    (let* ((tree (org-element-parse-buffer))
+           (headline (org-element-map tree 'headline #'identity nil t))
+           (timestamp (org-element-map headline 'timestamp #'identity nil t)))
+      (should (org-timegrid-org-default-filter headline timestamp))
+      (let ((org-timegrid-org-show-done nil))
+        (should-not (org-timegrid-org-default-filter headline timestamp)))
+      (let ((org-timegrid-org-show-repeaters nil))
+        (should-not (org-timegrid-org-default-filter headline timestamp)))
+      (let ((org-timegrid-org-exclude-tags '("private")))
+        (should-not (org-timegrid-org-default-filter headline timestamp)))
+      (let ((org-timegrid-org-exclude-todo-states '("DONE")))
+        (should-not (org-timegrid-org-default-filter headline timestamp)))
+      (let ((org-timegrid-org-exclude-properties '(("CALENDAR" . "no"))))
+        (should-not (org-timegrid-org-default-filter headline timestamp)))
+      (let ((org-timegrid-org-exclude-properties '(("CALENDAR"))))
+        (should-not (org-timegrid-org-default-filter headline timestamp))))))
+
+(ert-deftest org-timegrid-test-org-custom-filter-keeps-time-gate ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Keep\n<2026-09-05 Sat 10:00>\n* Reject\n<2026-09-05 Sat 11:00>\n* Inactive\n[2026-09-05 Sat 12:00]\n")
+    (let ((org-timegrid-org-filter-function
+           (lambda (headline _timestamp)
+             (equal (org-element-property :raw-value headline) "Keep"))))
+      (should (equal (mapcar #'org-timegrid-event-title
+                             (org-timegrid-org--buffer-events "test.org"))
+                     '("Keep"))))))
+
 (ert-deftest org-timegrid-test-svg-colors-are-normalized ()
   (dolist (case '(("Red1" nil "#ff0000")
                   ("#abc" nil "#aabbcc")
