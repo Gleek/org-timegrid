@@ -121,6 +121,13 @@ one-day layout suitable for a phone. Set
 `org-timegrid-android-display-keyboard` to non-nil to keep the on-screen
 keyboard available for commands that have no touch gesture.
 
+Here's a screencast:
+
+
+https://github.com/user-attachments/assets/fc368b76-4b29-40d0-8a0a-536ac526f6e0
+
+
+
 Android Emacs bundles librsvg without the font support needed to display SVG
 text. The Android layer therefore draws calendar text from bundled Noto Sans
 glyph outlines while retaining the shared SVG renderer and layout. Printable
