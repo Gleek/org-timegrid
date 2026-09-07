@@ -60,6 +60,64 @@
       (ert-info ((format "color %s" color))
         (should (equal (org-timegrid--svg-color color fallback) expected))))))
 
+(ert-deftest org-timegrid-test-android-text-uses-paths ()
+  (require 'org-timegrid-android)
+  (unwind-protect
+      (let ((svg (svg-create 100 20)))
+        (org-timegrid-android--draw-text
+         svg "Test 12" :x 2 :y 12 :font-size 10 :fill "#123456")
+        (let ((xml (with-temp-buffer
+                     (svg-print svg)
+                     (buffer-string))))
+          (should (string-match-p "<path" xml))
+          (should (string-match-p "fill=\"#123456\"" xml))
+          (should-not (string-match-p "<text" xml)))
+        (let ((regular (svg-create 20 20))
+              (medium (svg-create 20 20)))
+          (org-timegrid-android--draw-text regular "A" :font-weight 400)
+          (org-timegrid-android--draw-text medium "A" :font-weight 500)
+          (should-not
+           (equal (with-temp-buffer (svg-print regular) (buffer-string))
+                  (with-temp-buffer (svg-print medium) (buffer-string))))))
+    (advice-remove 'org-timegrid--draw-text
+                   #'org-timegrid-android--draw-text)))
+
+(ert-deftest org-timegrid-test-android-touch-scroll-uses-pixel-delta ()
+  (require 'org-timegrid-android)
+  (let ((org-timegrid-android-scroll-scale 0.5)
+        (org-timegrid-android-scroll-max-step 40)
+        seen)
+    (with-current-buffer (window-buffer (selected-window))
+      (setq-local org-timegrid--scroll-boundary '(bottom . 1.0)))
+    (cl-letf (((symbol-function 'org-timegrid-scroll)
+               (lambda (pixels window) (setq seen (list pixels window)))))
+      (org-timegrid-android-scroll
+       (list 'touchscreen-scroll (selected-window) 4 37))
+      (should (equal seen (list 18.5 (selected-window))))
+      (org-timegrid-android-scroll
+       (list 'touchscreen-scroll (selected-window) 4 200))
+      (should (equal seen (list 40 (selected-window))))
+      (should-not
+       (buffer-local-value 'org-timegrid--scroll-boundary
+                           (window-buffer (selected-window)))))))
+
+(ert-deftest org-timegrid-test-android-configures-shared-one-day-view ()
+  (require 'org-timegrid-android)
+  (with-temp-buffer
+    (org-timegrid-mode)
+    (org-timegrid-android--configure-buffer)
+    (should (= org-timegrid-days 1))
+    (should (= org-timegrid-default-zoom org-timegrid-android-zoom))
+    (should-not touch-screen-display-keyboard)
+    (should (equal org-timegrid-header-title-style
+                   org-timegrid-android-header-title-style))
+    (should (equal org-timegrid-single-day-label-style
+                   org-timegrid-android-single-day-label-style))
+    (let ((org-timegrid-android-display-keyboard t))
+      (org-timegrid-android--configure-buffer)
+      (should touch-screen-display-keyboard)
+      (should-not touch-screen-keyboard-function))))
+
 (ert-deftest org-timegrid-test-face-color-is-svg-safe ()
   (cl-letf (((symbol-function 'face-attribute)
              (lambda (&rest _ignored) "Red1")))
@@ -436,6 +494,18 @@
     (pcase-let ((`(,map ,event ,command) case))
       (ert-info ((format "event %s" event))
         (should (eq (lookup-key map event) command))))))
+
+(ert-deftest org-timegrid-test-header-navigation-targets ()
+  (let ((org-timegrid-days 1))
+    (cl-letf (((symbol-function 'org-timegrid--header-left-offset) (lambda (_) 0)))
+      (should (eq (org-timegrid--header-navigation-action
+                   nil '(20 . 10) (selected-window))
+                  #'org-timegrid-goto-date)))
+    (cl-letf (((symbol-function 'org-timegrid--header-left-offset) (lambda (_) 0)))
+      (should (eq (org-timegrid--header-navigation-action
+                   nil (cons 1 (1+ (org-timegrid--header-title-height)))
+                   (selected-window))
+                  #'org-timegrid-goto-today)))))
 
 (ert-deftest org-timegrid-test-cross-surface-preview-does-not-resize-drag-rail ()
   (let* ((source (org-timegrid-block-create

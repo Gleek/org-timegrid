@@ -172,6 +172,16 @@ future keyboard creation and navigation."
   "Height in pixels of one event row in the sticky date rail."
   :type 'integer)
 
+(defcustom org-timegrid-header-title-style
+  '(:font-size 24 :character-width 14.6 :height 44 :baseline 35)
+  "Geometry of the month and year title in SVG pixels."
+  :type 'plist)
+
+(defcustom org-timegrid-single-day-label-style
+  '(:scale 1.0 :x-offset -4 :gap 5)
+  "Scale, optical offset, and gap of the one-day weekday and date label."
+  :type 'plist)
+
 (defcustom org-timegrid-cursor-step-minutes 15
   "Minutes the keyboard cursor moves per ordinary step.
 The default matches `org-timegrid-slot-minutes'."
@@ -195,14 +205,11 @@ means \"more this way\" rather than merely marking where the window stops."
   "Name of the calendar buffer."
   :type 'string)
 
-(defconst org-timegrid--label-width 48)
+(defconst org-timegrid--label-width 54)
 (defconst org-timegrid--lane-gap 3)
 (defconst org-timegrid--grid-top-inset 6
   "Pixels between the sticky date rail and the midnight grid line.")
-(defconst org-timegrid--header-title-height 44)
 (defconst org-timegrid--header-date-height 30)
-(defconst org-timegrid--rail-top
-  (+ org-timegrid--header-title-height org-timegrid--header-date-height))
 (defconst org-timegrid--reference-font-size 10
   "Default-face pixel size for which the SVG's design sizes are specified.")
 (defconst org-timegrid--reference-font-height 18
@@ -257,6 +264,12 @@ Typography and geometry share this factor so their alignment is preserved."
   "Scale PIXELS with WINDOW's frame font, excluding buffer-local zoom."
   (* pixels (org-timegrid--frame-font-factor window)))
 
+(defun org-timegrid--single-day-label-factor (&optional window)
+  "Return the unified scale for the one-day weekday and date label."
+  (* (plist-get org-timegrid-single-day-label-style :scale)
+     (max (org-timegrid--frame-font-factor window)
+          (org-timegrid--zoom-factor window))))
+
 (defun org-timegrid--scale-pixels (pixels)
   "Scale vertical PIXELS by the current buffer's text zoom."
   (* pixels (org-timegrid--zoom-factor)))
@@ -268,6 +281,12 @@ Typography and geometry share this factor so their alignment is preserved."
 (defun org-timegrid--font-size (size)
   "Return SVG font SIZE adjusted by the unified calendar zoom."
   (* size (org-timegrid--zoom-factor)))
+
+(defun org-timegrid--draw-text (svg text &rest args)
+  "Draw TEXT in SVG using ARGS accepted by `svg-text'.
+Platform support files may advise this small seam when their SVG renderer
+cannot display text elements."
+  (apply #'svg-text svg text args))
 
 (defun org-timegrid--label-width ()
   "Return the width of the time-label gutter.
@@ -282,13 +301,15 @@ by the fixed week label in the header."
 
 (defun org-timegrid--header-title-height ()
   "Return the fixed month-and-year title section height."
-  org-timegrid--header-title-height)
+  (plist-get org-timegrid-header-title-style :height))
 
 (defun org-timegrid--rail-top ()
   "Return the top of the all-day rail.
 The title stays fixed and the date row follows only the frame's base font."
-  (+ org-timegrid--header-title-height
-     (org-timegrid--frame-scale-pixels org-timegrid--header-date-height)))
+  (+ (org-timegrid--header-title-height)
+     (if (= org-timegrid-days 1)
+         0
+       (org-timegrid--frame-scale-pixels org-timegrid--header-date-height))))
 
 (defun org-timegrid--all-day-lane-height ()
   "Return the zoom-adjusted height of one all-day lane."
@@ -1158,10 +1179,12 @@ DAYS controls the columns; WEEK-START enables weekend shading."
                                           (if hourp :grid :half-grid))
                        :stroke-width 1)
              (when (and hourp (< minute end-minute))
-               (svg-text svg (format "%02d:00" (/ minute 60))
-                         :x 5 :y (+ y (org-timegrid--scale-pixels 11))
+               (org-timegrid--draw-text svg (format "%02d:00" (/ minute 60))
+                         :x (/ (org-timegrid--label-width) 2.0)
+                         :y (+ y (org-timegrid--scale-pixels 11))
                          :font-size (org-timegrid--font-size 10)
                          :font-family font-family
+                         :text-anchor "middle"
                          :fill (plist-get palette :time-label))))))
 
 (defun org-timegrid-day-image (blocks start-minute end-minute width
@@ -1315,7 +1338,7 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                    :rx accent-radius :ry accent-radius :fill accent)
     (cl-loop for line in (unless boundary-edge title-lines)
              for index from 0 do
-             (svg-text svg line :x (+ x 9)
+             (org-timegrid--draw-text svg line :x (+ x 9)
                        :y (+ y (min (- block-height 1)
                                     (+ (if (= font-size small-font)
                                            (org-timegrid--scale-pixels 8)
@@ -1328,7 +1351,7 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                                  (plist-get palette :muted)
                                (plist-get palette :foreground))))
     (when (and (not boundary-edge) (< (length title-lines) max-lines))
-      (svg-text svg
+      (org-timegrid--draw-text svg
                 (org-timegrid--format-range
                  (or (org-timegrid-block-source-start block) (org-timegrid-block-start block))
                  (or (org-timegrid-block-source-end block) (org-timegrid-block-end block)))
@@ -1374,7 +1397,9 @@ geometry.  Return the marker's Y coordinate."
              (bubble-height (org-timegrid--scale-pixels 14))
              (bubble-x (/ (- (org-timegrid--label-width) bubble-width) 2.0))
              (bubble-right (+ bubble-x bubble-width))
-             (today-line-x (if (= today-day 0) bubble-right today-x))
+             (today-line-x (if (= today-day 0)
+                               bubble-right
+                             today-x))
              (edge-inset (org-timegrid--scale-pixels 1))
              (bubble-y (max edge-inset
                             (min (- height bubble-height edge-inset)
@@ -1387,12 +1412,13 @@ geometry.  Return the marker's Y coordinate."
         (when (> today-day 0)
           (svg-circle svg today-x y 4 :fill (plist-get palette :red)))
         (svg-rectangle svg bubble-x bubble-y bubble-width bubble-height
-                       :rx (org-timegrid--scale-pixels 7)
-                       :ry (org-timegrid--scale-pixels 7)
+                       :rx (/ bubble-height 2.0)
+                       :ry (/ bubble-height 2.0)
                        :fill (plist-get palette :red))
-        (svg-text svg label :x (/ (org-timegrid--label-width) 2.0)
+        (org-timegrid--draw-text svg label :x (/ (org-timegrid--label-width) 2.0)
                   :y (+ bubble-y (org-timegrid--scale-pixels 10))
-                  :font-size (org-timegrid--font-size 8) :font-weight "600"
+                  :font-size (org-timegrid--font-size 8)
+                  :font-weight "600"
                   :font-family font-family :text-anchor "middle"
                   :fill "#ffffff")
         y))))
@@ -1491,7 +1517,11 @@ geometry.  Return the marker's Y coordinate."
     (setq-local org-timegrid--clock-fragment
                 (and y (org-timegrid--svg-inner-xml svg))
                 org-timegrid--clock-tiles
-                (and y (org-timegrid--tiles-intersecting (- y 7) (+ y 7))))))
+                (and y
+                     (let ((radius
+                            (/ (org-timegrid--scale-pixels 14) 2.0)))
+                       (org-timegrid--tiles-intersecting
+                        (- y radius 1) (+ y radius 1)))))))
 
 (defun org-timegrid--tile-bounds (tile)
   "Return TILE's (TOP . HEIGHT) inside the canvas, in canvas pixels.
@@ -1843,7 +1873,7 @@ The final row is intentionally empty and can hold a cross-surface preview."
                                         (org-timegrid--scale-pixels 6.2)))))
            (title (truncate-string-to-width
                    (org-timegrid-block-title block) characters nil nil "…")))
-      (svg-text svg title :x text-x
+      (org-timegrid--draw-text svg title :x text-x
                 :y (+ y (org-timegrid--scale-pixels 13))
                 :font-size (org-timegrid--font-size 10)
                 :font-weight "600" :font-family font-family
@@ -1943,6 +1973,33 @@ the grid by the width of whatever else is there."
                 (nth 0 (window-edges window nil nil t))))
     0))
 
+(defun org-timegrid--draw-day-label
+    (svg day-name day-number center baseline factor todayp palette font-family)
+  "Draw one calendar day label centered at CENTER and BASELINE."
+  (if todayp
+      (let* ((name-width (* factor 8.0 (string-width day-name)))
+             (circle-radius (* factor 10))
+             (gap (* factor
+                     (plist-get org-timegrid-single-day-label-style :gap)))
+             (group-width (+ name-width gap (* 2 circle-radius)))
+             (name-x (- center (/ group-width 2.0)))
+             (number-x (+ name-x name-width gap circle-radius)))
+        (org-timegrid--draw-text svg day-name :x name-x :y baseline
+                    :font-size (* factor 14) :font-weight "500"
+                    :font-family font-family
+                    :fill (plist-get palette :foreground))
+        (svg-circle svg number-x (- baseline (* factor 4)) circle-radius
+                    :fill (plist-get palette :red))
+        (org-timegrid--draw-text svg day-number :x number-x :y baseline
+                    :font-size (* factor 14) :font-weight "700"
+                    :font-family font-family :text-anchor "middle"
+                    :fill "#ffffff"))
+    (org-timegrid--draw-text svg (format "%s %s" day-name day-number)
+                :x center :y baseline
+                :font-size (* factor 14) :font-weight "500"
+                :font-family font-family :text-anchor "middle"
+                :fill (plist-get palette :foreground))))
+
 (defun org-timegrid--header ()
   "Return a pixel-aligned SVG header for the calendar."
   (org-timegrid--ensure-state)
@@ -1959,7 +2016,12 @@ the grid by the width of whatever else is there."
          (date-factor (org-timegrid--frame-font-factor window))
          (rail-top (org-timegrid--rail-top))
          (lane-height (org-timegrid--all-day-lane-height))
-         (height (+ rail-top (* rail-rows lane-height)))
+         (height (max (+ rail-top (* rail-rows lane-height))
+                      (if (= org-timegrid-days 1)
+                          (+ rail-top
+                             (* (org-timegrid--single-day-label-factor window)
+                                42))
+                        0)))
          (column-width (/ (- canvas-width
                              (org-timegrid--label-width))
                           (float org-timegrid-days)))
@@ -1976,22 +2038,30 @@ the grid by the width of whatever else is there."
          geometry)
     (svg-rectangle svg 0 0 width height
                    :fill (plist-get palette :time-background))
-    (svg-text svg month-title :x title-x :y 35
-              :font-size 24 :font-weight "700"
+    (org-timegrid--draw-text svg month-title :x title-x
+              :y (plist-get org-timegrid-header-title-style :baseline)
+              :font-size (plist-get org-timegrid-header-title-style :font-size)
+              :font-weight "700"
               :font-family font-family :fill (plist-get palette :foreground))
-    (svg-text svg year-title
-              :x (+ title-x (* 14.6 (string-width month-title)) 8)
-              :y 35 :font-size 24 :font-weight "300"
+    (org-timegrid--draw-text svg year-title
+              :x (+ title-x
+                    (* (plist-get org-timegrid-header-title-style :character-width)
+                       (string-width month-title))
+                    8)
+              :y (plist-get org-timegrid-header-title-style :baseline)
+              :font-size (plist-get org-timegrid-header-title-style :font-size)
+              :font-weight "300"
               :font-family font-family
               :fill (plist-get palette :secondary-text))
-    (svg-text svg (org-timegrid--week-label week-start)
-              :x (+ left-offset 7)
-              :y (+ header-title-height (* date-factor 20))
-              :font-size (* date-factor 14) :font-family font-family
-              :fill (plist-get palette
-                               (if (org-timegrid--week-current-p week-start today)
-                                   :red
-                                 :secondary-text)))
+    (when (> org-timegrid-days 1)
+      (org-timegrid--draw-text svg (org-timegrid--week-label week-start)
+                :x (+ left-offset 7)
+                :y (+ header-title-height (* date-factor 20))
+                :font-size (* date-factor 14) :font-family font-family
+                :fill (plist-get palette
+                                 (if (org-timegrid--week-current-p week-start today)
+                                     :red
+                                   :secondary-text))))
     (dotimes (day org-timegrid-days)
       (let* ((absolute (+ week-start day))
              (date (calendar-gregorian-from-absolute absolute))
@@ -2002,37 +2072,31 @@ the grid by the width of whatever else is there."
                    (* day column-width)))
              (center (+ x (/ column-width 2.0)))
              (baseline (+ header-title-height (* date-factor 20))))
-        (if (= absolute today)
-            (let* ((name-width (* date-factor 8.0
-                                  (string-width day-name)))
-                   (circle-radius (* date-factor 10))
-                   (gap (* date-factor 5))
-                   (group-width (+ name-width gap (* 2 circle-radius)))
-                   (name-x (- center (/ group-width 2.0)))
-                   (number-x (+ name-x name-width gap circle-radius)))
-              (svg-text svg day-name :x name-x :y baseline
-                        :font-size (* date-factor 14) :font-weight "500"
-                        :font-family font-family
-                        :fill (plist-get palette :foreground))
-              (svg-circle svg number-x (- baseline (* date-factor 4))
-                          circle-radius
-                          :fill (plist-get palette :red))
-              (svg-text svg day-number :x number-x :y baseline
-                        :font-size (* date-factor 14) :font-weight "700"
-                        :font-family font-family :text-anchor "middle"
-                        :fill "#ffffff"))
-          (svg-text svg (format "%s %s" day-name day-number)
-                    :x center :y baseline
-                    :font-size (* date-factor 14) :font-weight "500"
-                    :font-family font-family :text-anchor "middle"
-                    :fill (plist-get palette :foreground)))))
+        (unless (= org-timegrid-days 1)
+          (org-timegrid--draw-day-label
+           svg day-name day-number center baseline date-factor
+           (= absolute today) palette font-family))))
     (svg-line svg 0 (1- rail-top)
               width (1- rail-top)
               :stroke (plist-get palette :grid) :stroke-width 1)
-    (svg-text svg "all-day" :x (+ left-offset 5)
-              :y (+ rail-top (org-timegrid--scale-pixels 15))
-              :font-size (org-timegrid--font-size 9) :font-family font-family
-              :fill (plist-get palette :secondary-text))
+    (if (= org-timegrid-days 1)
+        (let* ((date (calendar-gregorian-from-absolute week-start))
+               (day-name (calendar-day-name date t))
+               (day-number (number-to-string (nth 1 date)))
+               (center (+ left-offset (/ (org-timegrid--label-width) 2.0)))
+               (single-factor (org-timegrid--single-day-label-factor window))
+               (baseline (+ rail-top (* single-factor 25)))
+               (todayp (= week-start today)))
+          (org-timegrid--draw-day-label
+           svg day-name day-number
+           (+ center (* single-factor
+                        (plist-get org-timegrid-single-day-label-style :x-offset)))
+           baseline single-factor todayp
+           palette font-family))
+      (org-timegrid--draw-text svg "all-day" :x (+ left-offset 5)
+                :y (+ rail-top (org-timegrid--scale-pixels 15))
+                :font-size (org-timegrid--font-size 9) :font-family font-family
+                :fill (plist-get palette :secondary-text)))
     (dotimes (day org-timegrid-days)
       (let ((x (+ left-offset (org-timegrid--label-width) (* day column-width))))
         (svg-line svg x rail-top x height
@@ -2075,7 +2139,7 @@ the grid by the width of whatever else is there."
                      (< (org-timegrid-block-rail-start block) (* (1+ day) 1440))))
               all-day)))
         (when (> hidden 0)
-          (svg-text svg (format "+%d more" hidden)
+          (org-timegrid--draw-text svg (format "+%d more" hidden)
                     :x (+ left-offset (org-timegrid--label-width)
                           (* day column-width) 7)
                     :y (+ rail-top (* event-rows lane-height)
@@ -2702,6 +2766,40 @@ selects nothing.  The mouse and the keyboard drive one shared cursor."
               :lane (max 0 (floor (/ (- y (org-timegrid--rail-top))
                                      (org-timegrid--all-day-lane-height)))))))))
 
+(defun org-timegrid--header-navigation-action (position &optional coordinates window)
+  "Return the navigation command assigned to header POSITION, if any.
+COORDINATES and WINDOW allow callers to supply already decoded position data."
+  (let* ((xy (or coordinates
+                 (posn-object-x-y position)
+                 (posn-x-y position)))
+         (x (car-safe xy))
+         (y (cdr-safe xy))
+         (window (or window (posn-window position)))
+         (left-offset (org-timegrid--header-left-offset window)))
+    (when (and (numberp x) (numberp y))
+      (cond
+       ((< y (org-timegrid--header-title-height))
+        #'org-timegrid-goto-date)
+       ((and (= org-timegrid-days 1)
+             (< x (+ left-offset (org-timegrid--label-width))))
+        #'org-timegrid-goto-today)
+       ((and (> org-timegrid-days 1)
+             (< y (org-timegrid--rail-top))
+             (>= x (+ left-offset (org-timegrid--label-width))))
+        (let* ((canvas-width (org-timegrid--window-width))
+               (column-width (/ (- canvas-width (org-timegrid--label-width))
+                                (float org-timegrid-days)))
+               (day (floor (/ (- x left-offset
+                                  (org-timegrid--label-width))
+                               column-width)))
+               (absolute (+ (org-timegrid--calendar-state-week-start
+                             org-timegrid--state)
+                            day)))
+          (and (<= 0 day (org-timegrid--last-day-index))
+               (= absolute
+                  (calendar-absolute-from-gregorian (calendar-current-date)))
+               #'org-timegrid-goto-today)))))))
+
 (defun org-timegrid--mouse-position-xy (position)
   "Return comparable POSITION coordinates across the rail and time grid."
   (let ((xy (or (posn-x-y position) (posn-object-x-y position))))
@@ -2728,9 +2826,14 @@ rail's area names must be treated as one stable surface during a drag."
   "Move the shared calendar cursor to all-day rail mouse EVENT."
   (interactive "@e")
   (let* ((position (event-start event))
+         (navigation (org-timegrid--header-navigation-action position))
          (target (org-timegrid--header-target position)))
-    (if (null target)
-        (message "Click inside an all-day cell")
+    (cond
+     (navigation
+     (call-interactively navigation))
+     ((null target)
+      (message "Click inside an all-day cell"))
+     (t
       (let ((day (plist-get target :day))
             (lane (plist-get target :lane))
             (id (plist-get target :id)))
@@ -2740,7 +2843,7 @@ rail's area names must be treated as one stable surface during a drag."
                 id))
         (setf (org-timegrid--calendar-state-cursor-visible org-timegrid--state)
               t)
-        (org-timegrid--cursor-moved)))))
+        (org-timegrid--cursor-moved))))))
 
 (defun org-timegrid--all-day-create-proposal (origin target)
   "Return a date-only creation proposal spanning ORIGIN through TARGET.
@@ -2832,7 +2935,8 @@ Pressing an existing block retains ordinary click-to-select behavior."
                         org-timegrid--backend))))
     (cond
      ((null origin)
-      (message "Press inside an all-day cell"))
+      (unless (org-timegrid--header-navigation-action origin-position)
+        (message "Press inside an all-day cell")))
      ((plist-get origin :id)
       (let ((callback
              (and org-timegrid--backend
@@ -3891,6 +3995,32 @@ the duration is asked for separately, prefilled with the current one."
      (org-timegrid-block-time-kind block))
     (org-timegrid--refresh-data)))
 
+;;; Pointer context menu
+
+(defun org-timegrid--context-menu ()
+  "Return the context menu appropriate for the calendar cursor."
+  (let ((block (org-timegrid--block-at-cursor)))
+    (easy-menu-create-menu
+     "Org Time Grid"
+     (if block
+         (list
+          ["Open" org-timegrid-open-at-cursor t]
+          ["Rename…" org-timegrid-edit-selected-title t]
+          ["Change time…" org-timegrid-retime-selected t]
+          "--"
+          ["Copy" org-timegrid-copy-selected t]
+          ["Cut" org-timegrid-cut-selected t]
+          ["Delete" org-timegrid-remove-selected t])
+       (list
+        ["Create block…" org-timegrid-create-at-cursor t]
+        ["Paste" org-timegrid-yank (and org-timegrid--kill t)])))))
+
+(defun org-timegrid-context-menu (event)
+  "Select the calendar location at EVENT and show its action menu."
+  (interactive "@e")
+  (org-timegrid-click (list 'mouse-1 (event-start event)))
+  (popup-menu (org-timegrid--context-menu) event))
+
 ;;; Dates
 
 (defun org-timegrid-goto-date ()
@@ -4042,6 +4172,7 @@ not hold for a buffer made of tall image glyphs."
                 #'org-timegrid-press)
     (define-key map [mouse-1] #'org-timegrid-click)
     (define-key map [double-mouse-1] #'org-timegrid-visit)
+    (define-key map [down-mouse-3] #'org-timegrid-context-menu)
     (define-key map [mouse-movement] #'org-timegrid-pointer-feedback)
     (define-key map [header-line mouse-1] #'org-timegrid-header-click)
     (define-key map [header-line down-mouse-1] #'org-timegrid-header-press)
@@ -4063,6 +4194,8 @@ not hold for a buffer made of tall image glyphs."
                   #'org-timegrid-click)
       (define-key map (vector area 'double-mouse-1)
                   #'org-timegrid-visit)
+      (define-key map (vector area 'down-mouse-3)
+                  #'org-timegrid-context-menu)
       (define-key map (vector area 'mouse-movement)
                   #'org-timegrid-pointer-feedback)
       (dolist (wheel '(wheel-up double-wheel-up triple-wheel-up))
@@ -4175,10 +4308,14 @@ not hold for a buffer made of tall image glyphs."
               #'org-timegrid-press)
   (define-key org-timegrid-mode-map (vector area 'double-down-mouse-1)
               #'org-timegrid-ignore-double-press)
+  (define-key org-timegrid-mode-map (vector area 'down-mouse-3)
+              #'org-timegrid-context-menu)
   (define-key org-timegrid-mode-map (vector area 'mouse-movement)
               #'org-timegrid-pointer-feedback))
 (define-key org-timegrid-mode-map [mouse-movement]
             #'org-timegrid-pointer-feedback)
+(define-key org-timegrid-mode-map [down-mouse-3]
+            #'org-timegrid-context-menu)
 (define-key org-timegrid-mode-map [header-line mouse-1]
             #'org-timegrid-header-click)
 (define-key org-timegrid-mode-map [header-line down-mouse-1]
@@ -4297,4 +4434,6 @@ Revisiting an existing calendar retains its pixel scroll position."
 
 (provide 'org-timegrid)
 (require 'org-timegrid-isearch)
+(when (eq system-type 'android)
+  (require 'org-timegrid-android))
 ;;; org-timegrid.el ends here

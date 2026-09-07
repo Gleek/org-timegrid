@@ -113,6 +113,23 @@ else. The file does not need to be in `org-agenda-files`; org-timegrid always
 queries its capture file as well. If you do not want the Org Agenda strip,
 omit the second `use-package` form.
 
+### Android Emacs
+
+On Android, `org-timegrid` adds native touch scrolling and long-press editing,
+prevents calendar gestures from opening the software keyboard, and uses a
+one-day layout suitable for a phone. Set
+`org-timegrid-android-display-keyboard` to non-nil to keep the on-screen
+keyboard available for commands that have no touch gesture.
+
+Android Emacs bundles librsvg without the font support needed to display SVG
+text. The Android layer therefore draws calendar text from bundled Noto Sans
+glyph outlines while retaining the shared SVG renderer and layout. Printable
+ASCII and common calendar punctuation are included; unsupported characters use
+a question-mark glyph. The outline subset is roughly 59 KB, and its source font
+is licensed under the SIL Open Font License 1.1. You can generate the resource
+from another font with
+[`builds/generate-android-font.py`](builds/generate-android-font.py).
+
 ## What appears on the calendar
 
 The Org backend reads active timestamps with a start time. They may be plain

@@ -61,6 +61,8 @@ by the backend."
   :type '(choice (const :tag "All events" nil) function))
 
 (defvar-local org-timegrid-calendar--overlays nil)
+(defvar org-timegrid-calendar-setup-hook nil
+  "Hook run in Calendar after timegrid's event marks are refreshed.")
 (defvar displayed-month)
 (defvar displayed-year)
 
@@ -104,7 +106,8 @@ END-DAY is exclusive."
                  (setq org-timegrid-calendar--overlays
                        (nconc (seq-difference (overlays-at (point)) before)
                               org-timegrid-calendar--overlays)))))))
-       days))))
+       days)))
+  (run-hooks 'org-timegrid-calendar-setup-hook))
 
 ;;;###autoload
 (defun org-timegrid-calendar-read-date (backend &rest args)
