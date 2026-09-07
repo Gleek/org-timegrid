@@ -6,7 +6,11 @@
 
 (require 'org-timegrid)
 (require 'org-timegrid-android-font)
-(require 'touch-screen)
+
+(defvar touch-screen-current-tool)
+(defvar touch-screen-current-timer)
+(defvar touch-screen-display-keyboard)
+(defvar touch-screen-keyboard-function)
 
 (defcustom org-timegrid-android-scroll-scale 0.65
   "Scale physical Android touch pixels into calendar SVG pixels."
@@ -123,8 +127,9 @@ Enable this to use keyboard commands that have no touch gesture."
           (when origin
             (unwind-protect
                 (setq result
-                      (touch-screen-track-drag
-                       start-event #'org-timegrid-android--drag-update data))
+                      (funcall (intern "touch-screen-track-drag")
+                               start-event
+                               #'org-timegrid-android--drag-update data))
               (setq touch-screen-current-tool nil
                     touch-screen-current-timer nil))
             (cond
@@ -194,11 +199,15 @@ Enable this to use keyboard commands that have no touch gesture."
                #'org-timegrid-android--draw-text)
 
 (when (eq system-type 'android)
+  ;; Touch support is built into recent Android Emacs, but is absent from
+  ;; supported desktop Emacs 29.  Load it only on the platform that uses it.
+  (or (featurep 'touch-screen) (load "touch-screen" nil t))
   (advice-add 'org-timegrid--draw-text :override
               #'org-timegrid-android--draw-text)
   (add-hook 'org-timegrid-calendar-setup-hook
             #'org-timegrid-android--configure-date-picker)
-  (org-timegrid-android--install-touch-bindings)
+  (when (fboundp (intern "touch-screen-track-drag"))
+    (org-timegrid-android--install-touch-bindings))
   (advice-remove 'org-timegrid--tile-image-map
                  #'org-timegrid-android--plain-tile-image-map)
   (advice-add 'org-timegrid--tile-image-map :override
