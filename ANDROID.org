@@ -1,0 +1,155 @@
+#+title: Org Timegrid on Android
+
+This setup does not require ADB, Git, Termux, or any command-line binaries.
+
+* Requirements
+
+- Android Emacs 29.1 or newer
+- Org 9.6 or newer (included with recent Emacs)
+- SVG support
+
+Install the graphical Android port of Emacs from:
+
+https://sourceforge.net/projects/android-ports-for-gnu-emacs/files/
+
+Choose an APK matching the phone's CPU architecture and Android version.  Emacs
+30 stable is a safe choice.
+
+After starting Emacs once, grant it file access:
+
+1. Open Android Settings.
+2. Grant Emacs the Files and media permission.
+3. Under Special app access, grant Emacs All files access.
+
+The exact names of these settings vary between Android vendors.
+
+* Install org-timegrid without Git
+
+1. Download the org-timegrid repository as a ZIP in the phone's browser:
+
+   https://github.com/Gleek/org-timegrid/archive/refs/heads/main.zip
+
+2. Extract the ZIP with Android's Files app.
+3. Move or rename the extracted directory to:
+
+   #+begin_example
+   /storage/emulated/0/Documents/org-timegrid/
+   #+end_example
+
+The directory should directly contain =org-timegrid.el=,
+=org-timegrid-org.el=, =org-timegrid-android.el=, and the other
+=org-timegrid*.el= files.  Tests, screenshots, build scripts, and Git metadata
+are not needed.
+
+Keeping the package in shared storage avoids the need to copy anything into
+Emacs's private application directory.
+
+* Create the configuration
+
+In Emacs, open the init file with:
+
+#+begin_example
+C-x C-f ~/.emacs.d/init.el RET
+#+end_example
+
+If =~/.emacs.d= does not exist, first run =M-x make-directory= and enter
+=~/.emacs.d=.
+
+Add this configuration:
+
+#+begin_src emacs-lisp
+(require 'org)
+
+(add-to-list 'load-path
+             "/storage/emulated/0/Documents/org-timegrid")
+
+(setq org-directory "/storage/emulated/0/Documents/Org/"
+      org-agenda-files (list org-directory)
+      org-timegrid-org-files 'agenda
+      org-timegrid-org-capture-file
+      (expand-file-name "calendar.org" org-directory)
+      org-timegrid-org-auto-save t)
+
+(require 'org-timegrid-org)
+#+end_src
+
+Create the Org directory if necessary:
+
+#+begin_example
+/storage/emulated/0/Documents/Org/
+#+end_example
+
+Restart Emacs, then run:
+
+#+begin_example
+M-x org-timegrid-week
+#+end_example
+
+On Android, org-timegrid automatically enables a one-day phone layout, touch
+scrolling, long-press creation and editing, and Android-compatible SVG text.
+
+To keep the on-screen keyboard available inside the calendar, add:
+
+#+begin_src emacs-lisp
+(setq org-timegrid-android-display-keyboard t)
+#+end_src
+
+* Optional: copy the package into Emacs's private directory
+
+Android Emacs exposes its home directory through an Android document provider.
+Some Files apps show an =Emacs= location in their side menu.  From there, the
+package can be copied to =~/.emacs.d/site-lisp/org-timegrid/= and loaded with:
+
+#+begin_src emacs-lisp
+(add-to-list
+ 'load-path
+ (expand-file-name "site-lisp/org-timegrid" user-emacs-directory))
+#+end_src
+
+Some file managers hide dot-directories, so the shared =Documents/org-timegrid=
+method is generally easier.
+
+* Optional: synchronize Org files with Syncthing
+
+Syncthing can keep the Org directory synchronized with a desktop without ADB,
+Termux, or cloud storage.
+
+1. Install Syncthing on the desktop.
+2. On Android, install the maintained Syncthing-Fork:
+
+   https://github.com/researchxxl/syncthing-android
+
+   The former official Syncthing Android app is discontinued.
+
+3. Pair the phone and desktop in Syncthing.  Scanning the desktop device-ID QR
+   code is the easiest method.
+4. Share the desktop's existing Org directory with the phone.
+5. Select this folder as its location on the phone:
+
+   #+begin_example
+   /storage/emulated/0/Documents/Org/
+   #+end_example
+
+6. Use the =Send & Receive= folder type on both devices.
+7. Grant Syncthing-Fork file access.  If syncing stops when the screen is off,
+   disable Android battery optimization for it.
+8. Wait until both devices report =Up to Date= before editing on the other
+   device.
+
+To let Emacs notice files changed by Syncthing, add:
+
+#+begin_src emacs-lisp
+(global-auto-revert-mode 1)
+#+end_src
+
+Syncthing does not merge simultaneous edits within an Org file.  Avoid editing
+the same file on both devices before synchronization completes.  Enabling
+Syncthing file versioning on the desktop provides an additional safety net.
+
+* Optional: Termux binaries
+
+Org-timegrid itself needs no Termux binaries.  Use the specially signed Emacs
+and Termux APK pair only if Emacs must run external tools such as Git or
+ripgrep.  Both APKs must come from the matching =termux= directory here:
+
+https://sourceforge.net/projects/android-ports-for-gnu-emacs/files/termux/

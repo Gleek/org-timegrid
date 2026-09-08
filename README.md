@@ -115,6 +115,9 @@ omit the second `use-package` form.
 
 ### Android Emacs
 
+See [`ANDROID.org`](ANDROID.org) for a complete phone setup without ADB, Git,
+Termux, or other command-line binaries, plus optional Syncthing instructions.
+
 On Android, `org-timegrid` adds native touch scrolling and long-press editing,
 prevents calendar gestures from opening the software keyboard, and uses a
 one-day layout suitable for a phone. Set
