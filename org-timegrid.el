@@ -997,6 +997,13 @@ DAY-X and COLUMN-WIDTH describe the full column."
             (org-timegrid--format-minute end)
             (if (> day-offset 0) (format " (+%d)" day-offset) ""))))
 
+(defun org-timegrid--block-details (block)
+  "Return BLOCK's complete time range and title for transient UI."
+  (format "[%s-%s] %s"
+          (org-timegrid--format-minute (org-timegrid-block-start block))
+          (org-timegrid--format-minute (org-timegrid-block-end block))
+          (or (org-timegrid-block-title block) "")))
+
 (defun org-timegrid--resolve-color (color palette)
   "Return COLOR as a colour string, resolving a name through PALETTE.
 COLOR is a name in `org-timegrid-colors', any colour string, or nil for
@@ -1901,7 +1908,9 @@ the rail presents those same endpoints as its left and right edges."
   "Return move and horizontal-resize hotspots for all-day blocks."
   (let (edges bodies)
     (dolist (geometry org-timegrid--header-geometry)
-      (let* ((x (round (plist-get geometry :x)))
+      (let* ((block (org-timegrid--block (plist-get geometry :id)))
+             (details (and block (org-timegrid--block-details block)))
+             (x (round (plist-get geometry :x)))
              (y (round (plist-get geometry :y)))
              (right (round (+ (plist-get geometry :x)
                               (plist-get geometry :width))))
@@ -1912,16 +1921,16 @@ the rail presents those same endpoints as its left and right edges."
         (when (plist-get geometry :allow-left)
           (push (list `(rect . ((,x . ,y) . (,(+ x edge) . ,bottom)))
                       'calendar-rail-resize
-                      '(pointer hdrag help-echo "Drag to change the first day"))
+                      `(pointer hdrag help-echo ,details))
                 edges))
         (when (plist-get geometry :allow-right)
           (push (list `(rect . ((,(- right edge) . ,y) . (,right . ,bottom)))
                       'calendar-rail-resize
-                      '(pointer hdrag help-echo "Drag to change the last day"))
+                      `(pointer hdrag help-echo ,details))
                 edges))
         (push (list `(rect . ((,x . ,y) . (,right . ,bottom)))
                     'calendar-rail-block
-                    '(pointer hand help-echo "Drag to move; double-click to open"))
+                    `(pointer hand help-echo ,details))
               bodies)))
     (append edges bodies)))
 
@@ -1983,14 +1992,21 @@ the grid by the width of whatever else is there."
                      (plist-get org-timegrid-single-day-label-style :gap)))
              (group-width (+ name-width gap (* 2 circle-radius)))
              (name-x (- center (/ group-width 2.0)))
-             (number-x (+ name-x name-width gap circle-radius)))
+             (number-x (+ name-x name-width gap circle-radius))
+             ;; A leading "1" leaves noticeably less ink on the left than
+             ;; its advance width suggests.  Nudge multi-digit dates onto the
+             ;; circle's optical center while keeping its geometry unchanged.
+             (number-text-x (- number-x
+                               (if (> (length day-number) 1)
+                                   (* factor 0.5)
+                                 0))))
         (org-timegrid--draw-text svg day-name :x name-x :y baseline
                     :font-size (* factor 14) :font-weight "500"
                     :font-family font-family
                     :fill (plist-get palette :foreground))
-        (svg-circle svg number-x (- baseline (* factor 4)) circle-radius
+        (svg-circle svg number-x (- baseline (* factor 5)) circle-radius
                     :fill (plist-get palette :red))
-        (org-timegrid--draw-text svg day-number :x number-x :y baseline
+        (org-timegrid--draw-text svg day-number :x number-text-x :y baseline
                     :font-size (* factor 14) :font-weight "700"
                     :font-family font-family :text-anchor "middle"
                     :fill "#ffffff"))
@@ -2193,7 +2209,9 @@ leave no central move target."
   (let (edges bodies)
     (dolist (geometry org-timegrid--geometry)
       (unless (plist-get geometry :preview)
-        (let* ((x (round (plist-get geometry :x)))
+        (let* ((block (org-timegrid--block (plist-get geometry :id)))
+               (details (and block (org-timegrid--block-details block)))
+               (x (round (plist-get geometry :x)))
                (y (round (plist-get geometry :y)))
                (right (round (+ (plist-get geometry :x)
                                 (plist-get geometry :width))))
@@ -2209,26 +2227,24 @@ leave no central move target."
             (push (list `(rect . ((,x . ,y) . (,right . ,bottom)))
                         'calendar-resize
                         `(pointer nhdrag
-                                  help-echo ,(if (eq boundary-edge 'top)
-                                                 "Drag into this day to change the start time"
-                                               "Drag into this day to change the end time")))
+                                  help-echo ,details))
                   edges))
            (t
             (when (plist-get geometry :allow-top)
               (push (list `(rect . ((,x . ,(max 0 (- y slop)))
                                     . (,right . ,(+ y edge))))
                           'calendar-resize
-                          '(pointer nhdrag help-echo "Drag to change the start time"))
+                          `(pointer nhdrag help-echo ,details))
                     edges))
             (when (plist-get geometry :allow-bottom)
               (push (list `(rect . ((,x . ,(- bottom edge))
                                     . (,right . ,(+ bottom slop))))
                           'calendar-resize
-                          '(pointer nhdrag help-echo "Drag to change the end time"))
+                          `(pointer nhdrag help-echo ,details))
                     edges))
             (push (list `(rect . ((,x . ,y) . (,right . ,bottom)))
                         'calendar-block
-                        '(pointer hand help-echo "Drag to move; double-click to open"))
+                        `(pointer hand help-echo ,details))
                   bodies))))))
     (append edges bodies)))
 
@@ -3154,7 +3170,9 @@ Leave the first non-motion event for the gesture loop to process."
 (defun org-timegrid--cursor-moved ()
   "Render a cursor/selection model change and keep it visible."
   (org-timegrid--render-ui-change)
-  (org-timegrid--scroll-cursor-into-view))
+  (org-timegrid--scroll-cursor-into-view)
+  (when-let* ((block (org-timegrid--block-at-cursor)))
+    (message "%s" (org-timegrid--block-details block))))
 
 (defun org-timegrid--scroll-cursor-into-view ()
   "Scroll the minimum amount needed to make the whole cursor slot visible."
