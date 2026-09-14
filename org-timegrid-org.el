@@ -897,7 +897,6 @@ with no end time gets `org-timegrid-default-duration-minutes'."
   "Create a calendar event for FILE HEADLINE TIMESTAMP of KIND.
 ALL-DAY records that the timestamp has dates but no times."
   (let* ((todo (org-element-property :todo-keyword headline))
-         (done (and todo (member todo org-done-keywords)))
          (begin (org-timegrid-org--timestamp-position
                  headline timestamp)))
     (unless begin
@@ -914,7 +913,9 @@ ALL-DAY records that the timestamp has dates but no times."
             (org-timegrid-org--timestamp-minutes timestamp t))
      :all-day all-day
      :tags (org-element-property :tags headline)
-     :state (if done 'done todo)
+     ;; `org-timegrid-org--mark-latest-done' promotes this to `done'
+     ;; on whichever of the heading's events is latest.
+     :state todo
      :color (funcall org-timegrid-org-color-function headline)
      :source (list :file file :marker (copy-marker begin) :kind kind)
      :metadata
@@ -986,6 +987,20 @@ ALL-DAY records that the timestamp has dates but no times."
           (error "Org repeater expansion exceeded safety limit"))
         (nreverse occurrences)))))
 
+(defun org-timegrid-org--mark-latest-done (events todo)
+  "Mark the latest of EVENTS as done when heading keyword TODO is done.
+A heading's done state isn't a property of any one timestamp, so
+marking every timestamp done erases history: earlier occurrences
+already happened and shouldn't change appearance just because the
+heading was later marked done or cancelled.  Only the latest timestamp
+reflects the current state; the rest keep their plain TODO keyword."
+  (when (and events (member todo org-done-keywords))
+    (let ((latest (apply #'max (mapcar #'org-timegrid-event-start events))))
+      (dolist (event events)
+        (when (= (org-timegrid-event-start event) latest)
+          (setf (org-timegrid-event-state event) 'done)))))
+  events)
+
 (defun org-timegrid-org--buffer-events (&optional file)
   "Extract explicit timed ranges from the current Org buffer.
 FILE defaults to the variable `buffer-file-name'."
@@ -994,38 +1009,44 @@ FILE defaults to the variable `buffer-file-name'."
          events seen)
     (org-element-map tree 'headline
       (lambda (headline)
-        (dolist (planning `((scheduled . ,(org-element-property
-                                           :scheduled headline))
-                            (deadline . ,(org-element-property
-                                          :deadline headline))))
-          (let ((timestamp (cdr planning)))
-            (when (and
-                   (or (org-timegrid-org--timestamp-timed-p timestamp)
-                       (org-timegrid-org--timestamp-all-day-p timestamp))
-                   (funcall org-timegrid-org-filter-function
-                            headline timestamp))
-              (push (org-element-property :begin timestamp) seen)
-              (push (org-timegrid-org--event
-                     file headline timestamp (car planning)
-                     (org-timegrid-org--timestamp-all-day-p timestamp))
-                    events))))
-        (let ((section
-               (cl-find-if
-                (lambda (element) (eq (org-element-type element) 'section))
-                (org-element-contents headline))))
-          (when section
-            (org-element-map section 'timestamp
-              (lambda (timestamp)
-                (when (and
-                       (or (org-timegrid-org--timestamp-timed-p timestamp)
-                           (org-timegrid-org--timestamp-all-day-p timestamp))
-                       (funcall org-timegrid-org-filter-function
-                                headline timestamp)
-                       (not (memq (org-element-property :begin timestamp) seen)))
-                  (push (org-timegrid-org--event
-                         file headline timestamp 'timestamp
+        (let (headline-events)
+          (dolist (planning `((scheduled . ,(org-element-property
+                                             :scheduled headline))
+                              (deadline . ,(org-element-property
+                                            :deadline headline))))
+            (let ((timestamp (cdr planning)))
+              (when (and
+                     (or (org-timegrid-org--timestamp-timed-p timestamp)
                          (org-timegrid-org--timestamp-all-day-p timestamp))
-                        events))))))))
+                     (funcall org-timegrid-org-filter-function
+                              headline timestamp))
+                (push (org-element-property :begin timestamp) seen)
+                (push (org-timegrid-org--event
+                       file headline timestamp (car planning)
+                       (org-timegrid-org--timestamp-all-day-p timestamp))
+                      headline-events))))
+          (let ((section
+                 (cl-find-if
+                  (lambda (element) (eq (org-element-type element) 'section))
+                  (org-element-contents headline))))
+            (when section
+              (org-element-map section 'timestamp
+                (lambda (timestamp)
+                  (when (and
+                         (or (org-timegrid-org--timestamp-timed-p timestamp)
+                             (org-timegrid-org--timestamp-all-day-p timestamp))
+                         (funcall org-timegrid-org-filter-function
+                                  headline timestamp)
+                         (not (memq (org-element-property :begin timestamp) seen)))
+                    (push (org-timegrid-org--event
+                           file headline timestamp 'timestamp
+                           (org-timegrid-org--timestamp-all-day-p timestamp))
+                          headline-events))))))
+          (setq events
+                (nconc (org-timegrid-org--mark-latest-done
+                        headline-events
+                        (org-element-property :todo-keyword headline))
+                       events)))))
     (nreverse events)))
 
 (defun org-timegrid-org--list-events (start end)
