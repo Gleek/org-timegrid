@@ -598,7 +598,8 @@
           :cursor (org-timegrid--cursor-state-create
                    :surface 'grid :day 2 :minute 600 :lane 0)
           :cursor-visible t)))
-    (org-timegrid-set-mark-command)
+    (cl-letf (((symbol-function 'org-timegrid--render-ui-change) #'ignore))
+      (org-timegrid-set-mark-command))
     (org-timegrid--set-cursor 2 615)
     (should (equal (org-timegrid--region-range)
                    (cons (+ (* 102 1440) 600) (+ (* 102 1440) 615))))
