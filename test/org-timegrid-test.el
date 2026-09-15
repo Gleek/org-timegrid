@@ -277,6 +277,37 @@
     (should (= requested-start (* 100 1440)))
     (should (= requested-end (* 103 1440)))))
 
+(ert-deftest org-timegrid-test-isearch-finds-nearest-adjacent-week ()
+  (with-temp-buffer
+    (let* ((org-timegrid-days 7)
+           (org-timegrid-isearch-week-limit 2)
+           (org-timegrid--state
+            (org-timegrid--calendar-state-create :week-start 100))
+           (events
+            (list (org-timegrid-event-create
+                   :id 'past :title "Needle past" :start (* 95 1440)
+                   :end (+ (* 95 1440) 60))
+                  (org-timegrid-event-create
+                   :id 'near :title "Needle near" :start (* 108 1440)
+                   :end (+ (* 108 1440) 60))
+                  (org-timegrid-event-create
+                   :id 'far :title "Needle far" :start (* 113 1440)
+                   :end (+ (* 113 1440) 60))))
+           (org-timegrid--backend
+            (org-timegrid-backend-create
+             :name "search" :list-function (lambda (_start _end) events)))
+           (isearch-regexp nil)
+           (isearch-regexp-function nil)
+           (isearch-case-fold-search t))
+      (let ((isearch-forward t))
+        (should (eq (org-timegrid-event-id
+                     (org-timegrid-isearch--matching-event "needle"))
+                    'near)))
+      (let ((isearch-forward nil))
+        (should (eq (org-timegrid-event-id
+                     (org-timegrid-isearch--matching-event "needle"))
+                    'past))))))
+
 (ert-deftest org-timegrid-test-model-preserves-explicit-time-kinds ()
   (let* ((event (org-timegrid-event-create
                  :id 'date-only :title "Holiday" :start 14400 :end 15840

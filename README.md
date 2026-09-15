@@ -235,7 +235,7 @@ normal Emacs kill ring, so they paste as readable text outside the calendar.
 | `j` / `.`                 | Jump to a date or today                                                              |
 | `g`                       | Reload the week from the backend                                                     |
 | `q`                       | Quit                                                                                 |
-| `C-s`, `C-r`              | Isearch like forward or backward search. `RET` keeps the current match, `C-g` resets |
+| `C-s`, `C-r`              | Native Isearch through block titles and adjacent weeks; movement accepts the match, `C-g` resets |
 
 The Org backend can wrap other interactive commands for use in the calendar.
 `org-timegrid-org-command` runs a command at the selected source heading.
