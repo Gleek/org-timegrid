@@ -74,10 +74,13 @@ receives non-nil when it continues an unbroken run of undos, and REDO
 when the caller wants the reverse; the backend owns undo because only it
 knows where the edit landed.  READ-ENTRY-FUNCTION may return a cons of the
 display title and an opaque existing record.  READ-TIMESTAMP-FUNCTION lets a
-backend supply its own date prompt.  Mutation functions may be nil."
+backend supply its own date prompt.  TRANSACTION-FUNCTION receives a
+zero-argument function and makes every mutation it performs one atomic undo
+unit.  Mutation functions may be nil."
   name list-function create-function update-function delete-function
   delete-entry-function undo-function visit-function
-  read-entry-function read-timestamp-function)
+  read-entry-function read-timestamp-function transaction-function
+  entry-empty-function entry-key-function)
 
 (defcustom org-timegrid-slot-minutes 15
   "Granularity of the calendar, in minutes.

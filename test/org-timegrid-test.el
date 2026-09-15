@@ -536,20 +536,176 @@
            :cursor (org-timegrid--cursor-state-create
                     :surface 'grid :day 2 :minute 600 :lane 0)
            :cursor-visible t))
-         (org-timegrid--kill
-          (list :title "Meeting" :minutes 60 :all-day nil
-                :event source :target 'source-record :cut nil))
+         (kill-ring
+          (list
+           (propertize
+            "Meeting" 'org-timegrid-payload
+            (list :version 1 :cut nil
+                  :items (list (list :title "Meeting" :offset 0 :duration 60
+                                     :time-kind 'timed :event source
+                                     :target 'source-record))))))
          targets)
     (cl-letf (((symbol-function 'org-timegrid--backend-create)
                (lambda (_title _block _source target) (push target targets)))
+              ((symbol-function 'org-timegrid--transaction)
+               (lambda (function) (funcall function)))
               ((symbol-function 'org-timegrid--reveal-cursor) #'ignore))
       (org-timegrid-yank)
       (org-timegrid-yank t)
-      (setq org-timegrid--kill
-            (plist-put org-timegrid--kill :cut t))
+      (let ((payload (get-text-property 0 'org-timegrid-payload
+                                        (car kill-ring))))
+        (put-text-property 0 (length (car kill-ring)) 'org-timegrid-payload
+                           (plist-put payload :cut t) (car kill-ring)))
       (org-timegrid-yank))
     (should (equal (nreverse targets)
                    '(nil source-record source-record)))))
+
+(ert-deftest org-timegrid-test-calendar-region-is-half-open-and-reversible ()
+  (let ((org-timegrid--state
+         (org-timegrid--calendar-state-create
+          :week-start 100
+          :cursor (org-timegrid--cursor-state-create
+                   :surface 'grid :day 2 :minute 600 :lane 0)
+          :cursor-visible t)))
+    (org-timegrid-set-mark-command)
+    (org-timegrid--set-cursor 2 615)
+    (should (equal (org-timegrid--region-range)
+                   (cons (+ (* 102 1440) 600) (+ (* 102 1440) 615))))
+    (org-timegrid--set-cursor 2 585)
+    (should (equal (org-timegrid--region-range)
+                   (cons (+ (* 102 1440) 585) (+ (* 102 1440) 600))))))
+
+(ert-deftest org-timegrid-test-region-damage-keeps-cross-day-column-changes ()
+  (should (equal (org-timegrid--range-difference '(100 . 200) '(100 . 150))
+                 '((150 . 200))))
+  (should (equal (org-timegrid--range-difference '(100 . 150) '(100 . 200))
+                 nil))
+  (should (equal (org-timegrid--range-difference '(100 . 300) '(150 . 250))
+                 '((100 . 150) (250 . 300)))))
+
+(ert-deftest org-timegrid-test-free-region-copy-is-text-only ()
+  (let* ((org-timegrid--backend
+          (org-timegrid-backend-create :name "empty"
+                                       :list-function (lambda (&rest _) nil)))
+         (org-timegrid--state
+          (org-timegrid--calendar-state-create
+           :week-start 100 :mark (+ (* 100 1440) 600) :region-active t
+           :cursor (org-timegrid--cursor-state-create
+                    :surface 'grid :day 0 :minute 660 :lane 0)
+           :cursor-visible t))
+         kill-ring)
+    (cl-letf (((symbol-function 'org-timegrid--render-ui-change) #'ignore))
+      (org-timegrid-copy-selected))
+    (should (string-match-p "\n[0-9:]+–[0-9:]+  Free" (car kill-ring)))
+    (should-not (get-text-property 0 'org-timegrid-payload (car kill-ring)))))
+
+(ert-deftest org-timegrid-test-copy-text-groups-items-by-day ()
+  (let* ((day (calendar-absolute-from-gregorian '(9 14 2026)))
+         (start (+ (* day 1440) 480))
+         (selection
+          (list :start start :end (+ start 180)
+                :events
+                (list (org-timegrid-event-create
+                       :title "First" :start start :end (+ start 45))
+                      (org-timegrid-event-create
+                       :title "Second" :start (+ start 60)
+                       :end (+ start 120))))))
+    (should
+     (equal (org-timegrid--selection-text selection)
+            (concat "Mon 14 Sep 2026\n"
+                    "08:00–08:45  First\n"
+                    "08:45–09:00  Free\n"
+                    "09:00–10:00  Second\n"
+                    "10:00–11:00  Free")))
+    (should
+     (equal (org-timegrid--selection-text
+             (list :start start :end (+ start 1440) :events nil))
+            (concat "Mon 14 Sep 2026\n08:00–24:00  Free\n\n"
+                    "Tue 15 Sep 2026\n00:00–08:00  Free")))))
+
+(ert-deftest org-timegrid-test-org-bulk-transaction-undoes-as-one-unit ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Task\n<2026-09-14 Mon 09:00-10:00>\n<2026-09-14 Mon 11:00-12:00>\n")
+    (setq buffer-undo-list nil)
+    (let ((events (org-timegrid-org--buffer-events "test.org"))
+          (org-timegrid-org--undo-transactions nil)
+          (org-timegrid-org--redo-transactions nil)
+          (org-timegrid-org--undo-direction nil)
+          (org-timegrid-org-auto-save nil))
+      (org-timegrid-org--transaction
+       (lambda ()
+         (org-timegrid-org--remove-event (nth 0 events))
+         (should-not (org-timegrid-org--entry-empty-p (nth 0 events)))
+         (org-timegrid-org--remove-event (nth 1 events))
+         (should (org-timegrid-org--entry-empty-p (nth 1 events)))))
+      (should (= (length org-timegrid-org--undo-transactions) 1))
+      (should-not (string-match-p "<2026" (buffer-string)))
+      (org-timegrid-org--undo nil nil)
+      (should (= (how-many "<2026" (point-min) (point-max)) 2))
+      ;; Starting a new ordinary undo run reverses the previous run, like
+      ;; native `undo'; no dedicated redo command is required.
+      (org-timegrid-org--undo nil nil)
+      (should-not (string-match-p "<2026" (buffer-string)))
+      (org-timegrid-org--undo nil nil)
+      (should (= (how-many "<2026" (point-min) (point-max)) 2)))))
+
+(ert-deftest org-timegrid-test-org-bulk-create-removes-first-entry-too ()
+  (let* ((file (make-temp-file "org-timegrid-bulk-" nil ".org"
+                               "* Existing\n"))
+         (org-timegrid-org-capture-file file)
+         (org-timegrid-org-capture-template
+          '(:target file :template "* %{title}\n%{time-range}\n"))
+         (org-timegrid-org--undo-transactions nil)
+         (org-timegrid-org--redo-transactions nil)
+         (org-timegrid-org--undo-direction nil)
+         (org-timegrid-org-auto-save nil))
+    (unwind-protect
+        (progn
+          (org-timegrid-org--transaction
+           (lambda ()
+             (org-timegrid-org--create-event "First" 1065417600 1065417660)
+             (org-timegrid-org--create-event "Second" 1065417720 1065417780)
+             (org-timegrid-org--create-event "Third" 1065417840 1065417900)))
+          (with-current-buffer (find-file-noselect file)
+            (should (string-match-p "First" (buffer-string))))
+          (org-timegrid-org--undo nil nil)
+          (with-current-buffer (find-file-noselect file)
+            (should (equal (buffer-string) "* Existing\n"))))
+      (when-let* ((buffer (get-file-buffer file))) (kill-buffer buffer))
+      (delete-file file))))
+
+(ert-deftest org-timegrid-test-org-bulk-duplicate-removes-first-entry-too ()
+  (let* ((source-buffer (generate-new-buffer " *timegrid-sources*"))
+         (file (make-temp-file "org-timegrid-duplicates-" nil ".org"
+                               "* Existing\n"))
+         (org-timegrid-org-capture-file file)
+         (org-timegrid-org--undo-transactions nil)
+         (org-timegrid-org--redo-transactions nil)
+         (org-timegrid-org--undo-direction nil)
+         (org-timegrid-org-auto-save nil)
+         events)
+    (unwind-protect
+        (progn
+          (with-current-buffer source-buffer
+            (org-mode)
+            (insert "* First\n<2026-09-14 Mon 08:00-09:00>\n"
+                    "* Second\n<2026-09-14 Mon 10:00-11:00>\n"
+                    "* Third\n<2026-09-14 Mon 12:00-13:00>\n")
+            (setq events (org-timegrid-org--buffer-events "sources.org")))
+          (org-timegrid-org--transaction
+           (lambda ()
+             (cl-loop for event in events
+                      for start from 1065423360 by 120
+                      do (org-timegrid-org--create-event
+                          (org-timegrid-event-title event)
+                          start (+ start 60) event))))
+          (org-timegrid-org--undo nil nil)
+          (with-current-buffer (find-file-noselect file)
+            (should (equal (buffer-string) "* Existing\n"))))
+      (when (buffer-live-p source-buffer) (kill-buffer source-buffer))
+      (when-let* ((buffer (get-file-buffer file))) (kill-buffer buffer))
+      (delete-file file))))
 
 (ert-deftest org-timegrid-test-date-picker-groups-events-by-visible-day ()
   (let ((events (list

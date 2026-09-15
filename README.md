@@ -193,9 +193,10 @@ drag. Press `C-g` before releasing to cancel it.
 
 ### Keyboard
 
-The calendar has one cursor (point). A block is selected when the cursor sits on the
-slot where that block begins. This keeps keyboard and mouse selection in sync
-after redraws.
+The calendar cursor acts as point. `C-SPC` sets a calendar mark, and every
+keyboard movement extends the highlighted half-open time region. With no active
+region, edit commands operate on the block at point. Calendar copies use the
+normal Emacs kill ring, so they paste as readable text outside the calendar.
 
 | Key                       | Action                                                                               |
 |---------------------------|--------------------------------------------------------------------------------------|
@@ -206,19 +207,21 @@ after redraws.
 | `C-l`                     | Center the view on the cursor                                                        |
 | `C-x +` / `C-x C--` / `C-x C-0` | Zoom in, zoom out, or reset zoom                                              |
 | `n` / `p`                 | Select the next or previous block                                                    |
-| `RET`                     | Visit the selected block, or create one at the cursor                                |
-| `C-g`                     | Hide the cursor / Cancel unsaved new block                                           |
+| `C-SPC`, `C-x C-x`        | Set/deactivate the calendar mark, or exchange point and mark                         |
+| `RET`                     | Visit/create at point, or create one block spanning the active region                |
+| `C-g`                     | Deactivate the region, then hide the cursor                                           |
 | `M-down` / `M-up`         | Move the selected block by 15 minutes                                                |
 | `M-right` / `M-left`      | Move the block by one day                                                            |
 | `S-down` / `S-up`         | Move the end time                                                                    |
 | `C-S-up` / `C-S-down`     | Move the start time                                                                  |
 | `t`                       | Enter a new time or range                                                            |
 | `e`                       | Rename the heading                                                                   |
-| `d`, backspace            | Remove its time, then optionally delete the heading                                  |
-| `M-w`, then `C-y`         | Duplicate the block as an independent entry                                          |
-| `C-w`, then `C-y`         | Move the block by cutting and restoring its timestamp                                |
-| `M-w`, then `C-u C-y`     | Add the pasted timestamp to the existing entry instead of duplicating it             |
-| `C-/`, `C-x u`            | Undo the last calendar edit                                                          |
+| `d`, backspace            | Remove selected timestamps; offer deletion only for timestamp-free headings          |
+| `M-w`, then `C-y`         | Copy/paste selected blocks as independent entries via the Emacs kill ring             |
+| `C-w`, then `C-y`         | Cut selected timestamps and restore them at point                                    |
+| `M-w`, then `C-u C-y`     | Add pasted timestamps to their existing entries                                      |
+| `M-y`                     | Replace the preceding calendar paste with an older kill-ring entry                   |
+| `C-/`, `C-x u`            | Undo the last calendar transaction, including an entire bulk edit                    |
 | `:`, `C-c C-q`            | Change the selected entry's tags                                                     |
 | `C-c C-t`                 | Change the selected entry's TODO state                                               |
 | `,`, `C-c ,`              | Set the selected entry's priority                                                    |
@@ -330,6 +333,9 @@ priority, property, or file.
 | `org-timegrid-keyboard-commit-delay`                |     `0.25` | Idle delay before a moved block is saved              |
 | `org-timegrid-default-duration-minutes`             |       `30` | Length used when no end is present                    |
 | `org-timegrid-block-gap`                            |        `1` | Gap between blocks, in pixels                         |
+| `org-timegrid-copy-date-format`                     | `%a %d %b %Y` | Date heading in copied text                        |
+| `org-timegrid-copy-item-template`                   | `%{start}–%{end}  %{title}` | Copied block/free-time line           |
+| `org-timegrid-copy-day-separator`                   | blank line | Separator between copied days                         |
 | `org-timegrid-corner-radius`                        |        `0` | Block corner radius                                   |
 | `org-timegrid-nesting-indent`                       |        `8` | Indent for contained events                           |
 | `org-timegrid-title-clearance`                      |       `18` | Space a parent keeps for its title                    |
@@ -408,7 +414,9 @@ heading. Hook edits join the same undo step.
 The renderer itself does not require Org. `org-timegrid-open` accepts an
 `org-timegrid-backend` with a listing function and optional callbacks for
 create, update, delete, undo, visit, entry completion, and date input. A
-backend with only a listing function is read-only. See
+backend with only a listing function is read-only. Bulk-capable backends can
+provide a transaction function which receives a zero-argument mutation thunk;
+undo and redo remain backend-owned. See
 `org-timegrid-backend-create` for the full contract.
 
 Create and update callbacks can accept a final `time-kind` argument whose

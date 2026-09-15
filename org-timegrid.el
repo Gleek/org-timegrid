@@ -156,6 +156,10 @@ The cursor is drawn over the blocks, so its fill stays translucent and
 lets a block underneath remain readable."
   :type 'number)
 
+(defcustom org-timegrid-region-opacity 0.6
+  "Fill opacity of the theme-derived calendar region colour."
+  :type 'number)
+
 (defcustom org-timegrid-default-duration-minutes 30
   "Duration assumed wherever no end time is given.
 Keyboard creation offers it, and a backend event that has a start but no
@@ -203,6 +207,19 @@ means \"more this way\" rather than merely marking where the window stops."
 
 (defcustom org-timegrid-buffer-name "*Org Time Grid*"
   "Name of the calendar buffer."
+  :type 'string)
+
+(defcustom org-timegrid-copy-date-format "%a %d %b %Y"
+  "Date format used for day headings in copied calendar text."
+  :type 'string)
+
+(defcustom org-timegrid-copy-item-template "%{start}–%{end}  %{title}"
+  "Template for one item in copied calendar text.
+The tokens `%{title}', `%{start}', and `%{end}' are replaced."
+  :type 'string)
+
+(defcustom org-timegrid-copy-day-separator "\n\n"
+  "Text placed between different days in copied calendar text."
   :type 'string)
 
 (defconst org-timegrid--label-width 54)
@@ -365,6 +382,7 @@ The title stays fixed and the date row follows only the frame's base font."
 (defvar-local org-timegrid--scroll-restore-timer nil)
 (defvar-local org-timegrid--keyboard-edit-timer nil)
 (defvar-local org-timegrid--keyboard-edit nil)
+(defvar org-timegrid--defer-refresh nil)
 (defvar-local org-timegrid--stale nil)
 (defvar-local org-timegrid--saved-vscroll 0
   "Pixel scroll position restored when this calendar is shown again.")
@@ -404,7 +422,8 @@ The title stays fixed and the date row follows only the frame's base font."
 (cl-defstruct (org-timegrid--calendar-state
                (:constructor org-timegrid--calendar-state-create))
   "Backend data and interactive state for one displayed week."
-  week-start events blocks preview cursor selected-id cursor-visible)
+  week-start events blocks preview cursor selected-id cursor-visible
+  mark region-active)
 
 (defun org-timegrid--make-block
     (id day start end title &optional color done time-kind)
@@ -550,6 +569,52 @@ also moving it, so its position is visible before it is used."
     (+ (* (org-timegrid--cursor-state-day cursor) 1440)
        (org-timegrid--cursor-state-minute cursor))))
 
+(defun org-timegrid--cursor-calendar-minute ()
+  "Return the cursor as an absolute Gregorian minute."
+  (+ (* (org-timegrid--calendar-state-week-start org-timegrid--state) 1440)
+     (org-timegrid--cursor-absolute)))
+
+(defun org-timegrid-region-active-p ()
+  "Return non-nil when the calendar mark is active."
+  (and (org-timegrid--calendar-state-region-active org-timegrid--state)
+       (integerp (org-timegrid--calendar-state-mark org-timegrid--state))))
+
+(defun org-timegrid--region-range ()
+  "Return the active calendar region as a normalized half-open range."
+  (when (org-timegrid-region-active-p)
+    (let ((mark (org-timegrid--calendar-state-mark org-timegrid--state))
+          (point (org-timegrid--cursor-calendar-minute)))
+      (cons (min mark point) (max mark point)))))
+
+(defun org-timegrid-set-mark-command ()
+  "Set or deactivate the calendar mark at the cursor."
+  (interactive)
+  (org-timegrid--reveal-cursor)
+  (if (org-timegrid-region-active-p)
+      (setf (org-timegrid--calendar-state-region-active org-timegrid--state) nil)
+    (setf (org-timegrid--calendar-state-mark org-timegrid--state)
+          (org-timegrid--cursor-calendar-minute)
+          (org-timegrid--calendar-state-region-active org-timegrid--state) t))
+  (org-timegrid--render-ui-change)
+  (message (if (org-timegrid-region-active-p) "Mark set" "Mark deactivated")))
+
+(defun org-timegrid-exchange-point-and-mark ()
+  "Exchange the calendar cursor and its remembered mark."
+  (interactive)
+  (unless (integerp (org-timegrid--calendar-state-mark org-timegrid--state))
+    (user-error "No calendar mark set"))
+  (let* ((point (org-timegrid--cursor-calendar-minute))
+         (mark (org-timegrid--calendar-state-mark org-timegrid--state))
+         (day (floor mark 1440)))
+    (org-timegrid--reload-state (org-timegrid--range-start day))
+    (org-timegrid--set-cursor
+     (- day (org-timegrid--calendar-state-week-start org-timegrid--state))
+     (% mark 1440))
+    (setf (org-timegrid--calendar-state-mark org-timegrid--state) point
+          (org-timegrid--calendar-state-region-active org-timegrid--state) t
+          (org-timegrid--calendar-state-cursor-visible org-timegrid--state) t)
+    (org-timegrid--refresh)))
+
 (defun org-timegrid--set-cursor (day minute &optional lane)
   "Move the cursor to DAY and MINUTE, clamped to the visible week.
 LANE picks between blocks sharing that start, and defaults to zero."
@@ -578,14 +643,20 @@ after the reload is dropped."
         (visible (org-timegrid--calendar-state-cursor-visible
                   org-timegrid--state))
         (selected (org-timegrid--calendar-state-selected-id
-                   org-timegrid--state)))
+                   org-timegrid--state))
+        (mark (org-timegrid--calendar-state-mark org-timegrid--state))
+        (region-active
+         (org-timegrid--calendar-state-region-active org-timegrid--state)))
     (setq-local org-timegrid--state (org-timegrid--load-state week-start))
     (when cursor
       (setf (org-timegrid--calendar-state-cursor org-timegrid--state) cursor
             (org-timegrid--calendar-state-cursor-visible org-timegrid--state)
             visible
             (org-timegrid--calendar-state-selected-id org-timegrid--state)
-            selected))
+            selected
+            (org-timegrid--calendar-state-mark org-timegrid--state) mark
+            (org-timegrid--calendar-state-region-active org-timegrid--state)
+            region-active))
     (setq-local org-timegrid--static-inner nil)))
 
 (defun org-timegrid--block (id)
@@ -828,6 +899,7 @@ six-digit value as three one-digit components in `color-values'."
           :today (org-timegrid--blend highlight background 0.10)
           :blue blue :red red
           :cursor (org-timegrid--face-color 'cursor :background blue)
+          :region (org-timegrid--face-color 'region :background muted)
           :preview-fill (org-timegrid--blend muted background 0.18)
           :done-fill (org-timegrid--blend muted background 0.11))))
 
@@ -1676,6 +1748,33 @@ band under the grid."
          (preview (org-timegrid--calendar-state-preview org-timegrid--state))
          (selected (and (null preview) (org-timegrid--selected-id)))
          geometry tiles)
+    (when-let* ((range (and (null preview) (org-timegrid--region-range)))
+                ((< (car range) (cdr range))))
+      (let ((week (* (org-timegrid--calendar-state-week-start
+                      org-timegrid--state)
+                     1440)))
+        (dotimes (day org-timegrid-days)
+          (let* ((day-start (+ week (* day 1440)))
+                 (start (max (car range) day-start))
+                 (end (min (cdr range) (+ day-start 1440))))
+            (when (< start end)
+              (let ((rectangle
+                     (list :x (+ 1 (org-timegrid--label-width)
+                                 (* day column-width))
+                           :y (+ (org-timegrid--grid-top-inset)
+                                 (* (- (- start day-start) start-minute)
+                                    (org-timegrid--pixels-per-minute)))
+                           :width (- column-width 2)
+                           :height (* (- end start)
+                                      (org-timegrid--pixels-per-minute)))))
+                (svg-rectangle
+                 svg (plist-get rectangle :x) (plist-get rectangle :y)
+                 (plist-get rectangle :width) (plist-get rectangle :height)
+                 :fill (plist-get palette :region)
+                 :fill-opacity org-timegrid-region-opacity
+                 :stroke (plist-get palette :region) :stroke-width 1)
+                (dolist (tile (org-timegrid--geometry-tiles rectangle 0.5))
+                  (cl-pushnew tile tiles))))))))
     (dolist (block (org-timegrid--dynamic-blocks))
       (let ((item (org-timegrid--draw-block
                    svg block org-timegrid--image-height start-minute
@@ -1712,9 +1811,10 @@ band under the grid."
         (inhibit-read-only t))
     (put-text-property marker (1+ marker) 'display image)))
 
-(defun org-timegrid--render-dynamic (&optional redisplay-now)
+(defun org-timegrid--render-dynamic (&optional redisplay-now dirty-tiles)
   "Redraw tiles touched by cursor selection or a drag preview.
-When REDISPLAY-NOW is non-nil, force display before returning."
+When REDISPLAY-NOW is non-nil, force display before returning.
+DIRTY-TILES limits replacement to tiles whose visible contents changed."
   (let* ((preview (org-timegrid--calendar-state-preview org-timegrid--state))
          (excluded (and preview (org-timegrid--operation-replace-id preview))))
     (when (and (vectorp org-timegrid--tile-markers)
@@ -1726,8 +1826,11 @@ When REDISPLAY-NOW is non-nil, force display before returning."
         (org-timegrid--insert-tiles)
         (when window (org-timegrid--set-vscroll window scroll)))))
   (pcase-let* ((`(,fragment . ,new-tiles) (org-timegrid--dynamic-fragment))
-               (changed (delete-dups
-                         (append new-tiles org-timegrid--dynamic-tiles))))
+               (all-changed (delete-dups
+                             (append new-tiles org-timegrid--dynamic-tiles)))
+               (changed (if dirty-tiles
+                            (seq-intersection all-changed dirty-tiles)
+                          all-changed)))
     (dolist (tile changed)
       (org-timegrid--set-tile-image
        tile
@@ -1988,7 +2091,7 @@ the grid by the width of whatever else is there."
   "Draw one calendar day label centered at CENTER and BASELINE."
   (if todayp
       (let* ((name-width (* factor 8.0 (string-width day-name)))
-             (circle-radius (* factor 10))
+             (circle-radius (* factor 12))
              (gap (* factor
                      (plist-get org-timegrid-single-day-label-style :gap)))
              (group-width (+ name-width gap (* 2 circle-radius)))
@@ -2584,23 +2687,46 @@ requiring a trip to the file.  Declining keeps the timestamp removed."
     (org-timegrid--refresh-data)))
 
 (defun org-timegrid-remove-selected (&optional keep-entry)
-  "Remove the selected block from its calendar source.
-KEEP-ENTRY skips the offer to delete the entry itself, which is what a
-cut wants: the entry has to survive for the yank to copy it."
+  "Remove timestamps in the region or the block at point.
+KEEP-ENTRY never offers to remove timestamp-free entries."
   (interactive)
-  (let ((id (org-timegrid--selected-id)))
-    (if (null id)
-        (message "No block selected")
-      (let* ((block (org-timegrid--block id))
-             (event (and block (org-timegrid-block-event block)))
-             (deleter (org-timegrid-backend-delete-function
-                       org-timegrid--backend)))
-        (unless (and event (functionp deleter))
-          (user-error "This backend cannot remove calendar entries"))
-        (funcall deleter event)
-        (org-timegrid--refresh-data)
-        (unless keep-entry
-          (org-timegrid--offer-entry-deletion event))))))
+  (let* ((selection (org-timegrid--logical-selection))
+         (events (plist-get selection :events))
+         (deleter (org-timegrid-backend-delete-function org-timegrid--backend))
+         (entry-deleter
+          (org-timegrid-backend-delete-entry-function org-timegrid--backend))
+         (empty-p (and (fboundp 'org-timegrid-backend-entry-empty-function)
+                       (org-timegrid-backend-entry-empty-function
+                        org-timegrid--backend)))
+         (entry-key (and (fboundp 'org-timegrid-backend-entry-key-function)
+                         (org-timegrid-backend-entry-key-function
+                          org-timegrid--backend))))
+    (unless events (user-error "The calendar region contains no blocks"))
+    (unless (functionp deleter)
+      (user-error "This backend cannot remove calendar entries"))
+    (org-timegrid--transaction
+     (lambda ()
+       (dolist (event events) (funcall deleter event))
+       (unless keep-entry
+         (let (eligible)
+           (dolist (event events)
+             (when (and (functionp empty-p) (funcall empty-p event))
+               (unless (cl-find (and (functionp entry-key)
+                                     (funcall entry-key event))
+                                eligible :key (lambda (candidate)
+                                                (and (functionp entry-key)
+                                                     (funcall entry-key candidate)))
+                                :test #'equal)
+                 (push event eligible))))
+           (when (and eligible (functionp entry-deleter)
+                      (y-or-n-p
+                       (format "Delete %d timestamp-free entr%s too? "
+                               (length eligible)
+                               (if (= (length eligible) 1) "y" "ies"))))
+             (dolist (event eligible) (funcall entry-deleter event)))))))
+    (org-timegrid--deactivate-region)
+    (message "Removed %d timestamp%s" (length events)
+             (if (= (length events) 1) "" "s"))))
 
 (defun org-timegrid-edit-selected-title ()
   "Edit the selected calendar block's source heading title."
@@ -2667,7 +2793,7 @@ SOURCE-EVENT identifies an entry to reuse, and TARGET selects its destination."
       (if target
           (funcall creator title (car range) (cdr range) source-event target)
         (funcall creator title (car range) (cdr range) source-event)))
-    (org-timegrid--refresh-data)))
+    (unless org-timegrid--defer-refresh (org-timegrid--refresh-data))))
 
 (defun org-timegrid--read-entry ()
   "Read a title and optional existing record for a new block."
@@ -2740,8 +2866,15 @@ Clicking a block moves the cursor to that block's own first slot, which is
 what selects it; clicking empty space moves the cursor to that slot and so
 selects nothing.  The mouse and the keyboard drive one shared cursor."
   (interactive "@e")
-  (let* ((target (org-timegrid--target (event-start event)))
+  (let* ((extend (memq 'shift (event-modifiers event)))
+         (old-point (and extend (org-timegrid--cursor-calendar-minute)))
+         (target (org-timegrid--target (event-start event)))
          (block (org-timegrid--block (plist-get target :block-id))))
+    (if extend
+        (unless (org-timegrid-region-active-p)
+          (setf (org-timegrid--calendar-state-mark org-timegrid--state) old-point
+                (org-timegrid--calendar-state-region-active org-timegrid--state) t))
+      (org-timegrid--deactivate-region))
     (setf (org-timegrid--calendar-state-cursor-visible org-timegrid--state) t)
     (if block
         (org-timegrid--goto-block block)
@@ -2843,7 +2976,9 @@ rail's area names must be treated as one stable surface during a drag."
 (defun org-timegrid-header-click (event)
   "Move the shared calendar cursor to all-day rail mouse EVENT."
   (interactive "@e")
-  (let* ((position (event-start event))
+  (let* ((extend (memq 'shift (event-modifiers event)))
+         (old-point (and extend (org-timegrid--cursor-calendar-minute)))
+         (position (event-start event))
          (navigation (org-timegrid--header-navigation-action position))
          (target (org-timegrid--header-target position)))
     (cond
@@ -2852,6 +2987,13 @@ rail's area names must be treated as one stable surface during a drag."
      ((null target)
       (message "Click inside an all-day cell"))
      (t
+      (if extend
+          (unless (org-timegrid-region-active-p)
+            (setf (org-timegrid--calendar-state-mark org-timegrid--state)
+                  old-point
+                  (org-timegrid--calendar-state-region-active
+                   org-timegrid--state) t))
+        (org-timegrid--deactivate-region))
       (let ((day (plist-get target :day))
             (lane (plist-get target :lane))
             (id (plist-get target :id)))
@@ -3137,7 +3279,92 @@ Leave the first non-motion event for the gesture loop to process."
                      (copy-org-timegrid--cursor-state
                       (org-timegrid--cursor)))
         :selected-id (org-timegrid--selected-id)
+        :mark (org-timegrid--calendar-state-mark org-timegrid--state)
+        :region-active (org-timegrid-region-active-p)
+        :region (copy-tree (org-timegrid--region-range))
         :visible (and (org-timegrid--cursor-visible-p) t)))
+
+(defun org-timegrid--range-tiles (range)
+  "Return visible SVG tiles covered by absolute minute RANGE."
+  (when (and range (< (car range) (cdr range)))
+    (let ((week (* (org-timegrid--calendar-state-week-start
+                    org-timegrid--state) 1440))
+          (scale (org-timegrid--pixels-per-minute))
+          (start-minute (* 60 org-timegrid-start-hour))
+          tiles)
+      (dotimes (day org-timegrid-days)
+        (let* ((day-start (+ week (* day 1440)))
+               (start (max (car range) day-start))
+               (end (min (cdr range) (+ day-start 1440))))
+          (when (< start end)
+            (let ((top (+ (org-timegrid--grid-top-inset)
+                          (* (- (- start day-start) start-minute) scale)))
+                  (bottom (+ (org-timegrid--grid-top-inset)
+                             (* (- (- end day-start) start-minute) scale))))
+              (dolist (tile (org-timegrid--tiles-intersecting top bottom))
+                (cl-pushnew tile tiles))))))
+      tiles)))
+
+(defun org-timegrid--range-boundary-tiles (range)
+  "Return tiles containing RANGE's visible start and exclusive end."
+  (when (and range (< (car range) (cdr range)))
+    (delete-dups
+     (append (org-timegrid--range-tiles
+              (cons (car range) (1+ (car range))))
+             (org-timegrid--range-tiles
+              (cons (1- (cdr range)) (cdr range)))))))
+
+(defun org-timegrid--snapshot-cursor-tiles (snapshot)
+  "Return tiles occupied by SNAPSHOT's timed-grid cursor."
+  (let ((cursor (plist-get snapshot :cursor)))
+    (when (and (plist-get snapshot :visible) cursor
+               (eq (org-timegrid--cursor-state-surface cursor) 'grid))
+      (let* ((minute (org-timegrid--cursor-state-minute cursor))
+             (top (+ (org-timegrid--grid-top-inset)
+                     (* (- minute (* 60 org-timegrid-start-hour))
+                        (org-timegrid--pixels-per-minute)))))
+        (org-timegrid--tiles-intersecting
+         top (+ top (* org-timegrid-slot-minutes
+                       (org-timegrid--pixels-per-minute))))))))
+
+(defun org-timegrid--selected-id-tiles (id)
+  "Return tiles occupied by selected block ID."
+  (when id
+    (let (tiles)
+      (dolist (item org-timegrid--geometry)
+        (when (equal (plist-get item :id) id)
+          (setq tiles (append (org-timegrid--geometry-tiles item 1) tiles))))
+      (delete-dups tiles))))
+
+(defun org-timegrid--range-difference (left right)
+  "Return portions of minute range LEFT not covered by RIGHT."
+  (cond
+   ((or (null left) (<= (cdr left) (car left))) nil)
+   ((or (null right) (<= (cdr right) (car right))) (list left))
+   ((or (<= (cdr left) (car right)) (>= (car left) (cdr right)))
+    (list left))
+   (t
+    (delq nil
+          (list (and (< (car left) (car right))
+                     (cons (car left) (min (cdr left) (car right))))
+                (and (> (cdr left) (cdr right))
+                     (cons (max (car left) (cdr right)) (cdr left))))))))
+
+(defun org-timegrid--region-dirty-tiles (old new)
+  "Return the minimal tile damage between region snapshots OLD and NEW."
+  (let* ((old-range (plist-get old :region))
+         (new-range (plist-get new :region))
+         (changed-ranges
+          (append (org-timegrid--range-difference old-range new-range)
+                  (org-timegrid--range-difference new-range old-range))))
+    (delete-dups
+     (append (mapcan #'org-timegrid--range-tiles changed-ranges)
+             (org-timegrid--range-boundary-tiles old-range)
+             (org-timegrid--range-boundary-tiles new-range)
+             (org-timegrid--snapshot-cursor-tiles old)
+             (org-timegrid--snapshot-cursor-tiles new)
+             (org-timegrid--selected-id-tiles (plist-get old :selected-id))
+             (org-timegrid--selected-id-tiles (plist-get new :selected-id))))))
 
 (defun org-timegrid--render-header-dynamic ()
   "Repaint the small sticky surface without touching time-grid tiles."
@@ -3166,7 +3393,10 @@ Leave the first non-motion event for the gesture loop to process."
       (org-timegrid--render-header-dynamic)
       (org-timegrid--render-dynamic t))
      (t
-      (org-timegrid--render-dynamic t)))
+      (org-timegrid--render-dynamic
+       t (and (plist-get old :region-active)
+              (plist-get new :region-active)
+              (org-timegrid--region-dirty-tiles old new)))))
     (setq-local org-timegrid--rendered-ui new)))
 
 (defun org-timegrid--cursor-moved ()
@@ -3843,27 +4073,40 @@ time-grid cells prompt for the timed duration as usual."
   (interactive)
   (org-timegrid--reveal-cursor)
   (let* ((cursor (org-timegrid--ensure-cursor))
+         (range (org-timegrid--region-range))
          (all-day (eq (org-timegrid--cursor-state-surface cursor) 'rail))
+         (_ (when (and range (= (car range) (cdr range)))
+              (user-error "Move point to give the calendar region a duration")))
          (entry (org-timegrid--read-entry))
          (title (car entry)))
     (if (string-empty-p title)
         (message "Nothing created")
-      (let* ((minutes (if all-day
+      (let* ((minutes (if range
+                          (- (cdr range) (car range))
+                        (if all-day
                           1440
                         (org-timegrid--read-minutes
-                         org-timegrid-default-duration-minutes)))
-             (start (if all-day 0 (org-timegrid--cursor-state-minute cursor)))
+                         org-timegrid-default-duration-minutes))))
+             (absolute-start (and range (car range)))
+             (day (if range
+                      (- (floor absolute-start 1440)
+                         (org-timegrid--calendar-state-week-start
+                          org-timegrid--state))
+                    (org-timegrid--cursor-state-day cursor)))
+             (start (if range (% absolute-start 1440)
+                      (if all-day 0 (org-timegrid--cursor-state-minute cursor))))
              (block (org-timegrid--make-block
-                     'new (org-timegrid--cursor-state-day cursor) start (+ start minutes)
+                     'new day start (+ start minutes)
                      title 'blue nil (if all-day 'all-day 'timed))))
-        (org-timegrid--backend-create title block nil (cdr entry))))))
+        (org-timegrid--backend-create title block nil (cdr entry))
+        (org-timegrid--deactivate-region)))))
 
 (defun org-timegrid-open-at-cursor ()
   "Visit the block under the cursor, or create one when the slot is empty."
   (interactive)
   (org-timegrid--reveal-cursor)
   (let ((block (org-timegrid--block-at-cursor)))
-    (if (null block)
+    (if (or (org-timegrid-region-active-p) (null block))
         (org-timegrid-create-at-cursor)
       (let ((event (org-timegrid-block-event block))
             (visitor (and org-timegrid--backend
@@ -3875,74 +4118,246 @@ time-grid cells prompt for the timed duration as usual."
 
 ;;; Keyboard copy, cut, and yank
 
-(defvar org-timegrid--kill nil
-  "Plist describing the most recently copied block.
-Holds :title, :minutes, :all-day, and the opaque :event needed to
-reproduce the entry's content.  :target is the backend record to which a
-yank with a prefix adds the copied timestamp.  :cut records whether the
-source timestamp was removed and must therefore be restored on yank.")
+(defconst org-timegrid--clipboard-version 1)
+(defvar-local org-timegrid--last-yank-origin nil)
+(defvar-local org-timegrid--last-yank-add-occurrence nil)
+
+(defun org-timegrid--logical-selection ()
+  "Return the active region or the block at point as backend events."
+  (if-let* ((range (org-timegrid--region-range)))
+      (list :start (car range) :end (cdr range)
+            :events (if (< (car range) (cdr range))
+                        (sort (org-timegrid-backend-list
+                               org-timegrid--backend (car range) (cdr range))
+                              (lambda (left right)
+                                (< (org-timegrid-event-start left)
+                                   (org-timegrid-event-start right))))))
+    (let* ((block (org-timegrid--block-at-cursor))
+           (event (and block (org-timegrid-block-event block))))
+      (unless event
+        (user-error "No calendar region or block at point"))
+      (list :start (org-timegrid-event-start event)
+            :end (org-timegrid-event-end event) :events (list event)))))
+
+(defun org-timegrid--format-copy-date (minute)
+  "Format the date containing absolute Gregorian MINUTE."
+  (let* ((date (calendar-gregorian-from-absolute (floor minute 1440)))
+         (value (encode-time 0 0 12 (nth 1 date) (nth 0 date) (nth 2 date))))
+    (format-time-string org-timegrid-copy-date-format value)))
+
+(defun org-timegrid--format-copy-time (minute)
+  "Format the clock portion of absolute Gregorian MINUTE."
+  (let ((clock (% minute 1440)))
+    (format "%02d:%02d" (/ clock 60) (% clock 60))))
+
+(defun org-timegrid--format-copy-item (title start end)
+  "Format TITLE spanning absolute minutes START through END."
+  (let ((end-text
+         (cond
+          ((= (floor start 1440) (floor end 1440))
+           (org-timegrid--format-copy-time end))
+          ((and (= (% end 1440) 0)
+                (= (floor end 1440) (1+ (floor start 1440))))
+           "24:00")
+          (t (format "%s %s" (org-timegrid--format-copy-date end)
+                     (org-timegrid--format-copy-time end))))))
+    (string-replace
+     "%{end}" end-text
+     (string-replace
+      "%{start}" (org-timegrid--format-copy-time start)
+      (string-replace "%{title}" title org-timegrid-copy-item-template)))))
+
+(defun org-timegrid--format-copy-day (day items)
+  "Format copied ITEMS whose start lies on absolute DAY."
+  (concat (org-timegrid--format-copy-date (* day 1440)) "\n"
+          (mapconcat
+           (lambda (item)
+             (org-timegrid--format-copy-item
+              (car item) (cadr item) (caddr item)))
+           items "\n")))
+
+(defun org-timegrid--selection-free-ranges (selection)
+  "Return unoccupied ranges inside SELECTION, split at midnight."
+  (let* ((start (plist-get selection :start))
+         (end (plist-get selection :end))
+         (occupied
+          (sort
+           (delq nil
+                 (mapcar
+                  (lambda (event)
+                    (let ((from (max start (org-timegrid-event-start event)))
+                          (to (min end (org-timegrid-event-end event))))
+                      (and (< from to) (cons from to))))
+                  (plist-get selection :events)))
+           (lambda (left right) (< (car left) (car right)))))
+         merged cursor free)
+    (dolist (range occupied)
+      (if (and merged (<= (car range) (cdar merged)))
+          (setcdr (car merged) (max (cdar merged) (cdr range)))
+        (push (cons (car range) (cdr range)) merged)))
+    (setq cursor start)
+    (dolist (range (nreverse merged))
+      (when (< cursor (car range)) (push (cons cursor (car range)) free))
+      (setq cursor (max cursor (cdr range))))
+    (when (< cursor end) (push (cons cursor end) free))
+    (let (split)
+      (dolist (range (nreverse free))
+        (let ((from (car range)) (to (cdr range)))
+          (while (< from to)
+            (let ((part-end (min to (* (1+ (floor from 1440)) 1440))))
+              (push (cons from part-end) split)
+              (setq from part-end)))))
+      (nreverse split))))
+
+(defun org-timegrid--selection-text (selection)
+  "Return readable kill-ring text for SELECTION."
+  (let* ((events (plist-get selection :events))
+         (items
+          (sort
+           (append
+            (mapcar (lambda (event)
+                      (list (org-timegrid-event-title event)
+                            (org-timegrid-event-start event)
+                            (org-timegrid-event-end event)))
+                    events)
+            (mapcar (lambda (range) (list "Free" (car range) (cdr range)))
+                    (org-timegrid--selection-free-ranges selection)))
+           (lambda (left right) (< (cadr left) (cadr right)))))
+         days)
+    (dolist (item items)
+      (let* ((day (floor (cadr item) 1440))
+             (group (assq day days)))
+        (if group
+            (setcdr group (append (cdr group) (list item)))
+          (setq days (append days (list (list day item)))))))
+    (mapconcat (lambda (group)
+                 (org-timegrid--format-copy-day (car group) (cdr group)))
+               days org-timegrid-copy-day-separator)))
+
+(defun org-timegrid--clipboard-string (selection cut)
+  "Return a readable kill-ring string for SELECTION, marked as CUT."
+  (let* ((events (plist-get selection :events))
+         (origin (plist-get selection :start))
+         (text (org-timegrid--selection-text selection)))
+    (if (null events)
+        text
+      (propertize
+       text 'org-timegrid-payload
+       (list :version org-timegrid--clipboard-version :cut cut
+             :items
+             (mapcar
+              (lambda (event)
+                (list :title (org-timegrid-event-title event)
+                      :offset (- (org-timegrid-event-start event) origin)
+                      :duration (- (org-timegrid-event-end event)
+                                   (org-timegrid-event-start event))
+                      :time-kind (org-timegrid-event-time-kind event)
+                      :event event :target (org-timegrid-event-source event)))
+              events))))))
+
+(defun org-timegrid--deactivate-region ()
+  "Deactivate the calendar region without forgetting its mark."
+  (setf (org-timegrid--calendar-state-region-active org-timegrid--state) nil))
+
+(defun org-timegrid--transaction (function)
+  "Run FUNCTION as one backend transaction and refresh once."
+  (let ((transaction
+         (and (org-timegrid-backend-p org-timegrid--backend)
+              (fboundp 'org-timegrid-backend-transaction-function)
+              (org-timegrid-backend-transaction-function
+               org-timegrid--backend)))
+        (org-timegrid--defer-refresh t))
+    (if (functionp transaction)
+        (funcall transaction function)
+      (funcall function)))
+  (org-timegrid--refresh-data))
 
 (defun org-timegrid-copy-selected ()
-  "Copy the selected block for a later yank."
+  "Copy the calendar region or block at point to the normal kill ring."
   (interactive)
-  (let ((block (org-timegrid--selected-block)))
-    (setq org-timegrid--kill
-          (list :title (org-timegrid-block-title block)
-                :minutes (- (org-timegrid-block-end block) (org-timegrid-block-start block))
-                :all-day (and (org-timegrid-block-all-day-p block) t)
-                :event (org-timegrid-block-event block)
-                :cut nil
-                :target (org-timegrid-event-source
-                         (org-timegrid-block-event block))))
-    (message "Copied %s" (org-timegrid-block-title block))))
+  (let* ((selection (org-timegrid--logical-selection))
+         (count (length (plist-get selection :events))))
+    (kill-new (org-timegrid--clipboard-string selection nil))
+    (org-timegrid--deactivate-region)
+    (org-timegrid--render-ui-change)
+    (if (= count 0)
+        (message "Copied free time")
+      (message "Copied %d block%s" count (if (= count 1) "" "s")))))
 
 (defun org-timegrid-cut-selected ()
-  "Cut the selected block for a later yank.
-Unlike a copy, yanking a cut block adds its time back to the original
-backend record instead of duplicating that record."
+  "Copy selected blocks to the kill ring, then remove their timestamps."
   (interactive)
-  (let* ((block (org-timegrid--selected-block))
-         (event (org-timegrid-block-event block)))
-    (setq org-timegrid--kill
-          (list :title (org-timegrid-block-title block)
-                :minutes (- (org-timegrid-block-end block) (org-timegrid-block-start block))
-                :all-day (and (org-timegrid-block-all-day-p block) t)
-                :event event
-                :cut t
-                :target (org-timegrid-event-source event)))
-    (org-timegrid-remove-selected t)
-    (message "Cut %s" (org-timegrid-block-title block))))
+  (let* ((selection (org-timegrid--logical-selection))
+         (events (plist-get selection :events))
+         (deleter (org-timegrid-backend-delete-function org-timegrid--backend)))
+    (kill-new (org-timegrid--clipboard-string selection t))
+    (when events
+      (unless (functionp deleter) (user-error "This backend cannot cut events"))
+      (org-timegrid--transaction
+       (lambda () (dolist (event events) (funcall deleter event)))))
+    (org-timegrid--deactivate-region)
+    (org-timegrid--render-ui-change)
+    (if events
+        (message "Cut %d block%s" (length events)
+                 (if (= (length events) 1) "" "s"))
+      (message "Copied free time"))))
 
 (defun org-timegrid-yank (&optional add-occurrence)
-  "Yank the most recently copied or cut block at the cursor.
-Ordinarily a copied block becomes an independent backend entry.  With a
-prefix argument ADD-OCCURRENCE, add its timestamp to the original entry
-instead.  A cut block always returns to its original entry."
+  "Yank calendar data from the normal kill ring at point.
+With ADD-OCCURRENCE, add timestamps to their original entries."
   (interactive "P")
-  (unless org-timegrid--kill
-    (user-error "Nothing to yank; select a block and press M-w or C-w"))
-  (org-timegrid--reveal-cursor)
-  (let* ((cursor (org-timegrid--ensure-cursor))
-         (rail (eq (org-timegrid--cursor-state-surface cursor) 'rail))
-         (source-all-day (plist-get org-timegrid--kill :all-day))
-         (source-minutes (plist-get org-timegrid--kill :minutes))
-         (_ (when (and source-all-day (not rail) (> source-minutes 1440))
-              (user-error "Multi-day blocks can only be pasted in the all-day rail")))
-         (start (if rail 0 (org-timegrid--cursor-state-minute cursor)))
-         (minutes (cond
-                   (rail (if source-all-day source-minutes 1440))
-                   (source-all-day org-timegrid-default-duration-minutes)
-                   (t source-minutes)))
-         (block (org-timegrid--make-block
-                 'yank (org-timegrid--cursor-state-day cursor)
-                 start (+ start minutes)
-                 (plist-get org-timegrid--kill :title) 'blue nil
-                 (if rail 'all-day 'timed))))
-    (org-timegrid--backend-create
-     (plist-get org-timegrid--kill :title) block
-     (plist-get org-timegrid--kill :event)
-     (and (or add-occurrence (plist-get org-timegrid--kill :cut))
-          (plist-get org-timegrid--kill :target)))))
+  (let* ((string (current-kill 0 t))
+         (payload (and (> (length string) 0)
+                       (get-text-property 0 'org-timegrid-payload string))))
+    (unless payload
+      (user-error "The current kill-ring entry is text only"))
+    (org-timegrid--reveal-cursor)
+    (let ((origin (org-timegrid--cursor-calendar-minute))
+          (week (org-timegrid--calendar-state-week-start org-timegrid--state))
+          (items (plist-get payload :items)))
+      (dolist (item items)
+        (when (and (eq (plist-get item :time-kind) 'all-day)
+                   (or (/= (% (+ origin (plist-get item :offset)) 1440) 0)
+                       (/= (% (plist-get item :duration) 1440) 0)))
+          (user-error "Paste all-day blocks at midnight in the all-day rail")))
+      (org-timegrid--transaction
+       (lambda ()
+         (dolist (item items)
+           (let* ((start (+ origin (plist-get item :offset)))
+                  (duration (plist-get item :duration))
+                  (day (- (floor start 1440) week))
+                  (minute (% start 1440))
+                  (block (org-timegrid--make-block
+                          'yank day minute (+ minute duration)
+                          (plist-get item :title) 'blue nil
+                          (plist-get item :time-kind))))
+             (org-timegrid--backend-create
+              (plist-get item :title) block (plist-get item :event)
+              (and (or add-occurrence (plist-get payload :cut))
+                   (plist-get item :target)))))))
+      (org-timegrid--deactivate-region)
+      (setq-local org-timegrid--last-yank-origin origin
+                  org-timegrid--last-yank-add-occurrence add-occurrence)
+      (message "Pasted %d block%s" (length items)
+               (if (= (length items) 1) "" "s")))))
+
+(defun org-timegrid-yank-pop (&optional count)
+  "Replace the preceding calendar yank with another kill-ring entry."
+  (interactive "p")
+  (unless (and org-timegrid--last-yank-origin
+               (memq last-command '(org-timegrid-yank org-timegrid-yank-pop)))
+    (user-error "Previous command was not a calendar yank"))
+  (let* ((origin org-timegrid--last-yank-origin)
+         (add org-timegrid--last-yank-add-occurrence)
+         (day (floor origin 1440)))
+    (org-timegrid--backend-undo nil)
+    (current-kill (or count 1))
+    (org-timegrid--reload-state (org-timegrid--range-start day))
+    (org-timegrid--set-cursor
+     (- day (org-timegrid--calendar-state-week-start org-timegrid--state))
+     (% origin 1440))
+    (setf (org-timegrid--calendar-state-cursor-visible org-timegrid--state) t)
+    (org-timegrid-yank add)))
 
 ;;; Keyboard re-timing
 
@@ -4033,7 +4448,9 @@ the duration is asked for separately, prefilled with the current one."
           ["Delete" org-timegrid-remove-selected t])
        (list
         ["Create block…" org-timegrid-create-at-cursor t]
-        ["Paste" org-timegrid-yank (and org-timegrid--kill t)])))))
+        ["Paste" org-timegrid-yank
+         (ignore-errors
+           (get-text-property 0 'org-timegrid-payload (current-kill 0 t)))])))))
 
 (defun org-timegrid-context-menu (event)
   "Select the calendar location at EVENT and show its action menu."
@@ -4085,7 +4502,7 @@ COUNT controls the number of pages to move.
 Backspace sends DEL, so this key has to serve both the delete people
 expect on a selected block and the paging DEL means in a view buffer."
   (interactive "p")
-  (if (org-timegrid--selected-id)
+  (if (or (org-timegrid-region-active-p) (org-timegrid--selected-id))
       (org-timegrid-remove-selected)
     (org-timegrid-cursor-page-up count)))
 
@@ -4094,8 +4511,10 @@ expect on a selected block and the paging DEL means in a view buffer."
 The cursor's position is remembered, so a later movement key resumes from
 where it was left.  Only an explicit refresh forgets it."
   (interactive)
-  (setf (org-timegrid--calendar-state-preview org-timegrid--state) nil
-        (org-timegrid--calendar-state-cursor-visible org-timegrid--state) nil)
+  (if (org-timegrid-region-active-p)
+      (setf (org-timegrid--calendar-state-region-active org-timegrid--state) nil)
+    (setf (org-timegrid--calendar-state-preview org-timegrid--state) nil
+          (org-timegrid--calendar-state-cursor-visible org-timegrid--state) nil))
   (org-timegrid--render-ui-change))
 
 (defun org-timegrid-wheel-up (event)
@@ -4244,10 +4663,24 @@ not hold for a buffer made of tall image glyphs."
     (keymap-set map "<remap> <undo>" #'org-timegrid-undo)
     (keymap-set map "<remap> <undo-only>" #'org-timegrid-undo)
     (keymap-set map "<remap> <undo-redo>" #'org-timegrid-redo)
+    (keymap-set map "<remap> <undo-fu-only-undo>" #'org-timegrid-undo)
+    (keymap-set map "<remap> <undo-fu-only-redo>" #'org-timegrid-redo)
+    (keymap-set map "<remap> <undo-tree-undo>" #'org-timegrid-undo)
+    (keymap-set map "<remap> <undo-tree-redo>" #'org-timegrid-redo)
     (keymap-set map "C-/" #'org-timegrid-undo)
     (keymap-set map "C-_" #'org-timegrid-undo)
     (keymap-set map "C-x u" #'org-timegrid-undo)
     (keymap-set map "M-_" #'org-timegrid-redo)
+    (keymap-set map "<remap> <set-mark-command>"
+                #'org-timegrid-set-mark-command)
+    (keymap-set map "<remap> <exchange-point-and-mark>"
+                #'org-timegrid-exchange-point-and-mark)
+    (keymap-set map "<remap> <kill-ring-save>" #'org-timegrid-copy-selected)
+    (keymap-set map "<remap> <kill-region>" #'org-timegrid-cut-selected)
+    (keymap-set map "<remap> <yank>" #'org-timegrid-yank)
+    (keymap-set map "<remap> <yank-pop>" #'org-timegrid-yank-pop)
+    (keymap-set map "C-SPC" #'org-timegrid-set-mark-command)
+    (keymap-set map "C-x C-x" #'org-timegrid-exchange-point-and-mark)
     (keymap-set map "d" #'org-timegrid-remove-selected)
     (keymap-set map "e"
                 #'org-timegrid-edit-selected-title)
@@ -4292,6 +4725,7 @@ not hold for a buffer made of tall image glyphs."
     (keymap-set map "M-w" #'org-timegrid-copy-selected)
     (keymap-set map "C-w" #'org-timegrid-cut-selected)
     (keymap-set map "C-y" #'org-timegrid-yank)
+    (keymap-set map "M-y" #'org-timegrid-yank-pop)
     ;; Dates and files.
     (keymap-set map "j" #'org-timegrid-goto-date)
     (keymap-set map "." #'org-timegrid-goto-today)
@@ -4307,6 +4741,27 @@ not hold for a buffer made of tall image glyphs."
 (keymap-set org-timegrid-mode-map "M-<right>" #'org-timegrid-move-next-day)
 (keymap-set org-timegrid-mode-map "M-<left>" #'org-timegrid-move-previous-day)
 (keymap-set org-timegrid-mode-map "C-x +" #'text-scale-adjust)
+(keymap-set org-timegrid-mode-map "C-SPC" #'org-timegrid-set-mark-command)
+(keymap-set org-timegrid-mode-map "C-x C-x" #'org-timegrid-exchange-point-and-mark)
+(keymap-set org-timegrid-mode-map "<remap> <set-mark-command>"
+            #'org-timegrid-set-mark-command)
+(keymap-set org-timegrid-mode-map "<remap> <exchange-point-and-mark>"
+            #'org-timegrid-exchange-point-and-mark)
+(keymap-set org-timegrid-mode-map "<remap> <kill-ring-save>"
+            #'org-timegrid-copy-selected)
+(keymap-set org-timegrid-mode-map "<remap> <kill-region>"
+            #'org-timegrid-cut-selected)
+(keymap-set org-timegrid-mode-map "<remap> <yank>" #'org-timegrid-yank)
+(keymap-set org-timegrid-mode-map "<remap> <yank-pop>" #'org-timegrid-yank-pop)
+(keymap-set org-timegrid-mode-map "M-y" #'org-timegrid-yank-pop)
+(keymap-set org-timegrid-mode-map "<remap> <undo-fu-only-undo>"
+            #'org-timegrid-undo)
+(keymap-set org-timegrid-mode-map "<remap> <undo-fu-only-redo>"
+            #'org-timegrid-redo)
+(keymap-set org-timegrid-mode-map "<remap> <undo-tree-undo>"
+            #'org-timegrid-undo)
+(keymap-set org-timegrid-mode-map "<remap> <undo-tree-redo>"
+            #'org-timegrid-redo)
 (keymap-unset org-timegrid-mode-map "M-s-<right>" t)
 (keymap-unset org-timegrid-mode-map "M-s-<left>" t)
 (keymap-set org-timegrid-mode-map "S-<right>" #'org-timegrid-grow-all-day-end)

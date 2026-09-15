@@ -557,22 +557,75 @@ have a timed range in their own section."
         (cdr match)
       (cons choice nil))))
 
-(defvar org-timegrid-org--edited-buffers nil
-  "Buffers this calendar has edited, most recent first.")
+(defvar org-timegrid-org--undo-transactions nil)
+(defvar org-timegrid-org--redo-transactions nil)
+(defvar org-timegrid-org--transaction-edits nil)
+(defvar org-timegrid-org--undo-direction nil
+  "Direction of the current undo run: nil for undo and `redo' for redo.")
 
 (defun org-timegrid-org--note-edit ()
-  "Remember the current buffer as the calendar's most recent edit.
-Undo has to happen where the change landed, and only the backend knows
-where that was.  Save it when `org-timegrid-org-auto-save' is non-nil."
-  (setq org-timegrid-org--edited-buffers
-        (cons (current-buffer)
-              (seq-filter #'buffer-live-p
-                          (delq (current-buffer)
-                                org-timegrid-org--edited-buffers))))
-  (when (and org-timegrid-org-auto-save
+  "Record one calendar edit in the current source buffer.
+Save immediately outside a transaction; transactions save once at commit."
+  (if org-timegrid-org--transaction-edits
+      (puthash (current-buffer)
+               (1+ (gethash (current-buffer)
+                            org-timegrid-org--transaction-edits 0))
+               org-timegrid-org--transaction-edits)
+    (push (list (cons (current-buffer) 1))
+          org-timegrid-org--undo-transactions)
+    (setq org-timegrid-org--redo-transactions nil
+          org-timegrid-org--undo-direction nil))
+  (when (and (null org-timegrid-org--transaction-edits)
+             org-timegrid-org-auto-save
              buffer-file-name
              (buffer-modified-p))
     (save-buffer)))
+
+(defun org-timegrid-org--apply-history (transaction redo)
+  "Apply TRANSACTION as undo, or as REDO when non-nil."
+  (dolist (edit transaction)
+    (let ((buffer (car edit)) (count (cdr edit)))
+      (unless (buffer-live-p buffer)
+        (user-error "A source buffer needed for undo is no longer live"))
+      (with-current-buffer buffer
+        (when buffer-read-only (user-error "%s is read-only" (buffer-name)))
+        ;; A continued run of `undo' calls becomes one redo unit in Emacs.
+        (dotimes (index (if redo 1 count))
+          (let ((last-command (and (> index 0) (if redo 'undo-redo 'undo)))
+                (this-command this-command))
+            (if redo (undo-redo) (undo-only))))
+        ;; Source buffers do not run their own command loop while the calendar
+        ;; drives them.  Establish the boundary that Emacs would normally add
+        ;; after an interactive undo command.
+        (undo-boundary)
+        (when (and org-timegrid-org-auto-save buffer-file-name
+                   (buffer-modified-p))
+          (save-buffer))))))
+
+(defun org-timegrid-org--transaction (function)
+  "Run FUNCTION as one atomic backend transaction."
+  (let ((org-timegrid-org--transaction-edits (make-hash-table :test #'eq)))
+    (condition-case error-data
+        (prog1 (funcall function)
+          (let (transaction)
+            (maphash (lambda (buffer count)
+                       (push (cons buffer count) transaction))
+                     org-timegrid-org--transaction-edits)
+            (when transaction
+              (push transaction org-timegrid-org--undo-transactions)
+              (setq org-timegrid-org--redo-transactions nil
+                    org-timegrid-org--undo-direction nil)
+              (dolist (edit transaction)
+                (with-current-buffer (car edit)
+                  (when (and org-timegrid-org-auto-save buffer-file-name
+                             (buffer-modified-p))
+                    (save-buffer)))))))
+      ((error quit)
+       (let (transaction)
+         (maphash (lambda (buffer count) (push (cons buffer count) transaction))
+                  org-timegrid-org--transaction-edits)
+         (when transaction (org-timegrid-org--apply-history transaction nil)))
+       (signal (car error-data) (cdr error-data))))))
 
 (defun org-timegrid-org--undo (continue redo)
   "Undo, or REDO, the calendar's most recent Org edit.
@@ -580,23 +633,24 @@ CONTINUE means this call extends an unbroken run of them, so the source
 buffer keeps walking back through its own undo history instead of
 undoing the previous undo.  Each calendar edit is bracketed by
 `undo-boundary', so one press is one edit."
-  (setq org-timegrid-org--edited-buffers
-        (seq-filter #'buffer-live-p org-timegrid-org--edited-buffers))
-  (let ((buffer (car org-timegrid-org--edited-buffers)))
-    (unless buffer
-      (user-error "The calendar has made no edit to undo"))
-    (with-current-buffer buffer
-      (when buffer-read-only
-        (user-error "%s is read-only" (buffer-name)))
-      ;; Contain `undo's own `this-command' assignment: the run is tracked
-      ;; by the caller's command, which must survive this call.
-      (let ((last-command (and continue 'undo))
-            (this-command this-command))
-        (if redo (undo-redo) (undo)))
-      (when (and org-timegrid-org-auto-save
-                 buffer-file-name
-                 (buffer-modified-p))
-        (save-buffer)))))
+  (let* ((direction
+          (cond (redo 'redo)
+                (continue org-timegrid-org--undo-direction)
+                (org-timegrid-org--redo-transactions 'redo)))
+         (from (if direction org-timegrid-org--redo-transactions
+                 org-timegrid-org--undo-transactions))
+         (transaction (car from)))
+    (unless transaction
+      (user-error "The calendar has no edit to %s"
+                  (if direction "redo" "undo")))
+    (org-timegrid-org--apply-history transaction direction)
+    (setq org-timegrid-org--undo-direction direction)
+    (if direction
+        (progn
+          (setq org-timegrid-org--redo-transactions (cdr from))
+          (push transaction org-timegrid-org--undo-transactions))
+      (setq org-timegrid-org--undo-transactions (cdr from))
+      (push transaction org-timegrid-org--redo-transactions))))
 
 (defun org-timegrid-org--remove-entry (event)
   "Delete the whole Org heading that owned EVENT.
@@ -805,6 +859,32 @@ gone plans nothing.  Everything after this point treats them alike."
        (undo-boundary))
       (org-timegrid-org--note-edit))
     (message "Untimed %s" (org-timegrid-event-title event))))
+
+(defun org-timegrid-org--entry-empty-p (event)
+  "Return non-nil when EVENT's heading has no remaining timestamps."
+  (let ((marker (plist-get (org-timegrid-event-source event) :marker)))
+    (and (markerp marker) (marker-buffer marker)
+         (with-current-buffer (marker-buffer marker)
+           (org-with-wide-buffer
+            (org-element-cache-reset)
+            (goto-char marker)
+            (org-back-to-heading t)
+            (let ((start (point))
+                  (end (save-excursion (org-end-of-subtree t t) (point))))
+              (not (save-restriction
+                     (narrow-to-region start end)
+                     (org-element-map (org-element-parse-buffer)
+                         'timestamp #'identity nil t)))))))))
+
+(defun org-timegrid-org--entry-key (event)
+  "Return a stable identity for EVENT's owning heading."
+  (let ((marker (plist-get (org-timegrid-event-source event) :marker)))
+    (when (and (markerp marker) (marker-buffer marker))
+      (with-current-buffer (marker-buffer marker)
+        (org-with-wide-buffer
+         (goto-char marker)
+         (org-back-to-heading t)
+         (cons (current-buffer) (point)))))))
 
 (defun org-timegrid-org--timestamp-timed-p (timestamp)
   "Return non-nil when TIMESTAMP carries a clock start time.
@@ -1217,6 +1297,9 @@ When HEADING is non-nil, move to the containing Org heading first."
        :delete-function #'org-timegrid-org--remove-event
        :delete-entry-function #'org-timegrid-org--remove-entry
        :undo-function #'org-timegrid-org--undo
+       :transaction-function #'org-timegrid-org--transaction
+       :entry-empty-function #'org-timegrid-org--entry-empty-p
+       :entry-key-function #'org-timegrid-org--entry-key
        :visit-function #'org-timegrid-org--visit-event
        :read-entry-function #'org-timegrid-org-read-entry
        :read-timestamp-function #'org-timegrid-org-read-timestamp))
