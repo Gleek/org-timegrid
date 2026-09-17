@@ -2,6 +2,7 @@
 
 (require 'ert)
 (require 'org-timegrid-org)
+(require 'org-timegrid-agenda)
 
 (defun org-timegrid-test--svg-image-spec (svg &rest properties)
   "Return an image spec for SVG without invoking an image backend."
@@ -201,6 +202,13 @@
       (let ((data (plist-get (cdr (org-timegrid-day-image nil 557 617 400))
                              :data)))
         (should (string-match-p ">[[:space:]]*10:00</text>" data))))))
+
+(ert-deftest org-timegrid-test-agenda-strip-follows-agenda-day ()
+  (let ((org-starting-day 12345))
+    (should (= (org-timegrid-agenda--display-day) 12345))
+    (cl-letf (((symbol-function 'org-timegrid-week)
+               (lambda (day) day)))
+      (should (= (org-timegrid-agenda-open-week) 12345)))))
 
 (ert-deftest org-timegrid-test-plain-c-x-plus-zooms-calendar ()
   (should (eq (lookup-key org-timegrid-mode-map (kbd "C-x +"))

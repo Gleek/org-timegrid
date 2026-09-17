@@ -87,7 +87,12 @@ is what you want when the block below is the same day's untimed items."
 (defun org-timegrid-agenda-open-week ()
   "Open the standalone Week calendar on the strip's displayed day."
   (interactive)
-  (org-timegrid-week))
+  (org-timegrid-week (org-timegrid-agenda--display-day)))
+
+(defun org-timegrid-agenda--display-day ()
+  "Return the absolute day displayed by the current Agenda buffer."
+  (or (and (boundp 'org-starting-day) org-starting-day)
+      (calendar-absolute-from-gregorian (calendar-current-date))))
 
 (defun org-timegrid-agenda--window (now)
   "Return the visible minute range around NOW as a cons cell.
@@ -143,11 +148,14 @@ the usual way to install it."
              (now (+ (* 60 (decoded-time-hour decoded))
                      (decoded-time-minute decoded)))
              (today (calendar-absolute-from-gregorian (calendar-current-date)))
+             (day (org-timegrid-agenda--display-day))
+             (date (calendar-gregorian-from-absolute day))
              (window (org-timegrid-agenda--window now))
-             (blocks (org-timegrid-day-blocks org-timegrid-org-backend today))
+             (blocks (org-timegrid-day-blocks org-timegrid-org-backend day))
              (image (org-timegrid-day-image
                      blocks (car window) (cdr window)
-                     (org-timegrid-agenda--width) now))
+                     (org-timegrid-agenda--width)
+                     (and (= day today) now)))
              (inhibit-read-only t)
              start)
         (org-timegrid-agenda--remove)
@@ -172,7 +180,11 @@ the usual way to install it."
         (insert
          (propertize
           (concat (format org-timegrid-agenda-heading-format
-                          (format-time-string "%A %-d %B"))
+                          (format-time-string
+                           "%A %-d %B"
+                           (encode-time 0 0 0
+                                        (nth 1 date) (nth 0 date)
+                                        (nth 2 date))))
                   (format "  %s–%s\n"
                           (org-timegrid--format-minute (car window))
                           (org-timegrid--format-minute (cdr window))))
