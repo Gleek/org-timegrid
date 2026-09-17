@@ -316,6 +316,63 @@
                      (org-timegrid-isearch--matching-event "needle"))
                     'past))))))
 
+(ert-deftest org-timegrid-test-isearch-index-follows-block-order ()
+  (with-temp-buffer
+    (insert " \n ")
+    (let* ((org-timegrid--tile-count 2)
+           (org-timegrid--tile-markers (vector 1 3))
+           (first (org-timegrid-block-create :id 'first :title "First"))
+           (second (org-timegrid-block-create :id 'second :title "Second")))
+      (cl-letf (((symbol-function 'derived-mode-p) (lambda (&rest _) t))
+                ((symbol-function 'org-timegrid--ordered-blocks)
+                 (lambda () (list first second))))
+        (org-timegrid-isearch--index))
+      (should (< (caar (mapcar #'cdr org-timegrid-isearch--anchors))
+                 (caadr (mapcar #'cdr org-timegrid-isearch--anchors))))
+      (should (= (aref org-timegrid--tile-markers 1)
+                 (+ 3 (length "First\0Second\0")))))))
+
+(ert-deftest org-timegrid-test-isearch-sync-preserves-native-search-state ()
+  (with-temp-buffer
+    (insert (propertize "needle" 'org-timegrid-isearch-block 'block))
+    (goto-char (point-max))
+    (set-match-data (list (point-min) (point-max)))
+    (let ((isearch-mode t)
+          (isearch-success t)
+          (isearch-string "needle")
+          (point (point))
+          (match-data (match-data t)))
+      (cl-letf (((symbol-function 'org-timegrid--goto-block)
+                 (lambda (_block)
+                   (goto-char (point-min))
+                   (string-match "other" "other"))))
+        (org-timegrid-isearch--sync))
+      (should (= (point) point))
+      (should (equal (match-data t) match-data)))))
+
+(ert-deftest org-timegrid-test-isearch-abort-restores-selection ()
+  (with-temp-buffer
+    (insert " ")
+    (let* ((cursor (org-timegrid--cursor-state-create
+                    :surface 'grid :day 2 :minute 600 :lane 0))
+           (org-timegrid--state
+            (org-timegrid--calendar-state-create
+             :week-start 100
+             :cursor (org-timegrid--cursor-state-create
+                      :surface 'rail :day 4 :minute 0 :lane 0)
+             :cursor-visible t :selected-id 'search-match))
+           (org-timegrid-isearch--origin
+            (list 100 cursor t 'original-selection))
+           (org-timegrid-isearch--point (point-min))
+           (isearch-mode-end-hook-quit t))
+      (cl-letf (((symbol-function 'org-timegrid--reload-state) #'ignore)
+                ((symbol-function 'org-timegrid--refresh) #'ignore))
+        (org-timegrid-isearch--finish))
+      (should (eq (org-timegrid--calendar-state-selected-id
+                   org-timegrid--state)
+                  'original-selection))
+      (should (equal (org-timegrid--cursor) cursor)))))
+
 (ert-deftest org-timegrid-test-model-preserves-explicit-time-kinds ()
   (let* ((event (org-timegrid-event-create
                  :id 'date-only :title "Holiday" :start 14400 :end 15840

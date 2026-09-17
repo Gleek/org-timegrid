@@ -44,41 +44,28 @@ finite horizon.  Events in the horizon are fetched once per search."
 (defvar-local org-timegrid-isearch--anchors nil)
 (defvar-local org-timegrid-isearch--events nil)
 
-(defun org-timegrid-isearch--block-tile (block)
-  "Return the vertical SVG tile containing BLOCK's start."
-  (if (org-timegrid-block-all-day-p block)
-      0
-    (org-timegrid--tile-at-pixel
-     (+ (org-timegrid--grid-top-inset)
-        (* (- (org-timegrid-block-start block)
-              (* 60 org-timegrid-start-hour))
-           (org-timegrid--pixels-per-minute))))))
-
 (defun org-timegrid-isearch--index ()
-  "Append invisible block titles to their corresponding SVG tile lines."
+  "Append invisible block titles in keyboard-navigation order."
   (when (and (derived-mode-p 'org-timegrid-mode)
-             (vectorp org-timegrid--tile-markers))
+             (vectorp org-timegrid--tile-markers)
+             (> org-timegrid--tile-count 0))
     (let ((inhibit-read-only t)
           (offset 0)
-          anchors
-          (by-tile (make-vector org-timegrid--tile-count nil)))
+          anchors)
+      (goto-char (1+ (aref org-timegrid--tile-markers 0)))
       (dolist (block (org-timegrid--ordered-blocks))
-        (when-let* ((tile (org-timegrid-isearch--block-tile block)))
-          (push block (aref by-tile tile))))
-      (dotimes (tile org-timegrid--tile-count)
-        (let ((position (+ (aref org-timegrid--tile-markers tile) offset)))
-          (aset org-timegrid--tile-markers tile position)
-          (goto-char (1+ position))
-          (dolist (block (nreverse (aref by-tile tile)))
-            (let* ((start (point))
-                   (text (concat (or (org-timegrid-block-title block) "") "\0")))
-              (insert (propertize
-                       text 'display ""
-                       'org-timegrid-isearch-block block
-                       'rear-nonsticky t))
-              (push (cons (org-timegrid-block-id block) (cons start (point)))
-                    anchors)
-              (setq offset (+ offset (length text)))))))
+        (let* ((start (point))
+               (text (concat (or (org-timegrid-block-title block) "") "\0")))
+          (insert (propertize
+                   text 'display ""
+                   'org-timegrid-isearch-block block
+                   'rear-nonsticky t))
+          (push (cons (org-timegrid-block-id block) (cons start (point)))
+                anchors)
+          (setq offset (+ offset (length text)))))
+      (cl-loop for tile from 1 below org-timegrid--tile-count
+               do (aset org-timegrid--tile-markers tile
+                        (+ (aref org-timegrid--tile-markers tile) offset)))
       (setq-local org-timegrid-isearch--anchors (nreverse anchors)))))
 
 (defun org-timegrid-isearch--start-position (backward)
@@ -114,7 +101,9 @@ finite horizon.  Events in the horizon are fetched once per search."
               ((< position (point-max)))
               (block (get-text-property position
                                         'org-timegrid-isearch-block)))
-    (org-timegrid--goto-block block)))
+    (save-match-data
+      (save-excursion
+        (org-timegrid--goto-block block)))))
 
 (defun org-timegrid-isearch--visit-week (week)
   "Load and display WEEK while preserving active Isearch machinery."
@@ -196,11 +185,14 @@ finite horizon.  Events in the horizon are fetched once per search."
 (defun org-timegrid-isearch--finish ()
   "Restore the original calendar state when Isearch is aborted."
   (when isearch-mode-end-hook-quit
-    (pcase-let ((`(,week ,cursor ,visible) org-timegrid-isearch--origin))
+    (pcase-let ((`(,week ,cursor ,visible ,selected)
+                 org-timegrid-isearch--origin))
       (org-timegrid--reload-state week)
       (setf (org-timegrid--calendar-state-cursor org-timegrid--state) cursor
             (org-timegrid--calendar-state-cursor-visible org-timegrid--state)
-            visible)
+            visible
+            (org-timegrid--calendar-state-selected-id org-timegrid--state)
+            selected)
       (org-timegrid--refresh t)))
   (goto-char (min org-timegrid-isearch--point (point-max)))
   (remove-hook 'isearch-update-post-hook #'org-timegrid-isearch--sync t)
@@ -213,7 +205,8 @@ finite horizon.  Events in the horizon are fetched once per search."
    (list (org-timegrid--calendar-state-week-start org-timegrid--state)
          (and (org-timegrid--cursor)
               (copy-org-timegrid--cursor-state (org-timegrid--cursor)))
-         (org-timegrid--cursor-visible-p))
+         (org-timegrid--cursor-visible-p)
+         (org-timegrid--calendar-state-selected-id org-timegrid--state))
    org-timegrid-isearch--point (point)
    org-timegrid-isearch--events nil
    isearch-search-fun-function #'org-timegrid-isearch--search-function
