@@ -46,6 +46,15 @@ With [Elpaca](https://github.com/progfolio/elpaca):
   :bind ("C-c c" . org-timegrid-week))
 ```
 
+With the built-in `package-vc` via `use-package` (Emacs 30 or later):
+
+```elisp
+(use-package org-timegrid
+  :vc (:url "https://github.com/Gleek/org-timegrid.git")
+  :commands (org-timegrid-week)
+  :bind ("C-c c" . org-timegrid-week))
+```
+
 For a manual install, put the `.el` files on `load-path`, evaluate `(require
 'org-timegrid-org)`, then run `M-x org-timegrid-week`.
 
