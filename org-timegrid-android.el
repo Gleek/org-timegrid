@@ -142,7 +142,8 @@ Enable this to use keyboard commands that have no touch gesture."
 
 (defun org-timegrid-android--configure-buffer ()
   "Apply the one-day touch layout without maintaining a second renderer."
-  (setq-local touch-screen-display-keyboard
+  (setq-local echo-keystrokes 0
+              touch-screen-display-keyboard
               org-timegrid-android-display-keyboard
               touch-screen-keyboard-function
               (unless org-timegrid-android-display-keyboard (lambda () nil))

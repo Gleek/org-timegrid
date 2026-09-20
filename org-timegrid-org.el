@@ -808,7 +808,19 @@ END is exclusive internally; Org's written date-range endpoint is inclusive."
          (when title
            (org-timegrid-org--rename-heading marker title)))
        (undo-boundary))
-      (org-timegrid-org--note-edit))
+      (org-timegrid-org--note-edit)
+      ;; Keep validation metadata coherent for another optimistic update.
+      (let* ((updated (org-timegrid-org--timestamp-at-marker marker))
+             (metadata (copy-sequence (org-timegrid-event-metadata event))))
+        (setf (org-timegrid-event-start event) start
+              (org-timegrid-event-end event) end
+              (org-timegrid-event-all-day event)
+              (if time-kind
+                  (eq time-kind 'all-day)
+                (org-timegrid-org--timestamp-all-day-p updated))
+              (plist-get metadata :raw-value)
+              (org-element-property :raw-value updated)
+              (org-timegrid-event-metadata event) metadata)))
     (message "%s %s" (if title "Renamed" "Retimed")
              (org-timegrid-event-title event))))
 

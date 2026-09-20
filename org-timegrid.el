@@ -580,11 +580,22 @@ also moving it, so its position is visible before it is used."
        (integerp (org-timegrid--calendar-state-mark org-timegrid--state))))
 
 (defun org-timegrid--region-range ()
-  "Return the active calendar region as a normalized half-open range."
+  "Return the active calendar region as a normalized half-open range.
+Both the mark and point slots are included, matching Emacs's usual
+region semantics where the character under point is part of the
+region.  So the range always spans at least one unit, even when the
+mark and point sit on the same slot.  The unit is a whole day on the
+all-day rail and a grid slot everywhere else, matching whichever
+surface the cursor is on now."
   (when (org-timegrid-region-active-p)
-    (let ((mark (org-timegrid--calendar-state-mark org-timegrid--state))
-          (point (org-timegrid--cursor-calendar-minute)))
-      (cons (min mark point) (max mark point)))))
+    (let* ((mark (org-timegrid--calendar-state-mark org-timegrid--state))
+           (point (org-timegrid--cursor-calendar-minute))
+           (unit (if (eq (org-timegrid--cursor-state-surface
+                          (org-timegrid--ensure-cursor))
+                        'rail)
+                    1440
+                  org-timegrid-slot-minutes)))
+      (cons (min mark point) (+ (max mark point) unit)))))
 
 (defun org-timegrid-set-mark-command ()
   "Set or deactivate the calendar mark at the cursor."
@@ -2818,7 +2829,17 @@ SOURCE-EVENT identifies an entry to reuse, and TARGET selects its destination."
           (org-timegrid--call-update
            updater event (car range) (cdr range) nil
            (org-timegrid-block-time-kind block))
-          (org-timegrid--refresh-data))
+          (setf (org-timegrid-event-start event) (car range)
+                (org-timegrid-event-end event) (cdr range)
+                (org-timegrid-event-all-day event)
+                (eq (org-timegrid-block-time-kind block) 'all-day))
+          (let ((week (org-timegrid--calendar-state-week-start
+                       org-timegrid--state)))
+            (setf (org-timegrid--calendar-state-blocks org-timegrid--state)
+                  (org-timegrid-events-to-blocks
+                   (org-timegrid--calendar-state-events org-timegrid--state)
+                   week)))
+          (org-timegrid--refresh t))
       (error
        (org-timegrid--refresh-data)
        (signal (car error-data) (cdr error-data))))))
@@ -4075,8 +4096,6 @@ time-grid cells prompt for the timed duration as usual."
   (let* ((cursor (org-timegrid--ensure-cursor))
          (range (org-timegrid--region-range))
          (all-day (eq (org-timegrid--cursor-state-surface cursor) 'rail))
-         (_ (when (and range (= (car range) (cdr range)))
-              (user-error "Move point to give the calendar region a duration")))
          (entry (org-timegrid--read-entry))
          (title (car entry)))
     (if (string-empty-p title)

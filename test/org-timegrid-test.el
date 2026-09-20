@@ -25,7 +25,12 @@
   (with-temp-buffer
     (org-mode)
     (insert "* DONE Hidden :private:\n:PROPERTIES:\n:CALENDAR: no\n:END:\n<2026-09-05 Sat 10:00 +1w>\n")
-    (let* ((tree (org-element-parse-buffer))
+    (let* ((org-timegrid-org-show-done t)
+           (org-timegrid-org-show-repeaters t)
+           (org-timegrid-org-exclude-tags nil)
+           (org-timegrid-org-exclude-todo-states nil)
+           (org-timegrid-org-exclude-properties nil)
+           (tree (org-element-parse-buffer))
            (headline (org-element-map tree 'headline #'identity nil t))
            (timestamp (org-element-map headline 'timestamp #'identity nil t)))
       (should (org-timegrid-org-default-filter headline timestamp))
@@ -107,6 +112,7 @@
   (with-temp-buffer
     (org-timegrid-mode)
     (org-timegrid-android--configure-buffer)
+    (should (zerop echo-keystrokes))
     (should (= org-timegrid-days 1))
     (should (= org-timegrid-default-zoom org-timegrid-android-zoom))
     (should-not touch-screen-display-keyboard)
@@ -656,7 +662,7 @@
     (should (equal (nreverse targets)
                    '(nil source-record source-record)))))
 
-(ert-deftest org-timegrid-test-calendar-region-is-half-open-and-reversible ()
+(ert-deftest org-timegrid-test-calendar-region-includes-point-slot-and-reversible ()
   (let ((org-timegrid--state
          (org-timegrid--calendar-state-create
           :week-start 100
@@ -665,12 +671,14 @@
           :cursor-visible t)))
     (cl-letf (((symbol-function 'org-timegrid--render-ui-change) #'ignore))
       (org-timegrid-set-mark-command))
-    (org-timegrid--set-cursor 2 615)
     (should (equal (org-timegrid--region-range)
                    (cons (+ (* 102 1440) 600) (+ (* 102 1440) 615))))
+    (org-timegrid--set-cursor 2 615)
+    (should (equal (org-timegrid--region-range)
+                   (cons (+ (* 102 1440) 600) (+ (* 102 1440) 630))))
     (org-timegrid--set-cursor 2 585)
     (should (equal (org-timegrid--region-range)
-                   (cons (+ (* 102 1440) 585) (+ (* 102 1440) 600))))))
+                   (cons (+ (* 102 1440) 585) (+ (* 102 1440) 615))))))
 
 (ert-deftest org-timegrid-test-region-damage-keeps-cross-day-column-changes ()
   (should (equal (org-timegrid--range-difference '(100 . 200) '(100 . 150))
@@ -923,6 +931,47 @@
                             (org-timegrid--dynamic-fragment)
                             (org-timegrid--header)))))
               (should (= count 1))))))))))
+
+(ert-deftest org-timegrid-test-backend-update-is-optimistic ()
+  "A successful update changes cached state without reloading its backend."
+  (let* ((week 100)
+         ;; Block represents the event moved 15 minutes later.
+         (old-start (+ (* week 1440) 600))
+         (old-end   (+ (* week 1440) 660))
+         (new-start (+ old-start 15))
+         (new-end   (+ old-end   15))
+         (event (org-timegrid-event-create
+                 :id 'ev :title "Meeting" :start old-start :end old-end))
+         (block (org-timegrid-block-create
+                 :id 'ev :day 0 :start 615 :end 675
+                 :title "Meeting" :time-kind 'timed :event event))
+         (updated-start nil)
+         calls)
+    (with-temp-buffer
+      (org-timegrid-mode)
+      (setq-local org-timegrid--backend
+                  (org-timegrid-backend-create
+                   :name "test"
+                   :list-function (lambda (_s _e) (list event))
+                   :update-function (lambda (_ev s _e &rest _)
+                                      (setq updated-start s))))
+      (setq-local org-timegrid--state
+                  (org-timegrid--calendar-state-create
+                   :week-start week :events (list event)
+                   :blocks (list block)))
+      (cl-letf (((symbol-function 'org-timegrid--refresh-data)
+                 (lambda () (push 'reload calls)))
+                ((symbol-function 'org-timegrid--refresh)
+                 (lambda (&rest _) (push 'redraw calls))))
+        (org-timegrid--backend-update block))
+      ;; Updater was called with the block's new absolute range.
+      (should (= updated-start new-start))
+      ;; Event updated in-memory without waiting for a re-parse.
+      (should (= (org-timegrid-event-start event) new-start))
+      (should (= (org-timegrid-event-end   event) new-end))
+      (should-not (org-timegrid-event-all-day event))
+      ;; Only the in-memory redraw ran; the backend was not reloaded.
+      (should (equal calls '(redraw))))))
 
 (provide 'org-timegrid-test)
 ;;; org-timegrid-test.el ends here
