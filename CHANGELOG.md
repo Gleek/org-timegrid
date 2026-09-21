@@ -1,7 +1,7 @@
 # Changelog
 
 ## 2026-09-20
-- Calendar regions now include the slot under point, so setting the mark without moving selects one slot and extended regions include both endpoints.
+- Calendar regions now treat point and mark as boundaries, matching normal Emacs regions in both movement directions.
 - Moving and resizing events now redraw immediately from the updated in-memory state instead of reloading the Org backend after every edit.
 - Android keyboard commands now appear in the echo area without a delay.
 

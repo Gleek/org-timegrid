@@ -581,21 +581,13 @@ also moving it, so its position is visible before it is used."
 
 (defun org-timegrid--region-range ()
   "Return the active calendar region as a normalized half-open range.
-Both the mark and point slots are included, matching Emacs's usual
-region semantics where the character under point is part of the
-region.  So the range always spans at least one unit, even when the
-mark and point sit on the same slot.  The unit is a whole day on the
-all-day rail and a grid slot everywhere else, matching whichever
-surface the cursor is on now."
+Mark and point are boundaries, as in an ordinary Emacs buffer.  The
+calendar's block cursor paints the slot after point, but that slot is
+not itself part of the region."
   (when (org-timegrid-region-active-p)
-    (let* ((mark (org-timegrid--calendar-state-mark org-timegrid--state))
-           (point (org-timegrid--cursor-calendar-minute))
-           (unit (if (eq (org-timegrid--cursor-state-surface
-                          (org-timegrid--ensure-cursor))
-                        'rail)
-                    1440
-                  org-timegrid-slot-minutes)))
-      (cons (min mark point) (+ (max mark point) unit)))))
+    (let ((mark (org-timegrid--calendar-state-mark org-timegrid--state))
+          (point (org-timegrid--cursor-calendar-minute)))
+      (cons (min mark point) (max mark point)))))
 
 (defun org-timegrid-set-mark-command ()
   "Set or deactivate the calendar mark at the cursor."
@@ -4096,6 +4088,8 @@ time-grid cells prompt for the timed duration as usual."
   (let* ((cursor (org-timegrid--ensure-cursor))
          (range (org-timegrid--region-range))
          (all-day (eq (org-timegrid--cursor-state-surface cursor) 'rail))
+         (_ (when (and range (= (car range) (cdr range)))
+              (user-error "Move point to give the calendar region a duration")))
          (entry (org-timegrid--read-entry))
          (title (car entry)))
     (if (string-empty-p title)

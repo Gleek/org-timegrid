@@ -662,7 +662,7 @@
     (should (equal (nreverse targets)
                    '(nil source-record source-record)))))
 
-(ert-deftest org-timegrid-test-calendar-region-includes-point-slot-and-reversible ()
+(ert-deftest org-timegrid-test-calendar-region-is-half-open-and-reversible ()
   (let ((org-timegrid--state
          (org-timegrid--calendar-state-create
           :week-start 100
@@ -672,13 +672,16 @@
     (cl-letf (((symbol-function 'org-timegrid--render-ui-change) #'ignore))
       (org-timegrid-set-mark-command))
     (should (equal (org-timegrid--region-range)
-                   (cons (+ (* 102 1440) 600) (+ (* 102 1440) 615))))
+                   (cons (+ (* 102 1440) 600) (+ (* 102 1440) 600))))
     (org-timegrid--set-cursor 2 615)
     (should (equal (org-timegrid--region-range)
-                   (cons (+ (* 102 1440) 600) (+ (* 102 1440) 630))))
+                   (cons (+ (* 102 1440) 600) (+ (* 102 1440) 615))))
+    (org-timegrid--set-cursor 2 600)
+    (should (equal (org-timegrid--region-range)
+                   (cons (+ (* 102 1440) 600) (+ (* 102 1440) 600))))
     (org-timegrid--set-cursor 2 585)
     (should (equal (org-timegrid--region-range)
-                   (cons (+ (* 102 1440) 585) (+ (* 102 1440) 615))))))
+                   (cons (+ (* 102 1440) 585) (+ (* 102 1440) 600))))))
 
 (ert-deftest org-timegrid-test-region-damage-keeps-cross-day-column-changes ()
   (should (equal (org-timegrid--range-difference '(100 . 200) '(100 . 150))
