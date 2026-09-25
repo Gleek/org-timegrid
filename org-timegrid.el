@@ -1693,13 +1693,13 @@ band under the grid."
      org-timegrid--tile-width height y org-timegrid--tile-width height
      org-timegrid--static-inner (or fragment ""))))
 
-(defun org-timegrid--tile-image-map (tile)
+(defun org-timegrid--tile-image-map (tile &optional image-map)
   "Return the production image map clipped and translated for TILE."
   (let* ((bounds (org-timegrid--tile-bounds tile))
          (top (car bounds))
          (bottom (min org-timegrid--image-height (+ top (cdr bounds))))
          translated)
-    (dolist (entry (org-timegrid--image-map))
+    (dolist (entry (or image-map (org-timegrid--image-map)))
       (pcase-let* ((`(,shape ,id ,properties) entry)
                    (`(rect . ((,left . ,y) . (,right . ,end))) shape))
         (when (and (< y bottom) (> end top))
@@ -1709,9 +1709,9 @@ band under the grid."
                 translated))))
     (nreverse translated)))
 
-(defun org-timegrid--make-tile-image (tile &optional fragment)
+(defun org-timegrid--make-tile-image (tile &optional fragment image-map)
   "Create TILE's image, adding optional dynamic SVG FRAGMENT."
-  (let ((map (org-timegrid--tile-image-map tile))
+  (let ((map (org-timegrid--tile-image-map tile image-map))
         ;; The current-time marker is calendar chrome, so paint it after
         ;; selection and preview fragments instead of letting those cover it.
         (fragment (concat fragment
@@ -1750,9 +1750,10 @@ band under the grid."
   (org-timegrid--update-clock-fragment)
   (setq-local org-timegrid--static-images
               (make-vector org-timegrid--tile-count nil))
-  (dotimes (tile org-timegrid--tile-count)
-    (aset org-timegrid--static-images tile
-          (org-timegrid--make-tile-image tile))))
+  (let ((image-map (org-timegrid--image-map)))
+    (dotimes (tile org-timegrid--tile-count)
+      (aset org-timegrid--static-images tile
+            (org-timegrid--make-tile-image tile nil image-map)))))
 
 (defun org-timegrid--dynamic-blocks ()
   "Return laid-out blocks belonging to the current dynamic layer."
