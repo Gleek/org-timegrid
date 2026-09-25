@@ -4921,13 +4921,15 @@ keyboard changes pass through the same damage-based renderer.
          (y (+ (org-timegrid--grid-top-inset)
                (* (- minute start-minute)
                   (org-timegrid--pixels-per-minute))))
-         (target (max 0 (- y (/ (window-body-height window t) 2)))))
+         (body (window-body-height window t))
+         (maximum (max 0 (- (or org-timegrid--image-height 0) body)))
+         (target (max 0 (min maximum (- y (/ body 2))))))
     (org-timegrid--set-vscroll window target)))
 
 ;;;###autoload
 (defun org-timegrid-open (backend &optional absolute-date)
   "Open BACKEND on the week containing ABSOLUTE-DATE.
-Revisiting an existing calendar retains its pixel scroll position."
+Center the current time whenever the calendar is shown."
   (unless (org-timegrid-backend-p backend)
     (user-error "A calendar backend is required"))
   (let* ((existing (get-buffer org-timegrid-buffer-name))
@@ -4972,14 +4974,13 @@ Revisiting an existing calendar retains its pixel scroll position."
       (with-current-buffer buffer
         (cond
          ((null existing)
-          (org-timegrid--refresh)
-          (when window
-            (org-timegrid--center-now window)))
+          (org-timegrid--refresh))
          ((or refreshp
               (/= (org-timegrid--window-width)
                   (or org-timegrid--last-width -1)))
           (org-timegrid--refresh t)))
         (when window
+          (org-timegrid--center-now window)
           (org-timegrid--schedule-scroll-restore window))))
     buffer))
 
