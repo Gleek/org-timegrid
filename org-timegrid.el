@@ -40,6 +40,17 @@
 (require 'subr-x)
 (require 'org-timegrid-model)
 
+(defun org-timegrid--draw-repeater (svg x y color)
+  "Draw a small repeat icon on SVG with its top left at X, Y in COLOR."
+  (let ((top-transform (format "translate(%g %g) scale(0.24)" x y))
+        (bottom-transform (format "translate(%g %g) scale(0.24)" x (1+ y))))
+    (svg-node svg 'path :transform bottom-transform :fill color
+              :stroke color :stroke-width 1.5 :stroke-linejoin "round"
+              :d "M27.18 22.949h-22.497l4.492-4.494-0.754-0.754-5.743 5.744 5.743 5.743 0.754-0.754-4.419-4.42h23.491v-9.596h-1.066z")
+    (svg-node svg 'path :transform top-transform :fill color
+              :stroke color :stroke-width 1.5 :stroke-linejoin "round"
+              :d "M4.793 9.088h22.488l-4.456 4.457 0.754 0.754 5.742-5.742-5.743-5.744-0.754 0.754 4.454 4.456h-23.552v9.596h1.066z")))
+
 (defgroup org-timegrid nil
   "An SVG week calendar for Emacs, edited by mouse and keyboard."
   :group 'calendar
@@ -1407,6 +1418,9 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                                (org-timegrid--selected-id))))
          (fill (org-timegrid--color block palette))
          (accent (org-timegrid--accent block palette))
+         (event (org-timegrid-block-event block))
+         (repeater (and event (plist-get (org-timegrid-event-metadata event)
+                                        :repeater-type)))
          (small-font (org-timegrid--font-size 8))
          (font-size (if (< block-height (org-timegrid--scale-pixels 13))
                         small-font
@@ -1414,7 +1428,7 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
          (line-height (if (= font-size small-font)
                           (org-timegrid--scale-pixels 10)
                         (org-timegrid--scale-pixels 13)))
-         (characters (max 1 (floor (/ (- block-width 12)
+         (characters (max 1 (floor (/ (- block-width (if repeater 22 12))
                                       (* font-size 0.62)))))
          (max-lines (max 1 (floor (/ (max 1 (- block-height 3))
                                      line-height))))
@@ -1435,6 +1449,10 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                    :stroke-width (if selected 2 1))
     (svg-rectangle svg (+ x 2) (+ y 2) 3 (max 1 (- block-height 4))
                    :rx accent-radius :ry accent-radius :fill accent)
+    (when (and repeater
+               (not boundary-edge)
+               (>= block-width 25) (>= block-height 12))
+      (org-timegrid--draw-repeater svg (- (+ x block-width) 10) (+ y 1) accent))
     (cl-loop for line in (unless boundary-edge title-lines)
              for index from 0 do
              (org-timegrid--draw-text svg line :x (+ x 9)
@@ -1962,6 +1980,9 @@ The final row is intentionally empty and can hold a cross-surface preview."
          (leftp (org-timegrid-block-continues-left block))
          (rightp (org-timegrid-block-continues-right block))
          (fill (org-timegrid--color block palette))
+         (event (org-timegrid-block-event block))
+         (repeater (and event (plist-get (org-timegrid-event-metadata event)
+                                        :repeater-type)))
          (selected (equal (org-timegrid-block-id block) (org-timegrid--selected-id)))
          (radius (min (max 0 org-timegrid-corner-radius)
                       (/ height 2.0)))
@@ -1998,7 +2019,8 @@ The final row is intentionally empty and can hold a cross-surface preview."
               :stroke-width (if selected 2 1)
               :stroke-linejoin "round")
     (let* ((text-x (+ x (if leftp arrow 0) 9))
-           (available (max 1 (- right text-x 5)))
+           (available (max 1 (- right text-x
+                                (if repeater 14 5))))
            (characters (max 1 (floor (/ available
                                         (org-timegrid--scale-pixels 6.2)))))
            (title (truncate-string-to-width
@@ -2008,6 +2030,9 @@ The final row is intentionally empty and can hold a cross-surface preview."
                 :font-size (org-timegrid--font-size 10)
                 :font-weight "600" :font-family font-family
                 :fill (plist-get palette :foreground)))
+    (when (and repeater (>= (- right x) 25))
+      (org-timegrid--draw-repeater svg (- right 10) (+ y 3)
+                                   (org-timegrid--accent block palette)))
     (list :id (org-timegrid-block-id block) :lane (org-timegrid-block-rail-lane block)
           :x x :y y :width (- right x) :height height
           :allow-left (not leftp) :allow-right (not rightp))))
