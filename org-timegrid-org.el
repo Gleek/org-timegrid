@@ -1252,6 +1252,10 @@ When HEADING is non-nil, move to the containing Org heading first."
   (org-timegrid-org-command #'org-set-tags-command)
   "Set tags on the selected calendar entry, then refresh the calendar.")
 
+(defalias 'org-timegrid-org-open-at-point
+  (org-timegrid-org-command #'org-open-at-point)
+  "Open the link at the selected calendar entry's Org heading.")
+
 (defalias 'org-timegrid-org-todo
   (org-timegrid-org-command #'org-todo)
   "Change the selected calendar entry's TODO state, then refresh the calendar.")
@@ -1287,6 +1291,7 @@ When HEADING is non-nil, move to the containing Org heading first."
 (keymap-set org-timegrid-mode-map ":" #'org-timegrid-org-set-tags)
 (keymap-set org-timegrid-mode-map "C-c C-q" #'org-timegrid-org-set-tags)
 (keymap-set org-timegrid-mode-map "C-c C-t" #'org-timegrid-org-todo)
+(keymap-set org-timegrid-mode-map "C-c C-o" #'org-timegrid-org-open-at-point)
 (keymap-set org-timegrid-mode-map "," #'org-timegrid-org-priority)
 (keymap-set org-timegrid-mode-map "C-c ," #'org-timegrid-org-priority)
 (keymap-set org-timegrid-mode-map "i" #'org-timegrid-org-clock-in)
