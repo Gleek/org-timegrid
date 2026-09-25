@@ -253,6 +253,38 @@
           (org-timegrid--center-now 'calendar-window)
           (should (= scrolled 900)))))))
 
+(ert-deftest org-timegrid-test-goto-today-avoids-rebuilding-current-range ()
+  (with-temp-buffer
+    (let* ((today (calendar-absolute-from-gregorian (calendar-current-date)))
+           (range (org-timegrid--range-start today))
+           (org-timegrid--state
+            (org-timegrid--calendar-state-create :week-start range))
+           rebuilt)
+      (cl-letf (((symbol-function 'org-timegrid--reload-state)
+                 (lambda (&rest _) (setq rebuilt t)))
+                ((symbol-function 'org-timegrid--refresh)
+                 (lambda (&rest _) (setq rebuilt t))))
+        (org-timegrid-goto-today)
+        (should-not rebuilt)))))
+
+(ert-deftest org-timegrid-test-refresh-reloads-today ()
+  (with-temp-buffer
+    (let* ((today (calendar-absolute-from-gregorian (calendar-current-date)))
+           (range (org-timegrid--range-start today))
+           (org-timegrid--state
+            (org-timegrid--calendar-state-create :week-start range))
+           reloaded refreshed)
+      (cl-letf (((symbol-function 'org-timegrid--reload-state)
+                 (lambda (start) (setq reloaded start)))
+                ((symbol-function 'org-timegrid--now-minute)
+                 (lambda () 1020))
+                ((symbol-function 'org-timegrid--refresh)
+                 (lambda (&optional preserve center)
+                   (setq refreshed (list preserve center)))))
+        (org-timegrid-refresh)
+        (should (= reloaded range))
+        (should (equal refreshed '(nil 1020)))))))
+
 (ert-deftest org-timegrid-test-scroll-boundary-distinguishes-rebound-from-reversal ()
   (with-temp-buffer
     (org-timegrid-mode)

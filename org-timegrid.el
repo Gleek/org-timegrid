@@ -2404,9 +2404,10 @@ leave no central move target."
                   bodies))))))
     (append edges bodies)))
 
-(defun org-timegrid--refresh (&optional preserve-scroll)
+(defun org-timegrid--refresh (&optional preserve-scroll center-minute)
   "Rebuild cached tiles.
-When PRESERVE-SCROLL is non-nil, preserve the pixel scroll position."
+When PRESERVE-SCROLL is non-nil, preserve the pixel scroll position.
+When CENTER-MINUTE is a number, center that minute before redisplay."
   (org-timegrid--ensure-state)
   (org-timegrid--sync-fringe-background)
   (let* ((window (get-buffer-window (current-buffer) t))
@@ -2433,14 +2434,17 @@ When PRESERVE-SCROLL is non-nil, preserve the pixel scroll position."
                 (org-timegrid--window-width))
     (set-buffer-modified-p nil)
     (when window
-      ;; Restore the viewport before redisplay.  Painting after the tile
-      ;; insertion but before this restoration flashes the top of the
-      ;; calendar whenever an edit reloads its backend data.
-      (if vscroll
-          (org-timegrid--set-vscroll window vscroll)
+      ;; Position the viewport before redisplay, so the rebuilt calendar
+      ;; never appears briefly at the top.
+      (cond
+       ((numberp center-minute)
+        (org-timegrid--center-minute window center-minute))
+       (vscroll
+        (org-timegrid--set-vscroll window vscroll))
+       (t
         (set-window-start window (point-min) t)
         (set-window-point window (point-min))
-        (set-window-vscroll window 0 t))
+        (set-window-vscroll window 0 t)))
       (redisplay t))))
 
 (defun org-timegrid--text-scale-changed ()
@@ -2460,16 +2464,7 @@ Keep the same calendar minute at the vertical center of the window."
                     (/ (- (+ scroll (/ body 2.0)) old-inset)
                        old-scale)))))
       (setq-local org-timegrid--last-zoom-factor new-factor)
-      (org-timegrid--refresh)
-      (when (and window anchor-minute)
-        (let* ((new-center
-                (+ (org-timegrid--grid-top-inset)
-                   (* (- anchor-minute (* 60 org-timegrid-start-hour))
-                      (org-timegrid--pixels-per-minute))))
-               (maximum (max 0 (- org-timegrid--image-height body)))
-               (target (max 0 (min maximum (- new-center (/ body 2.0))))))
-          (org-timegrid--set-vscroll window target)
-          (redisplay t))))))
+      (org-timegrid--refresh nil anchor-minute))))
 
 (defun org-timegrid--install-text-scale-hook ()
   "Install SVG zoom support in the current calendar buffer."
@@ -4562,21 +4557,32 @@ the duration is asked for separately, prefilled with the current one."
     (org-timegrid--refresh)
     (org-timegrid--scroll-cursor-into-view)))
 
-(defun org-timegrid-goto-today ()
+(defun org-timegrid-goto-today (&optional force-reload)
   "Show the week containing today.
 A visible cursor moves to the current slot; a hidden one stays hidden,
-since jumping dates should not conjure a cursor nobody asked for."
+since jumping dates should not conjure a cursor nobody asked for.
+Center the current time in the window when possible.
+With FORCE-RELOAD, reload the backend even if today is already displayed."
   (interactive)
-  (let ((today (calendar-absolute-from-gregorian (calendar-current-date)))
-        (visible (and (org-timegrid--cursor) t)))
-    (org-timegrid--reload-state (org-timegrid--range-start today))
-    (setf (org-timegrid--calendar-state-cursor org-timegrid--state)
-          (and visible
-               (org-timegrid--default-cursor
-                (org-timegrid--calendar-state-week-start
-                 org-timegrid--state))))
-    (org-timegrid--refresh)
-    (org-timegrid--scroll-cursor-into-view)))
+  (let* ((today (calendar-absolute-from-gregorian (calendar-current-date)))
+         (range (org-timegrid--range-start today))
+         (visible (and (org-timegrid--cursor) t))
+         (reload (or force-reload org-timegrid--stale
+                     (/= range (org-timegrid--calendar-state-week-start
+                                org-timegrid--state)))))
+    (when reload
+      (org-timegrid--reload-state range)
+      (setq-local org-timegrid--stale nil))
+    (let ((cursor (and visible (org-timegrid--default-cursor range))))
+      (unless (equal cursor (org-timegrid--cursor))
+        (setf (org-timegrid--calendar-state-cursor org-timegrid--state)
+              cursor)
+        (unless reload
+          (org-timegrid--render-ui-change))))
+    (if reload
+        (org-timegrid--refresh nil (org-timegrid--now-minute))
+      (when-let* ((window (get-buffer-window (current-buffer) t)))
+        (org-timegrid--center-now window)))))
 
 (defun org-timegrid-remove-or-page-up (&optional count)
   "Remove the selected block, or page the cursor up when none is selected.
@@ -4671,15 +4677,9 @@ not hold for a buffer made of tall image glyphs."
   (org-timegrid--refresh t))
 
 (defun org-timegrid-refresh ()
-  "Manually reload the displayed week and reset its cursor and viewport."
+  "Reload the backend, show today, and center the current time."
   (interactive)
-  (org-timegrid--reload-state (org-timegrid--calendar-state-week-start org-timegrid--state))
-  (setf (org-timegrid--calendar-state-cursor org-timegrid--state) nil
-        (org-timegrid--calendar-state-cursor-visible org-timegrid--state) nil)
-  (setq-local org-timegrid--saved-vscroll 0)
-  (org-timegrid--refresh)
-  (when-let* ((window (get-buffer-window (current-buffer) t)))
-    (org-timegrid--set-vscroll window 0)))
+  (org-timegrid-goto-today t))
 
 (defvar org-timegrid-mode-map
   (let ((map (make-sparse-keymap)))
@@ -4912,12 +4912,14 @@ keyboard changes pass through the same damage-based renderer.
   (add-hook 'kill-buffer-hook
             #'org-timegrid--cancel-timers nil t))
 
-(defun org-timegrid--center-now (window)
-  "Center the current time vertically in WINDOW."
-  (let* ((now (decode-time))
-         (minute (+ (* 60 (decoded-time-hour now))
-                    (decoded-time-minute now)))
-         (start-minute (* 60 org-timegrid-start-hour))
+(defun org-timegrid--now-minute ()
+  "Return the current minute of the day."
+  (let ((now (decode-time)))
+    (+ (* 60 (decoded-time-hour now)) (decoded-time-minute now))))
+
+(defun org-timegrid--center-minute (window minute)
+  "Center MINUTE of the day vertically in WINDOW."
+  (let* ((start-minute (* 60 org-timegrid-start-hour))
          (y (+ (org-timegrid--grid-top-inset)
                (* (- minute start-minute)
                   (org-timegrid--pixels-per-minute))))
@@ -4926,10 +4928,14 @@ keyboard changes pass through the same damage-based renderer.
          (target (max 0 (min maximum (- y (/ body 2))))))
     (org-timegrid--set-vscroll window target)))
 
+(defun org-timegrid--center-now (window)
+  "Center the current time vertically in WINDOW."
+  (org-timegrid--center-minute window (org-timegrid--now-minute)))
+
 ;;;###autoload
 (defun org-timegrid-open (backend &optional absolute-date)
   "Open BACKEND on the week containing ABSOLUTE-DATE.
-Center the current time whenever the calendar is shown."
+Center the current time on first display; later visits retain the view."
   (unless (org-timegrid-backend-p backend)
     (user-error "A calendar backend is required"))
   (let* ((existing (get-buffer org-timegrid-buffer-name))
@@ -4974,13 +4980,12 @@ Center the current time whenever the calendar is shown."
       (with-current-buffer buffer
         (cond
          ((null existing)
-          (org-timegrid--refresh))
+          (org-timegrid--refresh nil (org-timegrid--now-minute)))
          ((or refreshp
               (/= (org-timegrid--window-width)
                   (or org-timegrid--last-width -1)))
           (org-timegrid--refresh t)))
         (when window
-          (org-timegrid--center-now window)
           (org-timegrid--schedule-scroll-restore window))))
     buffer))
 
