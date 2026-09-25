@@ -477,7 +477,7 @@ the first visible day at the configured start hour otherwise."
         (let ((now (decode-time)))
           (org-timegrid--cursor-state-create
            :surface 'grid :day offset
-           :minute (org-timegrid--snap-minute
+           :minute (org-timegrid--visible-minute
                     (+ (* 60 (decoded-time-hour now))
                        (decoded-time-minute now)))
            :lane 0))
@@ -491,6 +491,12 @@ the first visible day at the configured start hour otherwise."
                   org-timegrid-slot-minutes)))
     (* org-timegrid-slot-minutes
        (max 0 (min slots (floor minute org-timegrid-slot-minutes))))))
+
+(defun org-timegrid--visible-minute (minute)
+  "Clamp MINUTE to a rendered grid slot."
+  (max (* 60 org-timegrid-start-hour)
+       (min (- (* 60 org-timegrid-end-hour) org-timegrid-slot-minutes)
+            (org-timegrid--snap-minute minute))))
 
 (defun org-timegrid--cursor ()
   "Return the remembered cursor position, which may be hidden."
@@ -650,7 +656,7 @@ not itself part of the region."
   "Move the cursor to DAY and MINUTE, clamped to the visible week.
 LANE picks between blocks sharing that start, and defaults to zero."
   (let* ((day (max 0 (min (org-timegrid--last-day-index) day)))
-         (minute (org-timegrid--snap-minute minute))
+         (minute (org-timegrid--visible-minute minute))
          (lane (or lane 0))
          (candidates (org-timegrid--blocks-starting-at day minute))
          (selected (and candidates
@@ -3575,7 +3581,8 @@ the cursor never moves to satisfy the scroll."
                 (let ((next (1+ (org-timegrid--cursor-state-lane cursor)))
                       (rows (org-timegrid--all-day-visible-rows)))
                   (if (> next rows)
-                      (org-timegrid--set-cursor (org-timegrid--cursor-state-day cursor) 0)
+                      (org-timegrid--set-cursor (org-timegrid--cursor-state-day cursor)
+                                                (* 60 org-timegrid-start-hour))
                     (org-timegrid--set-all-day-cursor
                      (org-timegrid--cursor-state-day cursor) next)))
               (org-timegrid--set-cursor
@@ -3599,7 +3606,8 @@ the cursor never moves to satisfy the scroll."
               (org-timegrid--set-all-day-cursor
                (org-timegrid--cursor-state-day cursor)
                (max 0 (1- (org-timegrid--cursor-state-lane cursor)))))
-             ((= (org-timegrid--cursor-state-minute cursor) 0)
+             ((= (org-timegrid--cursor-state-minute cursor)
+                 (* 60 org-timegrid-start-hour))
               (org-timegrid--set-all-day-cursor
                (org-timegrid--cursor-state-day cursor)
                (org-timegrid--all-day-visible-rows)))
@@ -3668,11 +3676,12 @@ last lane, or where there is only one, it moves by a day."
   (org-timegrid-cursor-forward-day (- (or count 1))))
 
 (defun org-timegrid-cursor-day-start ()
-  "Move the cursor to midnight in its own day."
+  "Move the cursor to the first visible slot in its own day."
   (interactive)
   (unless (org-timegrid--reveal-cursor)
     (org-timegrid--set-cursor
-     (org-timegrid--cursor-state-day (org-timegrid--cursor)) 0))
+     (org-timegrid--cursor-state-day (org-timegrid--cursor))
+     (* 60 org-timegrid-start-hour)))
   (org-timegrid--cursor-moved))
 
 (defun org-timegrid-cursor-day-end ()
@@ -3681,7 +3690,8 @@ last lane, or where there is only one, it moves by a day."
   (unless (org-timegrid--reveal-cursor)
     (org-timegrid--set-cursor
      (org-timegrid--cursor-state-day (org-timegrid--cursor))
-                              (- (* 60 24) org-timegrid-slot-minutes)))
+                              (- (* 60 org-timegrid-end-hour)
+                                 org-timegrid-slot-minutes)))
   (org-timegrid--cursor-moved))
 
 (defun org-timegrid--page-minutes (&optional window)
