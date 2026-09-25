@@ -589,6 +589,20 @@ not itself part of the region."
           (point (org-timegrid--cursor-calendar-minute)))
       (cons (min mark point) (max mark point)))))
 
+(defun org-timegrid--region-message ()
+  "Return the active calendar region as a readable time range."
+  (when-let* ((range (org-timegrid--region-range)))
+    (let ((start (car range))
+          (end (cdr range)))
+      (if (= (floor start 1440) (floor end 1440))
+          (format "%s–%s" (org-timegrid--format-minute start)
+                  (org-timegrid--format-minute end))
+        (format "%s %s–%s %s"
+                (org-timegrid--format-copy-date start)
+                (org-timegrid--format-minute start)
+                (org-timegrid--format-copy-date end)
+                (org-timegrid--format-minute end))))))
+
 (defun org-timegrid-set-mark-command ()
   "Set or deactivate the calendar mark at the cursor."
   (interactive)
@@ -599,7 +613,9 @@ not itself part of the region."
           (org-timegrid--cursor-calendar-minute)
           (org-timegrid--calendar-state-region-active org-timegrid--state) t))
   (org-timegrid--render-ui-change)
-  (message (if (org-timegrid-region-active-p) "Mark set" "Mark deactivated")))
+  (if (org-timegrid-region-active-p)
+      (message "%s" (org-timegrid--region-message))
+    (message nil)))
 
 (defun org-timegrid-exchange-point-and-mark ()
   "Exchange the calendar cursor and its remembered mark."
@@ -616,7 +632,8 @@ not itself part of the region."
     (setf (org-timegrid--calendar-state-mark org-timegrid--state) point
           (org-timegrid--calendar-state-region-active org-timegrid--state) t
           (org-timegrid--calendar-state-cursor-visible org-timegrid--state) t)
-    (org-timegrid--refresh)))
+    (org-timegrid--refresh)
+    (message "%s" (org-timegrid--region-message))))
 
 (defun org-timegrid--set-cursor (day minute &optional lane)
   "Move the cursor to DAY and MINUTE, clamped to the visible week.
@@ -3416,8 +3433,11 @@ Leave the first non-motion event for the gesture loop to process."
   "Render a cursor/selection model change and keep it visible."
   (org-timegrid--render-ui-change)
   (org-timegrid--scroll-cursor-into-view)
-  (when-let* ((block (org-timegrid--block-at-cursor)))
-    (message "%s" (org-timegrid--block-details block))))
+  (if (org-timegrid-region-active-p)
+      (message "%s" (org-timegrid--region-message))
+    (if-let* ((block (org-timegrid--block-at-cursor)))
+        (message "%s" (org-timegrid--block-details block))
+      (message nil))))
 
 (defun org-timegrid--scroll-cursor-into-view ()
   "Scroll the minimum amount needed to make the whole cursor slot visible."
@@ -3438,14 +3458,24 @@ Leave the first non-motion event for the gesture loop to process."
         (org-timegrid--set-vscroll
          window (max 0 (min maximum (- bottom body)))))))))
 
+(defvar-local org-timegrid--recenter-position nil
+  "Last cursor alignment used by `org-timegrid-recenter'.")
+
 (defun org-timegrid-recenter ()
-  "Scroll the cursor's slot to the middle of the window, leaving it put.
+  "Cycle the cursor's slot through middle, top, and bottom of the window.
 Ordinary motion scrolls only as far as it must, which keeps the cursor at
 an edge after a long run; this is the view half of that on its own, so
 the cursor never moves to satisfy the scroll."
   (interactive)
-  (let ((cursor (org-timegrid--ensure-cursor))
+  (let ((position (if (eq last-command 'org-timegrid-recenter)
+                      (pcase org-timegrid--recenter-position
+                        ('middle 'top)
+                        ('top 'bottom)
+                        (_ 'middle))
+                    'middle))
+        (cursor (org-timegrid--ensure-cursor))
         (window (get-buffer-window (current-buffer) t)))
+    (setq org-timegrid--recenter-position position)
     (when (window-live-p window)
       (let* ((scale (org-timegrid--pixels-per-minute))
              (top (+ (org-timegrid--grid-top-inset)
@@ -3457,9 +3487,13 @@ the cursor never moves to satisfy the scroll."
         (org-timegrid--set-vscroll
          window
          (max 0 (min maximum
-                     (round (- top (/ (- body (* org-timegrid-slot-minutes
-                                                scale))
-                                      2))))))))))
+                     (round (- top
+                               (pcase position
+                                 ('top 0)
+                                 ('bottom (- body (* org-timegrid-slot-minutes
+                                                     scale)))
+                                 (_ (/ (- body (* org-timegrid-slot-minutes
+                                                scale)) 2))))))))))))
 
 (defun org-timegrid--move-cursor (minutes days)
   "Move the cursor by MINUTES and DAYS, revealing it first when hidden."
@@ -4528,7 +4562,8 @@ where it was left.  Only an explicit refresh forgets it."
       (setf (org-timegrid--calendar-state-region-active org-timegrid--state) nil)
     (setf (org-timegrid--calendar-state-preview org-timegrid--state) nil
           (org-timegrid--calendar-state-cursor-visible org-timegrid--state) nil))
-  (org-timegrid--render-ui-change))
+  (org-timegrid--render-ui-change)
+  (message nil))
 
 (defun org-timegrid-wheel-up (event)
   "Scroll the SVG upward in response to EVENT."
