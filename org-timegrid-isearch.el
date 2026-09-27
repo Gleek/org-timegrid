@@ -3,7 +3,7 @@
 ;; Copyright (C) 2026 Umar Ahmad
 ;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
-;; Version: 0.1.0
+;; Version: 0.0.1
 ;; Keywords: calendar, outlines, convenience
 ;; URL: https://github.com/Gleek/org-timegrid
 ;; This file is not part of GNU Emacs.

@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.0.1 — 2026-09-27
+- Added `org-timegrid-range-alignment`: set it to `center` to center today or a chosen date, with even day counts placing it just right of center. The default remains `week`.
+- Opening the calendar now centers the current time vertically on first display; later visits retain the viewport. Going to today also centers the current time, and manual refresh reloads events and returns to today.
+- The calendar cursor now stays within the configured visible hours.
+- Repeating events now display a repeat icon in both timed blocks and the all-day rail.
+- `C-c C-o` now runs Org's open-at-point command on the selected calendar entry's heading.
+- The active region's time range now appears in the echo area while setting the mark, moving, or exchanging point and mark.
+- Fixed isearch matching across adjacent event titles.
+- Static calendar tiles now share one image map calculation to reduce rendering work.
+
 ## 2026-09-20
 - Calendar regions now treat point and mark as boundaries, matching normal Emacs regions in both movement directions.
 - Moving and resizing events now redraw immediately from the updated in-memory state instead of reloading the Org backend after every edit.

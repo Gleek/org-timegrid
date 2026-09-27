@@ -4,7 +4,7 @@
 
 ;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
-;; Version: 0.1.0
+;; Version: 0.0.1
 ;; Package-Requires: ((emacs "29.1") (org "9.6"))
 ;; Keywords: calendar, outlines, convenience
 ;; URL: https://github.com/Gleek/org-timegrid
