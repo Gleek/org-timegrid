@@ -55,7 +55,7 @@ finite horizon.  Events in the horizon are fetched once per search."
       (goto-char (1+ (aref org-timegrid--tile-markers 0)))
       (dolist (block (org-timegrid--ordered-blocks))
         (let* ((start (point))
-               (text (concat (or (org-timegrid-block-title block) "") "\0")))
+               (text (concat (or (org-timegrid-block-title block) "") "\n")))
           (insert (propertize
                    text 'display ""
                    'org-timegrid-isearch-block block
