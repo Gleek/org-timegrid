@@ -1,6 +1,6 @@
 ;;; org-timegrid-android-font.el --- Generated Android path font -*- lexical-binding: t; -*-
 
-;; Author: The Noto Project Authors
+;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Assisted-by: Codex:gpt-5.6-sol
 ;; SPDX-License-Identifier: OFL-1.1
 ;; Attribution above covers the generated Lisp wrapper, not the font design.

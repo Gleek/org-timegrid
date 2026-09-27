@@ -1,0 +1,30 @@
+name: melpazoid
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+      - name: Install melpazoid
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes emacs
+          git clone --depth 1 https://github.com/riscy/melpazoid.git "$RUNNER_TEMP/melpazoid"
+      - name: Lint package
+        env:
+          LOCAL_REPO: ${{ github.workspace }}
+          RECIPE: '(org-timegrid :fetcher github :repo "Gleek/org-timegrid" :files (:defaults ("LICENSES" "LICENSES/NotoSans-OFL.txt")))'
+          WARN_IS_ERROR: 'false'
+        run: make -C "$RUNNER_TEMP/melpazoid"

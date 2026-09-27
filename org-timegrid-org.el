@@ -1289,38 +1289,22 @@ When HEADING is non-nil, move to the containing Org heading first."
   (org-timegrid-org-command #'org-archive-subtree-default)
   "Archive the selected calendar entry, then refresh the calendar.")
 
-(keymap-set org-timegrid-mode-map ":" #'org-timegrid-org-set-tags)
-(keymap-set org-timegrid-mode-map "C-c C-q" #'org-timegrid-org-set-tags)
-(keymap-set org-timegrid-mode-map "C-c C-t" #'org-timegrid-org-todo)
-(keymap-set org-timegrid-mode-map "C-c C-o" #'org-timegrid-org-open-at-point)
-(keymap-set org-timegrid-mode-map "," #'org-timegrid-org-priority)
-(keymap-set org-timegrid-mode-map "C-c ," #'org-timegrid-org-priority)
-(keymap-set org-timegrid-mode-map "i" #'org-timegrid-org-clock-in)
-(keymap-set org-timegrid-mode-map "O" #'org-timegrid-org-clock-out)
-(keymap-set org-timegrid-mode-map "z" #'org-timegrid-org-add-note)
-(keymap-set org-timegrid-mode-map "C-c C-z" #'org-timegrid-org-add-note)
-(keymap-set org-timegrid-mode-map "C-c C-x e" #'org-timegrid-org-set-effort)
-(keymap-set org-timegrid-mode-map "C-c C-w" #'org-timegrid-org-refile)
-(keymap-set org-timegrid-mode-map "$" #'org-timegrid-org-archive)
-
-(defvar org-timegrid-org-backend nil
+(defvar org-timegrid-org-backend
+  (org-timegrid-backend-create
+   :name "Org"
+   :list-function #'org-timegrid-org--list-events
+   :create-function #'org-timegrid-org--create-event
+   :update-function #'org-timegrid-org--update-event-range
+   :delete-function #'org-timegrid-org--remove-event
+   :delete-entry-function #'org-timegrid-org--remove-entry
+   :undo-function #'org-timegrid-org--undo
+   :transaction-function #'org-timegrid-org--transaction
+   :entry-empty-function #'org-timegrid-org--entry-empty-p
+   :entry-key-function #'org-timegrid-org--entry-key
+   :visit-function #'org-timegrid-org--visit-event
+   :read-entry-function #'org-timegrid-org-read-entry
+   :read-timestamp-function #'org-timegrid-org-read-timestamp)
   "Org backend used by the integrated Week view.")
-
-(setq org-timegrid-org-backend
-      (org-timegrid-backend-create
-       :name "Org"
-       :list-function #'org-timegrid-org--list-events
-       :create-function #'org-timegrid-org--create-event
-       :update-function #'org-timegrid-org--update-event-range
-       :delete-function #'org-timegrid-org--remove-event
-       :delete-entry-function #'org-timegrid-org--remove-entry
-       :undo-function #'org-timegrid-org--undo
-       :transaction-function #'org-timegrid-org--transaction
-       :entry-empty-function #'org-timegrid-org--entry-empty-p
-       :entry-key-function #'org-timegrid-org--entry-key
-       :visit-function #'org-timegrid-org--visit-event
-       :read-entry-function #'org-timegrid-org-read-entry
-       :read-timestamp-function #'org-timegrid-org-read-timestamp))
 
 (defun org-timegrid-org-read-timestamp (absolute-start duration)
   "Read a start, and possibly a duration, through the Org date prompt.

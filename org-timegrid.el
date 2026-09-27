@@ -364,36 +364,17 @@ The title stays fixed and the date row follows only the frame's base font."
                 #'org-timegrid-ignore-double-press)
     (define-key map [header-line mouse-1] #'org-timegrid-header-click)
     (define-key map [header-line double-mouse-1] #'org-timegrid-header-visit)
+    (define-key map [down-mouse-1] #'org-timegrid-header-press)
+    (define-key map [double-down-mouse-1] #'org-timegrid-ignore-double-press)
+    (define-key map [mouse-1] #'org-timegrid-header-click)
+    (define-key map [double-mouse-1] #'org-timegrid-header-visit)
+    (dolist (area '(calendar-rail-block calendar-rail-resize))
+      (define-key map (vector area 'down-mouse-1) #'org-timegrid-header-press)
+      (define-key map (vector area 'double-down-mouse-1) #'org-timegrid-ignore-double-press)
+      (define-key map (vector area 'mouse-1) #'org-timegrid-header-click)
+      (define-key map (vector area 'double-mouse-1) #'org-timegrid-header-visit))
     map)
   "Mouse map installed directly on the sticky calendar header image.")
-;; Refresh an existing map when this source is evaluated in a live Emacs.
-;; Header-line events arrive prefixed through the mode map but unprefixed
-;; through the image string's `keymap' property, so support both forms.
-(define-key org-timegrid--header-map [down-mouse-1]
-            #'org-timegrid-header-press)
-(define-key org-timegrid--header-map [double-down-mouse-1]
-            #'org-timegrid-ignore-double-press)
-(define-key org-timegrid--header-map [mouse-1]
-            #'org-timegrid-header-click)
-(define-key org-timegrid--header-map [double-mouse-1]
-            #'org-timegrid-header-visit)
-(define-key org-timegrid--header-map [header-line down-mouse-1]
-            #'org-timegrid-header-press)
-(define-key org-timegrid--header-map [header-line double-down-mouse-1]
-            #'org-timegrid-ignore-double-press)
-(define-key org-timegrid--header-map [header-line mouse-1]
-            #'org-timegrid-header-click)
-(define-key org-timegrid--header-map [header-line double-mouse-1]
-            #'org-timegrid-header-visit)
-(dolist (area '(calendar-rail-block calendar-rail-resize))
-  (define-key org-timegrid--header-map (vector area 'down-mouse-1)
-              #'org-timegrid-header-press)
-  (define-key org-timegrid--header-map (vector area 'double-down-mouse-1)
-              #'org-timegrid-ignore-double-press)
-  (define-key org-timegrid--header-map (vector area 'mouse-1)
-              #'org-timegrid-header-click)
-  (define-key org-timegrid--header-map (vector area 'double-mouse-1)
-              #'org-timegrid-header-visit))
 (defvar-local org-timegrid--image-height nil)
 (defvar-local org-timegrid--last-width nil)
 (defvar-local org-timegrid--pointer-overlay nil)
@@ -4545,8 +4526,8 @@ the duration is asked for separately, prefilled with the current one."
        (list
         ["Create block…" org-timegrid-create-at-cursor t]
         ["Paste" org-timegrid-yank
-         (ignore-errors
-           (get-text-property 0 'org-timegrid-payload (current-kill 0 t)))])))))
+         (and kill-ring
+              (get-text-property 0 'org-timegrid-payload (car kill-ring)))])))))
 
 (defun org-timegrid-context-menu (event)
   "Select the calendar location at EVENT and show its action menu."
@@ -4700,6 +4681,18 @@ not hold for a buffer made of tall image glyphs."
   (interactive)
   (org-timegrid-goto-today t))
 
+;; Org commands are loaded only when one of their bindings is used.
+(autoload 'org-timegrid-org-set-tags "org-timegrid-org" nil t)
+(autoload 'org-timegrid-org-todo "org-timegrid-org" nil t)
+(autoload 'org-timegrid-org-open-at-point "org-timegrid-org" nil t)
+(autoload 'org-timegrid-org-priority "org-timegrid-org" nil t)
+(autoload 'org-timegrid-org-clock-in "org-timegrid-org" nil t)
+(autoload 'org-timegrid-org-clock-out "org-timegrid-org" nil t)
+(autoload 'org-timegrid-org-add-note "org-timegrid-org" nil t)
+(autoload 'org-timegrid-org-set-effort "org-timegrid-org" nil t)
+(autoload 'org-timegrid-org-refile "org-timegrid-org" nil t)
+(autoload 'org-timegrid-org-archive "org-timegrid-org" nil t)
+
 (defvar org-timegrid-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map special-mode-map)
@@ -4832,79 +4825,20 @@ not hold for a buffer made of tall image glyphs."
     (keymap-set map "j" #'org-timegrid-goto-date)
     (keymap-set map "." #'org-timegrid-goto-today)
     (keymap-set map "q" #'quit-window)
+    (keymap-set map ":" #'org-timegrid-org-set-tags)
+    (keymap-set map "C-c C-q" #'org-timegrid-org-set-tags)
+    (keymap-set map "C-c C-t" #'org-timegrid-org-todo)
+    (keymap-set map "C-c C-o" #'org-timegrid-org-open-at-point)
+    (keymap-set map "," #'org-timegrid-org-priority)
+    (keymap-set map "C-c ," #'org-timegrid-org-priority)
+    (keymap-set map "i" #'org-timegrid-org-clock-in)
+    (keymap-set map "O" #'org-timegrid-org-clock-out)
+    (keymap-set map "z" #'org-timegrid-org-add-note)
+    (keymap-set map "C-c C-z" #'org-timegrid-org-add-note)
+    (keymap-set map "C-c C-x e" #'org-timegrid-org-set-effort)
+    (keymap-set map "C-c C-w" #'org-timegrid-org-refile)
+    (keymap-set map "$" #'org-timegrid-org-archive)
     map))
-
-;; Keep reevaluation in a running Emacs from retaining the previous bindings.
-(dolist (key '("M-S-<down>" "M-S-<up>" "M-S-<right>" "M-S-<left>"
-               "M-S-s-<right>" "M-S-s-<left>"))
-  (keymap-unset org-timegrid-mode-map key t))
-(keymap-set org-timegrid-mode-map "M-<down>" #'org-timegrid-move-later)
-(keymap-set org-timegrid-mode-map "M-<up>" #'org-timegrid-move-earlier)
-(keymap-set org-timegrid-mode-map "M-<right>" #'org-timegrid-move-next-day)
-(keymap-set org-timegrid-mode-map "M-<left>" #'org-timegrid-move-previous-day)
-(keymap-set org-timegrid-mode-map "C-x +" #'text-scale-adjust)
-(keymap-set org-timegrid-mode-map "C-SPC" #'org-timegrid-set-mark-command)
-(keymap-set org-timegrid-mode-map "C-x C-x" #'org-timegrid-exchange-point-and-mark)
-(keymap-set org-timegrid-mode-map "<remap> <set-mark-command>"
-            #'org-timegrid-set-mark-command)
-(keymap-set org-timegrid-mode-map "<remap> <exchange-point-and-mark>"
-            #'org-timegrid-exchange-point-and-mark)
-(keymap-set org-timegrid-mode-map "<remap> <kill-ring-save>"
-            #'org-timegrid-copy-selected)
-(keymap-set org-timegrid-mode-map "<remap> <kill-region>"
-            #'org-timegrid-cut-selected)
-(keymap-set org-timegrid-mode-map "<remap> <yank>" #'org-timegrid-yank)
-(keymap-set org-timegrid-mode-map "<remap> <yank-pop>" #'org-timegrid-yank-pop)
-(keymap-set org-timegrid-mode-map "M-y" #'org-timegrid-yank-pop)
-(keymap-set org-timegrid-mode-map "<remap> <undo-fu-only-undo>"
-            #'org-timegrid-undo)
-(keymap-set org-timegrid-mode-map "<remap> <undo-fu-only-redo>"
-            #'org-timegrid-redo)
-(keymap-set org-timegrid-mode-map "<remap> <undo-tree-undo>"
-            #'org-timegrid-undo)
-(keymap-set org-timegrid-mode-map "<remap> <undo-tree-redo>"
-            #'org-timegrid-redo)
-(keymap-unset org-timegrid-mode-map "M-s-<right>" t)
-(keymap-unset org-timegrid-mode-map "M-s-<left>" t)
-(keymap-set org-timegrid-mode-map "S-<right>" #'org-timegrid-grow-all-day-end)
-(keymap-set org-timegrid-mode-map "S-<left>" #'org-timegrid-shrink-all-day-end)
-(keymap-set org-timegrid-mode-map "C-S-<left>" #'org-timegrid-grow-all-day-start)
-(keymap-set org-timegrid-mode-map "C-S-<right>" #'org-timegrid-shrink-all-day-start)
-;; These live outside the `defvar' initializer so evaluating an updated
-;; package installs them in an already-running Emacs as well.
-(define-key org-timegrid-mode-map [s-down-mouse-1]
-            #'org-timegrid-press)
-(define-key org-timegrid-mode-map [S-down-mouse-1]
-            #'org-timegrid-press)
-(define-key org-timegrid-mode-map [double-down-mouse-1]
-            #'org-timegrid-ignore-double-press)
-(dolist (area '(calendar-block calendar-resize))
-  (define-key org-timegrid-mode-map (vector area 's-down-mouse-1)
-              #'org-timegrid-press)
-  (define-key org-timegrid-mode-map (vector area 'S-down-mouse-1)
-              #'org-timegrid-press)
-  (define-key org-timegrid-mode-map (vector area 'double-down-mouse-1)
-              #'org-timegrid-ignore-double-press)
-  (define-key org-timegrid-mode-map (vector area 'down-mouse-3)
-              #'org-timegrid-context-menu)
-  (define-key org-timegrid-mode-map (vector area 'mouse-movement)
-              #'org-timegrid-pointer-feedback))
-(define-key org-timegrid-mode-map [mouse-movement]
-            #'org-timegrid-pointer-feedback)
-(define-key org-timegrid-mode-map [down-mouse-3]
-            #'org-timegrid-context-menu)
-(define-key org-timegrid-mode-map [header-line mouse-1]
-            #'org-timegrid-header-click)
-(define-key org-timegrid-mode-map [header-line down-mouse-1]
-            #'org-timegrid-header-press)
-(define-key org-timegrid-mode-map [header-line double-down-mouse-1]
-            #'org-timegrid-ignore-double-press)
-(define-key org-timegrid-mode-map [header-line s-down-mouse-1]
-            #'org-timegrid-header-press)
-(define-key org-timegrid-mode-map [header-line S-down-mouse-1]
-            #'org-timegrid-header-press)
-(define-key org-timegrid-mode-map [header-line double-mouse-1]
-            #'org-timegrid-header-visit)
 
 (define-derived-mode org-timegrid-mode special-mode
   "Org Time Grid"
@@ -4923,6 +4857,7 @@ keyboard changes pass through the same damage-based renderer.
   (setq-local mouse-fine-grained-tracking t)
   (setq-local auto-window-vscroll t)
   (org-timegrid--install-text-scale-hook)
+  (org-timegrid--install-global-hooks)
   (org-timegrid--install-precision-scroll-override)
   (add-hook 'window-size-change-functions
             #'org-timegrid--window-resized nil t)
@@ -5008,12 +4943,13 @@ Center the current time on first display; later visits retain the view."
           (org-timegrid--schedule-scroll-restore window))))
     buffer))
 
-(add-hook 'enable-theme-functions
-          #'org-timegrid--theme-changed)
-(add-hook 'disable-theme-functions
-          #'org-timegrid--theme-changed)
-(add-hook 'window-buffer-change-functions
-          #'org-timegrid--restore-frame-calendars)
+
+(defun org-timegrid--install-global-hooks ()
+  "Install hooks needed while a calendar is active."
+  (add-hook 'enable-theme-functions #'org-timegrid--theme-changed)
+  (add-hook 'disable-theme-functions #'org-timegrid--theme-changed)
+  (add-hook 'window-buffer-change-functions
+            #'org-timegrid--restore-frame-calendars))
 
 (provide 'org-timegrid)
 (require 'org-timegrid-isearch)
