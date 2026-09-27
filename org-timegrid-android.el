@@ -1,8 +1,35 @@
 ;;; org-timegrid-android.el --- Android support for org-timegrid -*- lexical-binding: t; -*-
 
+;; Copyright (C) 2026 Umar Ahmad
+;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
+;; Assisted-by: Codex:gpt-5.6-sol
+;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
+;; Version: 0.0.1
+;; Keywords: calendar, outlines, convenience
+;; URL: https://github.com/Gleek/org-timegrid
+
+;; This file is not part of GNU Emacs.
+
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+;;; Commentary:
+
 ;; Android Emacs's bundled librsvg cannot render SVG text elements.  Render
 ;; text using pre-generated Noto Sans outlines while leaving other platforms
 ;; untouched.
+
+;;; Code:
 
 (require 'org-timegrid)
 (require 'org-timegrid-android-font)
@@ -66,7 +93,7 @@ Enable this to use keyboard commands that have no touch gesture."
          (x (cond ((equal anchor "middle") (- x (/ width 2)))
                   ((equal anchor "end") (- x width))
                   (t x)))
-         (outer (if-let ((clip-path (plist-get args :clip-path)))
+         (outer (if-let* ((clip-path (plist-get args :clip-path)))
                     (svg-node svg 'g :clip-path clip-path)
                   svg))
          (group (svg-node
@@ -105,7 +132,7 @@ Enable this to use keyboard commands that have no touch gesture."
               (window (posn-window position))
               ((window-live-p window)))
     (with-selected-window window
-      (when-let ((target (org-timegrid--target position)))
+      (when-let* ((target (org-timegrid--target position)))
         (aset data 2 target)
         (org-timegrid--set-preview
          (org-timegrid--proposal (aref data 1) target nil))))))
@@ -192,7 +219,7 @@ Enable this to use keyboard commands that have no touch gesture."
     (define-key org-timegrid--header-map (vector area 'touchscreen-scroll)
                 #'org-timegrid-android-scroll))
   (add-hook 'org-timegrid-mode-hook #'org-timegrid-android--configure-buffer)
-  (when-let ((buffer (get-buffer org-timegrid-buffer-name)))
+  (when-let* ((buffer (get-buffer org-timegrid-buffer-name)))
     (with-current-buffer buffer
       (org-timegrid-android--configure-buffer))))
 

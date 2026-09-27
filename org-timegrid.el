@@ -3,6 +3,7 @@
 ;; Copyright (C) 2026 Umar Ahmad
 
 ;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
+;; Assisted-by: Codex:gpt-5.6-sol
 ;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Version: 0.0.1
 ;; Package-Requires: ((emacs "29.1") (org "9.6"))
@@ -302,7 +303,7 @@ Typography and geometry share this factor so their alignment is preserved."
   (* pixels (org-timegrid--frame-font-factor window)))
 
 (defun org-timegrid--single-day-label-factor (&optional window)
-  "Return the unified scale for the one-day weekday and date label."
+  "Return the unified scale for WINDOW's one-day weekday and date label."
   (* (plist-get org-timegrid-single-day-label-style :scale)
      (max (org-timegrid--frame-font-factor window)
           (org-timegrid--zoom-factor window))))
@@ -1269,6 +1270,9 @@ size and need no gradient definition."
     (svg width height column-width palette font-family start-minute end-minute
          scale days &optional week-start)
   "Draw the shared timed-grid background into SVG.
+WIDTH, HEIGHT and COLUMN-WIDTH specify pixel dimensions.
+PALETTE and FONT-FAMILY control its appearance; START-MINUTE, END-MINUTE
+and SCALE determine the time range and vertical scale.
 DAYS controls the columns; WEEK-START enables weekend shading."
   (svg-rectangle svg 0 0 width height :fill (plist-get palette :background))
   (svg-rectangle svg 0 0 (org-timegrid--label-width) height
@@ -1702,13 +1706,14 @@ band under the grid."
      org-timegrid--tile-width height y org-timegrid--tile-width height
      org-timegrid--static-inner (or fragment ""))))
 
-(defun org-timegrid--tile-image-map (tile &optional image-map)
-  "Return the production image map clipped and translated for TILE."
+(defun org-timegrid--tile-image-map (tile &optional hotspots)
+  "Return HOTSPOTS clipped and translated for TILE.
+When HOTSPOTS is nil, generate the production image map."
   (let* ((bounds (org-timegrid--tile-bounds tile))
          (top (car bounds))
          (bottom (min org-timegrid--image-height (+ top (cdr bounds))))
          translated)
-    (dolist (entry (or image-map (org-timegrid--image-map)))
+    (dolist (entry (or hotspots (org-timegrid--image-map)))
       (pcase-let* ((`(,shape ,id ,properties) entry)
                    (`(rect . ((,left . ,y) . (,right . ,end))) shape))
         (when (and (< y bottom) (> end top))
@@ -1718,9 +1723,10 @@ band under the grid."
                 translated))))
     (nreverse translated)))
 
-(defun org-timegrid--make-tile-image (tile &optional fragment image-map)
-  "Create TILE's image, adding optional dynamic SVG FRAGMENT."
-  (let ((map (org-timegrid--tile-image-map tile image-map))
+(defun org-timegrid--make-tile-image (tile &optional fragment hotspots)
+  "Create TILE's image, adding optional dynamic SVG FRAGMENT.
+Use HOTSPOTS as the image map when provided."
+  (let ((map (org-timegrid--tile-image-map tile hotspots))
         ;; The current-time marker is calendar chrome, so paint it after
         ;; selection and preview fragments instead of letting those cover it.
         (fragment (concat fragment
@@ -1759,10 +1765,10 @@ band under the grid."
   (org-timegrid--update-clock-fragment)
   (setq-local org-timegrid--static-images
               (make-vector org-timegrid--tile-count nil))
-  (let ((image-map (org-timegrid--image-map)))
+  (let ((hotspots (org-timegrid--image-map)))
     (dotimes (tile org-timegrid--tile-count)
       (aset org-timegrid--static-images tile
-            (org-timegrid--make-tile-image tile nil image-map)))))
+            (org-timegrid--make-tile-image tile nil hotspots)))))
 
 (defun org-timegrid--dynamic-blocks ()
   "Return laid-out blocks belonging to the current dynamic layer."
@@ -2149,7 +2155,9 @@ the grid by the width of whatever else is there."
 
 (defun org-timegrid--draw-day-label
     (svg day-name day-number center baseline factor todayp palette font-family)
-  "Draw one calendar day label centered at CENTER and BASELINE."
+  "Draw DAY-NAME and DAY-NUMBER on SVG at CENTER and BASELINE.
+FACTOR sets the scale; TODAYP highlights today.
+PALETTE and FONT-FAMILY determine the label's appearance."
   (if todayp
       (let* ((name-width (* factor 8.0 (string-width day-name)))
              (circle-radius (* factor 12))
@@ -4297,7 +4305,7 @@ time-grid cells prompt for the timed duration as usual."
       (nreverse split))))
 
 (defun org-timegrid--selection-text (selection)
-  "Return readable kill-ring text for SELECTION."
+  "Return readable clipboard text for SELECTION."
   (let* ((events (plist-get selection :events))
          (items
           (sort
@@ -4322,7 +4330,7 @@ time-grid cells prompt for the timed duration as usual."
                days org-timegrid-copy-day-separator)))
 
 (defun org-timegrid--clipboard-string (selection cut)
-  "Return a readable kill-ring string for SELECTION, marked as CUT."
+  "Return a readable clipboard string for SELECTION, marked as CUT."
   (let* ((events (plist-get selection :events))
          (origin (plist-get selection :start))
          (text (org-timegrid--selection-text selection)))
@@ -4429,7 +4437,8 @@ With ADD-OCCURRENCE, add timestamps to their original entries."
                (if (= (length items) 1) "" "s")))))
 
 (defun org-timegrid-yank-pop (&optional count)
-  "Replace the preceding calendar yank with another kill-ring entry."
+  "Replace the preceding calendar yank with another `kill-ring' entry.
+COUNT selects how many entries to advance."
   (interactive "p")
   (unless (and org-timegrid--last-yank-origin
                (memq last-command '(org-timegrid-yank org-timegrid-yank-pop)))

@@ -74,7 +74,7 @@ def emit_table(name, glyphs):
     lines = [f"(defconst {name}", "  '("]
     for codepoint, advance, path in glyphs:
         lines.append(f"    ({codepoint} {advance} {lisp_string(path)})")
-    lines.append("    ))\n")
+    lines[-1] += "))\n"
     return "\n".join(lines)
 
 
@@ -105,11 +105,19 @@ def main():
     family, version, copyright_notice = metadata(args.font)
     text = """;;; org-timegrid-android-font.el --- Generated Android path font -*- lexical-binding: t; -*-
 
+;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
+;; Assisted-by: Codex:gpt-5.6-sol
+;; Attribution above covers the generated Lisp wrapper, not the font design.
+
+;;; Commentary:
+
 """
     text += (f";; Generated from {family}, {version}, at weights "
              f"{args.regular_weight:g} and {args.bold_weight:g}.\n")
     text += ";; Do not edit by hand.\n"
     text += comment(copyright_notice) + "\n"
+    text += ";; Preserve the source font's license when distributing this resource.\n\n"
+    text += ";;; Code:\n\n"
     text += f"(defconst org-timegrid-android-font-units-per-em {units})\n\n"
     text += emit_table("org-timegrid-android-font-regular", regular)
     text += emit_table("org-timegrid-android-font-bold", bold)

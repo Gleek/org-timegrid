@@ -76,6 +76,9 @@ inside `org-directory`, and enables the optional day strip in Org Agenda.
   ;; The symbol `agenda' means: read events from `org-agenda-files'.
   (setq org-timegrid-org-files 'agenda
 
+        ;; Center today (or a date you jump to) in the visible range.
+        org-timegrid-range-alignment 'center
+
         ;; Recommended compact scale; use 1.0 to match Emacs's default font.
         org-timegrid-default-zoom 0.7
 
