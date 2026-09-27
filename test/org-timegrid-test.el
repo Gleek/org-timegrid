@@ -322,6 +322,7 @@
 
 (ert-deftest org-timegrid-test-range-start-keeps-date-in-visible-range ()
   (let ((org-timegrid-days 3)
+        (org-timegrid-range-alignment 'week)
         (calendar-week-start-day 0))
     (dolist (case '(((9 1 2026) (8 30 2026) week-start-visible)
                     ((9 2 2026) (8 31 2026) trailing-range)))
@@ -330,6 +331,19 @@
           (should (= (org-timegrid--range-start
                       (calendar-absolute-from-gregorian date))
                      (calendar-absolute-from-gregorian expected))))))))
+
+(ert-deftest org-timegrid-test-range-start-centers-target-date ()
+  (let ((org-timegrid-range-alignment 'center))
+    (dolist (date '((1 1 2026) (3 1 2028) (9 27 2026)))
+      (let ((absolute (calendar-absolute-from-gregorian date)))
+        (cl-loop for org-timegrid-days from 1 to 7
+                 for column in '(1 2 2 3 3 4 4)
+                 do (should (= (org-timegrid--range-start absolute)
+                               (- absolute (1- column)))))))
+    (let ((org-timegrid-days 7))
+      (should (= (org-timegrid--range-start)
+                 (- (calendar-absolute-from-gregorian
+                     (calendar-current-date)) 3))))))
 
 (ert-deftest org-timegrid-test-load-state-honours-visible-day-count ()
   (let* ((org-timegrid-days 3)

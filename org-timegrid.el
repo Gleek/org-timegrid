@@ -66,10 +66,19 @@
 
 (defcustom org-timegrid-days 7
   "Number of consecutive days displayed in the calendar.
-The initial range ends today unless the current week's first day falls
-within that range; in that case it starts on the week's first day.
+The initial range is positioned using `org-timegrid-range-alignment'.
 The value must be a positive integer."
   :type '(integer :tag "Days"))
+
+(defcustom org-timegrid-range-alignment 'week
+  "How to position the range when opening or jumping to a date.
+With `week', start on `calendar-week-start-day', or end on the target
+date if that week start would leave the target outside the range.
+With `center', place the target date in the middle.  For an even
+number of days, use the column just right of the middle.
+The target date defaults to today."
+  :type '(choice (const :tag "Align to week start" week)
+                 (const :tag "Center target date" center)))
 
 (defcustom org-timegrid-highlight-current-day nil
   "Non-nil means tint today's column in the timed grid."
@@ -81,15 +90,15 @@ The value must be a positive integer."
 
 (defun org-timegrid--range-start (&optional absolute-date)
   "Return the first visible day for a range containing ABSOLUTE-DATE.
-Prefer the configured start of the week when it lies among the trailing
-`org-timegrid-days' dates.  Otherwise end that trailing range on
-ABSOLUTE-DATE."
-  (let* ((absolute (or absolute-date
-                       (calendar-absolute-from-gregorian
-                        (calendar-current-date))))
-         (week-start (org-timegrid-week-start absolute))
-         (trailing-start (- absolute (org-timegrid--last-day-index))))
-    (max week-start trailing-start)))
+Position the range according to `org-timegrid-range-alignment'.
+ABSOLUTE-DATE defaults to today."
+  (let ((absolute (or absolute-date
+                      (calendar-absolute-from-gregorian
+                       (calendar-current-date)))))
+    (if (eq org-timegrid-range-alignment 'center)
+        (- absolute (/ org-timegrid-days 2))
+      (max (org-timegrid-week-start absolute)
+           (- absolute (org-timegrid--last-day-index))))))
 
 (defcustom org-timegrid-pixels-per-minute 0.9
   "Vertical SVG scale in pixels per minute."
