@@ -9,7 +9,7 @@
 
 ;; Generated from Noto Sans 2.014 at weights 400 and 500.  Do not edit by hand.
 ;; Noto Sans is Copyright 2016 The Noto Project Authors and is distributed
-;; under the SIL Open Font License 1.1; see LICENSES/NotoSans-OFL.txt.
+;; under the SIL Open Font License 1.1; see https://openfontlicense.org/.
 
 ;;; Code:
 
