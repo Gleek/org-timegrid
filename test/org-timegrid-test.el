@@ -4,6 +4,23 @@
 (require 'org-timegrid-org)
 (require 'org-timegrid-agenda)
 
+(ert-deftest org-timegrid-test-keyboard-move-snaps-off-grid-start ()
+  (let* ((block (org-timegrid--make-block 1 3 993 1023 "test"))
+         (first (org-timegrid--operation-block
+                 (org-timegrid--keyboard-proposal block -15 0 nil)))
+         (second (org-timegrid--operation-block
+                  (org-timegrid--keyboard-proposal first -15 0 nil)))
+         (day (org-timegrid--operation-block
+               (org-timegrid--keyboard-proposal block 0 1 nil)))
+         (resize (org-timegrid--operation-block
+                  (org-timegrid--keyboard-proposal block -15 0 'top))))
+    (should (equal (list (org-timegrid-block-start first)
+                         (org-timegrid-block-end first))
+                   '(975 1005)))
+    (should (= (org-timegrid-block-start second) 960))
+    (should (= (org-timegrid-block-start day) 993))
+    (should (= (org-timegrid-block-start resize) 978))))
+
 (defun org-timegrid-test--svg-image-spec (svg &rest properties)
   "Return an image spec for SVG without invoking an image backend."
   (append (list 'image :type 'svg :data
@@ -799,6 +816,23 @@
              (list :start start :end (+ start 1440) :events nil))
             (concat "Mon 14 Sep 2026\n08:00–24:00  Free\n\n"
                     "Tue 15 Sep 2026\n00:00–08:00  Free")))))
+
+(ert-deftest org-timegrid-test-cut-two-headings-keeps-paste-targets ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "* First\n<2026-09-14 Mon 09:00-10:00>\n* Second\n<2026-09-14 Mon 11:00-12:00>\n")
+    (let ((events (org-timegrid-org--buffer-events "test.org"))
+          (org-timegrid-org-auto-save nil))
+      (dolist (event events)
+        (org-timegrid-org--remove-event event))
+      (dolist (event events)
+        (let ((target (org-timegrid-event-source event)))
+          (org-timegrid-org--add-range target
+                                       (org-timegrid-event-start event)
+                                       (org-timegrid-event-end event))))
+      (should (equal (mapcar #'org-timegrid-event-title
+                             (org-timegrid-org--buffer-events "test.org"))
+                     '("First" "Second"))))))
 
 (ert-deftest org-timegrid-test-org-bulk-transaction-undoes-as-one-unit ()
   (with-temp-buffer

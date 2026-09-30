@@ -5,7 +5,7 @@
 ;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Assisted-by: Codex:gpt-5.6-sol
 ;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
-;; Version: 0.0.1
+;; Version: 0.0.2
 ;; Keywords: calendar, outlines, convenience
 ;; URL: https://github.com/Gleek/org-timegrid
 
@@ -853,6 +853,14 @@ gone plans nothing.  Everything after this point treats them alike."
       (org-with-wide-buffer
        (when buffer-read-only
          (user-error "The source Org buffer is read-only"))
+       ;; The cut payload retains this marker for paste.  Keep it on its
+       ;; heading before deleting the timestamp underneath it, and advance
+       ;; it when paste inserts text at the end of the preceding heading.
+       (save-excursion
+         (goto-char marker)
+         (org-back-to-heading t)
+         (set-marker marker (point))
+         (set-marker-insertion-type marker t))
        (undo-boundary)
        (atomic-change-group
          (let ((region (org-timegrid-org--timestamp-region

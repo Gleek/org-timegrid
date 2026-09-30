@@ -4,7 +4,7 @@
 ;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Assisted-by: Codex:gpt-5.6-sol
 ;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
-;; Version: 0.0.1
+;; Version: 0.0.2
 ;; Keywords: calendar, outlines, convenience
 ;; URL: https://github.com/Gleek/org-timegrid
 

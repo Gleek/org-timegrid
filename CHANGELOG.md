@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.0.2 — 2026-09-30
+- Fixed block selection when nearby start times share a cursor slot; navigation now selects blocks directly by ID.
+- Keyboard time moves now snap timed blocks to the configured slot interval while preserving duration. Day moves and resizing retain their existing precision.
+- Fixed cutting and pasting multiple blocks assigning their timestamps to the wrong Org heading.
+- Cleaned up package metadata, autoloads, hooks, and deprecated forms for MELPA; added melpazoid checks in CI.
+
 ## v0.0.1 — 2026-09-27
 - Added `org-timegrid-range-alignment`: set it to `center` to center today or a chosen date, with even day counts placing it just right of center. The default remains `week`.
 - Opening the calendar now centers the current time vertically on first display; later visits retain the viewport. Going to today also centers the current time, and manual refresh reloads events and returns to today.

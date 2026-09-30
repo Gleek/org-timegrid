@@ -5,7 +5,7 @@
 ;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Assisted-by: Codex:gpt-5.6-sol
 ;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
-;; Version: 0.0.1
+;; Version: 0.0.2
 ;; Package-Requires: ((emacs "29.1") (org "9.6"))
 ;; Keywords: calendar, outlines, convenience
 ;; URL: https://github.com/Gleek/org-timegrid
@@ -3753,9 +3753,7 @@ occurs once, at its first visible date."
     result))
 
 (defun org-timegrid--goto-block (block)
-  "Move the cursor to BLOCK's own first slot to select it.
-The lane records which of several blocks sharing that start is meant, so
-co-starting entries stay individually reachable."
+  "Move the cursor to BLOCK's start and select BLOCK by id."
   (let* ((day (max 0 (min (org-timegrid--last-day-index)
                           (org-timegrid-block-day block))))
          (start (org-timegrid-block-start block)))
@@ -3769,17 +3767,10 @@ co-starting entries stay individually reachable."
                            (org-timegrid-block-rail-start laid-out))
                       0)
                   1440)
-           (or (and laid-out (org-timegrid-block-rail-lane laid-out)) 0))
-          ;; Keep selection explicit when the event is hidden by the lane cap.
-          (setf (org-timegrid--calendar-state-selected-id org-timegrid--state)
-                (org-timegrid-block-id block)))
-      (let ((lane (or (cl-position
-                       (org-timegrid-block-id block)
-                       (org-timegrid--blocks-starting-at day start)
-                       :key (lambda (candidate) (org-timegrid-block-id candidate))
-                       :test #'equal)
-                      0)))
-        (org-timegrid--set-cursor day start lane)))
+           (or (and laid-out (org-timegrid-block-rail-lane laid-out)) 0)))
+      (org-timegrid--set-cursor day start))
+    (setf (org-timegrid--calendar-state-selected-id org-timegrid--state)
+          (org-timegrid-block-id block))
     (setf (org-timegrid--calendar-state-cursor-visible org-timegrid--state) t)
     (org-timegrid--cursor-moved)
     (org-timegrid--scroll-cursor-into-view)))
@@ -3911,6 +3902,12 @@ lane after an edit changes its layout."
 (defun org-timegrid--keyboard-proposal (block minutes days edge)
   "Return one timed or all-day edit preview for BLOCK.
 MINUTES and DAYS form the interval delta; EDGE selects a resize endpoint."
+  (when (and (null edge) (/= minutes 0)
+             (not (org-timegrid-block-all-day-p block)))
+    (let ((start (org-timegrid-block-start block)))
+      (setq minutes (- (* org-timegrid-slot-minutes
+                          (round (+ start minutes) org-timegrid-slot-minutes))
+                       start))))
   (org-timegrid--operation-create
    :kind (if edge 'resize 'move)
    :block (org-timegrid--transform-block-range
