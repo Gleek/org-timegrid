@@ -23,6 +23,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
+      - uses: astral-sh/setup-uv@v9.0.0
       - name: Install melpazoid
         run: |
           sudo apt-get update
@@ -33,4 +34,5 @@ jobs:
           LOCAL_REPO: ${{ github.workspace }}
           RECIPE: '(org-timegrid :fetcher github :repo "Gleek/org-timegrid")'
           WARN_IS_ERROR: 'false'
+          RUNNER: 'uv run'
         run: make -C "$RUNNER_TEMP/melpazoid"
