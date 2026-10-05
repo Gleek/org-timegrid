@@ -4,6 +4,18 @@
 (require 'org-timegrid-org)
 (require 'org-timegrid-agenda)
 
+(ert-deftest org-timegrid-test-isearch-reload-preserves-custom-bindings ()
+  (should (eq (keymap-lookup org-timegrid-mode-map "C-s")
+              #'org-timegrid-isearch-forward))
+  (should (eq (keymap-lookup org-timegrid-mode-map "C-r")
+              #'org-timegrid-isearch-backward))
+  (let ((org-timegrid-mode-map (copy-keymap org-timegrid-mode-map)))
+    (keymap-set org-timegrid-mode-map "C-s" #'ignore)
+    (keymap-set org-timegrid-mode-map "C-r" #'ignore)
+    (load (expand-file-name "org-timegrid-isearch.el") nil t t)
+    (should (eq (keymap-lookup org-timegrid-mode-map "C-s") #'ignore))
+    (should (eq (keymap-lookup org-timegrid-mode-map "C-r") #'ignore))))
+
 (ert-deftest org-timegrid-test-keyboard-move-snaps-off-grid-start ()
   (let* ((block (org-timegrid--make-block 1 3 993 1023 "test"))
          (first (org-timegrid--operation-block

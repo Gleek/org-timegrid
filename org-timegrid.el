@@ -4746,6 +4746,8 @@ not hold for a buffer made of tall image glyphs."
     (keymap-set map "M-b" #'org-timegrid-previous-week)
     (keymap-set map "M-f" #'org-timegrid-next-week)
     (keymap-set map "g" #'org-timegrid-refresh)
+    (keymap-set map "C-s" #'org-timegrid-isearch-forward)
+    (keymap-set map "C-r" #'org-timegrid-isearch-backward)
     ;; In vanilla Emacs the fully modified `C-x C-+' invokes text scaling,
     ;; while `C-x +' balances windows.  The latter is a convenient calendar-
     ;; local alias and matches how this command is commonly described.

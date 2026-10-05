@@ -231,8 +231,5 @@ finite horizon.  Events in the horizon are fetched once per search."
                          #'org-timegrid--insert-tiles)
   (advice-add 'org-timegrid--insert-tiles :after #'org-timegrid-isearch--index))
 
-(keymap-set org-timegrid-mode-map "C-s" #'org-timegrid-isearch-forward)
-(keymap-set org-timegrid-mode-map "C-r" #'org-timegrid-isearch-backward)
-
 (provide 'org-timegrid-isearch)
 ;;; org-timegrid-isearch.el ends here

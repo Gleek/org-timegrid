@@ -14,6 +14,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Reject top-level key bindings
+        run: |
+          if rg -n '^\((keymap-set|define-key)\s' --glob 'org-timegrid*.el' .; then
+            echo 'Initialize bindings inside the keymap defvar to preserve user customizations.'
+            exit 1
+          fi
       - uses: actions/setup-python@v6
         with:
           python-version: '3.10'
@@ -25,6 +31,6 @@ jobs:
       - name: Lint package
         env:
           LOCAL_REPO: ${{ github.workspace }}
-          RECIPE: '(org-timegrid :fetcher github :repo "Gleek/org-timegrid" :files (:defaults ("LICENSES" "LICENSES/NotoSans-OFL.txt")))'
+          RECIPE: '(org-timegrid :fetcher github :repo "Gleek/org-timegrid")'
           WARN_IS_ERROR: 'false'
         run: make -C "$RUNNER_TEMP/melpazoid"
