@@ -2850,6 +2850,16 @@ SOURCE-EVENT identifies an entry to reuse, and TARGET selects its destination."
         (funcall reader)
       (cons (org-timegrid--read-title) nil))))
 
+(defvar-local org-timegrid--edit-context nil
+  "Backend edit scope retained during consecutive block adjustments.")
+
+(defun org-timegrid--prepare-block-edit (block)
+  "Let BLOCK's backend choose an edit scope before displaying a preview."
+  (when-let* ((event (org-timegrid-block-event block))
+              (prepare (plist-get (org-timegrid-event-metadata event)
+                                  :prepare-edit)))
+    (funcall prepare event)))
+
 (defun org-timegrid--backend-update (block)
   "Ask the active backend to apply BLOCK's new range."
   (let* ((updater (org-timegrid-backend-update-function
@@ -2858,6 +2868,7 @@ SOURCE-EVENT identifies an entry to reuse, and TARGET selects its destination."
          (range (org-timegrid--block-absolute-range block)))
     (unless (and event (functionp updater))
       (user-error "This backend cannot move or resize calendar entries"))
+    (org-timegrid--prepare-block-edit block)
     (condition-case error-data
         (progn
           (org-timegrid--call-update
@@ -2867,13 +2878,16 @@ SOURCE-EVENT identifies an entry to reuse, and TARGET selects its destination."
                 (org-timegrid-event-end event) (cdr range)
                 (org-timegrid-event-all-day event)
                 (eq (org-timegrid-block-time-kind block) 'all-day))
-          (let ((week (org-timegrid--calendar-state-week-start
-                       org-timegrid--state)))
+          (if (plist-get (org-timegrid-event-metadata event) :reload-after-edit)
+              (progn
+                (org-timegrid--refresh-data)
+                (when-let* ((updated (org-timegrid--block (org-timegrid-event-id event))))
+                  (org-timegrid--goto-block updated)))
             (setf (org-timegrid--calendar-state-blocks org-timegrid--state)
                   (org-timegrid-events-to-blocks
                    (org-timegrid--calendar-state-events org-timegrid--state)
-                   week)))
-          (org-timegrid--refresh t))
+                   (org-timegrid--calendar-state-week-start org-timegrid--state)))
+            (org-timegrid--refresh t)))
       (error
        (org-timegrid--refresh-data)
        (signal (car error-data) (cdr error-data))))))
@@ -3942,12 +3956,12 @@ MINUTES and DAYS form the interval delta; EDGE selects a resize endpoint."
         (when-let* ((proposal org-timegrid--keyboard-edit))
           (setq-local org-timegrid--keyboard-edit nil)
           (let* ((block (org-timegrid--operation-block proposal))
-                 (id (org-timegrid-block-id block))
                  (day (org-timegrid-block-day block))
                  (minute (org-timegrid-block-start block)))
             (org-timegrid--apply proposal)
             (org-timegrid--follow-block
-             id day minute (org-timegrid-block-all-day-p block))))))))
+             (org-timegrid-event-id (org-timegrid-block-event block))
+             day minute (org-timegrid-block-all-day-p block))))))))
 
 (defun org-timegrid--schedule-keyboard-commit ()
   "Restart the idle timer that commits keyboard block movement."
@@ -3961,8 +3975,7 @@ MINUTES and DAYS form the interval delta; EDGE selects a resize endpoint."
 
 (defun org-timegrid--commit-before-unrelated-command ()
   "Commit a keyboard edit before running a command outside its edit family."
-  (when (and org-timegrid--keyboard-edit
-             (not (memq this-command
+  (when (not (memq this-command
                         '(org-timegrid-move-later
                           org-timegrid-move-earlier
                           org-timegrid-move-next-day
@@ -3974,8 +3987,9 @@ MINUTES and DAYS form the interval delta; EDGE selects a resize endpoint."
                           org-timegrid-grow-all-day-end
                           org-timegrid-shrink-all-day-end
                           org-timegrid-grow-all-day-start
-                          org-timegrid-shrink-all-day-start))))
-    (org-timegrid--commit-keyboard-edit)))
+                          org-timegrid-shrink-all-day-start)))
+    (org-timegrid--commit-keyboard-edit)
+    (setq org-timegrid--edit-context nil)))
 
 (defun org-timegrid--edit-selected (minutes days edge)
   "Shift the selected block by MINUTES and DAYS.
@@ -3988,6 +4002,7 @@ changes its end.  The cursor follows, so the key can be held down."
          (updater (org-timegrid-backend-update-function org-timegrid--backend)))
     (unless (and (org-timegrid-block-event block) (functionp updater))
       (user-error "This backend cannot move or resize calendar entries"))
+    (org-timegrid--prepare-block-edit block)
     (let* ((all-day (org-timegrid-block-all-day-p block))
            (to-timed (and all-day (/= minutes 0)))
            (proposal (if to-timed

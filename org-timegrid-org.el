@@ -87,6 +87,63 @@ When nil, the calendar omits both the anchor and generated occurrences of
 timestamps with an Org repeater."
   :type 'boolean)
 
+(defcustom org-timegrid-org-repeater-history t
+  "Interpret a heading's timestamps as successive schedule versions.
+Override with TIMEGRID_REPEATER_HISTORY (t or nil), as an inherited heading
+property or a file #+PROPERTY.  Plain timestamps end previous repeaters.
+This convention applies only to Timegrid, not Org Agenda."
+  :type 'boolean)
+
+(defun org-timegrid-org--repeater-history-p ()
+  "Return the repeater history setting at the current heading."
+  (let ((value (org-entry-get nil "TIMEGRID_REPEATER_HISTORY" 'inherit t)))
+    (if value (equal (downcase value) "t")
+      org-timegrid-org-repeater-history)))
+
+(defun org-timegrid-org--history-events (events)
+  "Annotate EVENTS with schedule cutoffs and edit preparation."
+  (when (cl-some (lambda (event)
+                   (plist-get (org-timegrid-event-metadata event) :repeater-type))
+                 events)
+    (let ((ordered (sort (copy-sequence events)
+                         (lambda (a b) (< (org-timegrid-event-start a)
+                                          (org-timegrid-event-start b))))))
+      (cl-loop for tail on ordered
+               for event = (car tail)
+               for next = (cadr tail)
+               for metadata = (org-timegrid-event-metadata event)
+               do (setf (plist-get metadata :history) t
+                        (plist-get metadata :prepare-edit)
+                        #'org-timegrid-org--prepare-history-edit
+                        (plist-get metadata :history-until)
+                        (and next
+                             (if (eq (plist-get metadata :repeater-unit) 'hour)
+                                 (org-timegrid-event-start next)
+                               (* 1440 (floor (org-timegrid-event-start next) 1440))))
+                        (org-timegrid-event-metadata event) metadata))))
+  events)
+
+(defun org-timegrid-org--prepare-history-edit (event &optional deleting)
+  "Return EVENT's scope, prompting once per editing session."
+  (let ((marker (plist-get (org-timegrid-event-source event) :marker)))
+    (unless (and (not deleting)
+                 (equal marker (plist-get org-timegrid--edit-context :marker))
+                 (equal (org-timegrid-event-start event)
+                        (plist-get org-timegrid--edit-context :start)))
+      (let* ((choices '(("just this" . this) ("this and future" . future)
+                        ("all" . all)))
+             (scope (if (plist-get (org-timegrid-event-metadata event) :repeater-type)
+                        (cdr (assoc (completing-read
+                                     (if deleting "Delete repeating block: "
+                                       "Change repeating block: ")
+                                     choices nil t nil nil "this and future")
+                                    choices))
+                      'direct)))
+        (setq org-timegrid--edit-context
+              (list :marker (copy-marker marker)
+                    :start (org-timegrid-event-start event) :scope scope))))
+    (plist-get org-timegrid--edit-context :scope)))
+
 (defcustom org-timegrid-org-show-done t
   "Whether timestamps belonging to done Org headings appear."
   :type 'boolean)
@@ -767,6 +824,14 @@ END is exclusive internally; Org's written date-range endpoint is inclusive."
 (defun org-timegrid-org--update-event-range
     (event start end &optional title time-kind)
   "Update EVENT to START through END, optional TITLE, and TIME-KIND."
+  (if (and (plist-get (org-timegrid-event-metadata event) :history)
+           (not title))
+      (org-timegrid-org--update-history-range event start end time-kind)
+    (org-timegrid-org--update-anchor-range event start end title time-kind)))
+
+(defun org-timegrid-org--update-anchor-range
+    (event start end &optional title time-kind)
+  "Update EVENT's original anchor to START and END."
   (let* ((source (org-timegrid-event-source event))
          (marker (plist-get source :marker))
          (timestamp (org-timegrid-org--timestamp-at-marker marker)))
@@ -825,6 +890,118 @@ END is exclusive internally; Org's written date-range endpoint is inclusive."
     (message "%s %s" (if title "Renamed" "Retimed")
              (org-timegrid-event-title event))))
 
+(defun org-timegrid-org--history-replacement (timestamp start end all-day
+                                                        &optional single cancelled)
+  "Rewrite TIMESTAMP to START and END, optionally as a SINGLE occurrence."
+  (let ((copy (copy-tree timestamp)))
+    (when single
+      (dolist (key '(:repeater-type :repeater-value :repeater-unit))
+        (org-element-put-property copy key nil)))
+    (let ((text (if all-day
+                    (org-timegrid-org--rewrite-all-day-timestamp copy start end)
+                  (org-timegrid-org--rewrite-timestamp copy start end))))
+      (if cancelled
+          (concat "CANCELLED: " (subst-char-in-string
+                                ?> ?\] (subst-char-in-string ?< ?\[ text)))
+        text))))
+
+(defun org-timegrid-org--validate-history-range (event start end all-day scope)
+  "Check that EVENT can be edited to START and END with ALL-DAY and SCOPE."
+  (when (and (eq (plist-get (org-timegrid-event-metadata event) :repeater-unit) 'hour)
+             (not (eq scope 'all)))
+    (user-error "Hourly history repeaters currently support only All edits"))
+  (when (and (not (eq scope 'all))
+             (/= (floor start 1440) (floor (org-timegrid-event-start event) 1440)))
+    (user-error "Scoped history edits must stay on the occurrence's date"))
+  (when (and all-day (not (org-timegrid-org--all-day-range-p start end)))
+    (user-error "All-day ranges must span whole days")))
+
+(defun org-timegrid-org--write-history-range
+    (event timestamp start end all-day scope deleting)
+  "Rewrite TIMESTAMP for EVENT; return its new (MARKER . KIND).
+START, END, ALL-DAY, SCOPE and DELETING describe the edit.  The caller owns
+buffer selection, validation and the atomic change group."
+  (let* ((metadata (org-timegrid-event-metadata event))
+         (source (org-timegrid-event-source event))
+         (old-start (org-timegrid-event-start event))
+         (base (if (org-timegrid-event-all-day event)
+                   (org-timegrid-org--timestamp-all-day-minutes timestamp nil)
+                 (org-timegrid-org--timestamp-minutes timestamp nil)))
+         (replace (or (memq scope '(all direct)) (= base old-start)))
+         (offset (if (eq scope 'all) (- base old-start) 0))
+         (value (plist-get metadata :repeater-value))
+         (resume (and value (org-timegrid-org--next-repetition
+                             old-start value (plist-get metadata :repeater-unit))))
+         (until (plist-get metadata :history-until)))
+    ;; One-off edits resume only before the next existing break.
+    (when (and (eq scope 'this) resume (or (null until) (< resume until)))
+      (goto-char (org-element-property :end timestamp))
+      (insert "\n" (org-timegrid-org--history-replacement
+                     timestamp resume
+                     (+ resume (- (org-timegrid-event-end event) old-start))
+                     (org-timegrid-event-all-day event))))
+    (if replace
+        (let ((region (if deleting
+                          (org-timegrid-org--timestamp-region
+                           timestamp (plist-get source :kind))
+                        (cons (org-element-property :begin timestamp)
+                              (org-element-property :end timestamp)))))
+          (goto-char (car region))
+          (delete-region (car region) (cdr region)))
+      (goto-char (org-element-property :end timestamp))
+      (insert "\n"))
+    (let ((marker (copy-marker (point))))
+      (insert (org-timegrid-org--history-replacement
+               timestamp (+ start offset) (+ end offset)
+               all-day (eq scope 'this) deleting))
+      (when deleting
+        (set-marker marker (+ (marker-position marker) (length "CANCELLED: "))))
+      (cons marker (if (or deleting (not replace)) 'timestamp
+                     (plist-get source :kind))))))
+
+(defun org-timegrid-org--sync-history-event (event location start end all-day scope)
+  "Update EVENT and editing context after writing LOCATION with START and END.
+ALL-DAY and SCOPE describe the edit; LOCATION is a (MARKER . KIND) pair."
+  (let* ((marker (car location))
+         (timestamp (org-timegrid-org--timestamp-at-marker marker))
+         (source (org-timegrid-event-source event))
+         (metadata (org-timegrid-event-metadata event))
+         (id (org-timegrid-org--event-id
+              (plist-get source :file) (marker-position marker) (cdr location))))
+    (dolist (property '(:raw-value :repeater-type :repeater-value :repeater-unit))
+      (setq metadata (plist-put metadata property (org-element-property property timestamp))))
+    (setf (plist-get source :marker) marker
+          (plist-get source :kind) (cdr location)
+          (org-timegrid-event-id event) (if (plist-get metadata :repeater-type) (list id start) id)
+          (org-timegrid-event-start event) start
+          (org-timegrid-event-end event) end
+          (org-timegrid-event-all-day event) all-day
+          (org-timegrid-event-metadata event) (plist-put metadata :reload-after-edit t))
+    (setq org-timegrid--edit-context
+          (list :marker (copy-marker marker) :start start
+                :scope (if (eq scope 'this) 'direct scope)))))
+
+(defun org-timegrid-org--update-history-range (event start end time-kind &optional deleting)
+  "Edit EVENT's series to START and END with TIME-KIND, or cancel if DELETING."
+  (let* ((scope (org-timegrid-org--prepare-history-edit event deleting))
+         (marker (plist-get (org-timegrid-event-source event) :marker))
+         (timestamp (org-timegrid-org--timestamp-at-marker marker))
+         (all-day (if time-kind (eq time-kind 'all-day)
+                    (org-timegrid-event-all-day event)))
+         location)
+    (org-timegrid-org--validate-event-source event timestamp)
+    (org-timegrid-org--validate-history-range event start end all-day scope)
+    (with-current-buffer (marker-buffer marker)
+      (org-with-wide-buffer
+       (when buffer-read-only (user-error "The source Org buffer is read-only"))
+       (undo-boundary)
+       (atomic-change-group
+         (setq location (org-timegrid-org--write-history-range
+                         event timestamp start end all-day scope deleting)))
+       (undo-boundary)
+       (org-timegrid-org--note-edit)))
+    (org-timegrid-org--sync-history-event event location start end all-day scope)))
+
 (defun org-timegrid-org--timestamp-region (timestamp kind)
   "Return the region to delete for TIMESTAMP of KIND as a cons cell.
 The three kinds differ in one respect only: a SCHEDULED or DEADLINE value
@@ -845,6 +1022,14 @@ gone plans nothing.  Everything after this point treats them alike."
 
 (defun org-timegrid-org--remove-event (event)
   "Remove EVENT's time from its Org heading, keeping the heading itself."
+  (if (plist-get (org-timegrid-event-metadata event) :history)
+      (org-timegrid-org--update-history-range
+       event (org-timegrid-event-start event) (org-timegrid-event-end event)
+       nil t)
+    (org-timegrid-org--remove-anchor event)))
+
+(defun org-timegrid-org--remove-anchor (event)
+  "Remove EVENT's original timestamp without history semantics."
   (let* ((source (org-timegrid-event-source event))
          (marker (plist-get source :marker))
          (timestamp (org-timegrid-org--timestamp-at-marker marker)))
@@ -1055,11 +1240,16 @@ ALL-DAY records that the timestamp has dates but no times."
          (value (plist-get metadata :repeater-value))
          (unit (plist-get metadata :repeater-unit))
          (base-start (org-timegrid-event-start event))
-         (duration (- (org-timegrid-event-end event) base-start)))
-    (if (not (and (integerp value) (> value 0) unit))
+         (duration (- (org-timegrid-event-end event) base-start))
+         (until (plist-get metadata :history-until)))
+    (when until (setq query-end (min query-end until)))
+    (cond
+     ((plist-get metadata :cancelled) nil)
+     ((not (and (integerp value) (> value 0) unit))
         (and (< base-start query-end)
              (> (+ base-start duration) query-start)
-             (list event))
+             (list event)))
+     (t
       (let ((occurrence-start base-start)
             (iterations 0)
             occurrences)
@@ -1086,7 +1276,7 @@ ALL-DAY records that the timestamp has dates but no times."
                   iterations (1+ iterations))))
         (when (= iterations 100000)
           (error "Org repeater expansion exceeded safety limit"))
-        (nreverse occurrences)))))
+        (nreverse occurrences))))))
 
 (defun org-timegrid-org--mark-latest-done (events todo)
   "Mark the latest of EVENTS as done when heading keyword TODO is done.
@@ -1110,7 +1300,10 @@ FILE defaults to the variable `buffer-file-name'."
          events seen)
     (org-element-map tree 'headline
       (lambda (headline)
-        (let (headline-events)
+        (let ((history (save-excursion
+                         (goto-char (org-element-property :begin headline))
+                         (org-timegrid-org--repeater-history-p)))
+              headline-events)
           (dolist (planning `((scheduled . ,(org-element-property
                                              :scheduled headline))
                               (deadline . ,(org-element-property
@@ -1126,23 +1319,31 @@ FILE defaults to the variable `buffer-file-name'."
                        file headline timestamp (car planning)
                        (org-timegrid-org--timestamp-all-day-p timestamp))
                       headline-events))))
-          (let ((section
-                 (cl-find-if
-                  (lambda (element) (eq (org-element-type element) 'section))
-                  (org-element-contents headline))))
-            (when section
-              (org-element-map section 'timestamp
-                (lambda (timestamp)
-                  (when (and
-                         (or (org-timegrid-org--timestamp-timed-p timestamp)
-                             (org-timegrid-org--timestamp-all-day-p timestamp))
-                         (funcall org-timegrid-org-filter-function
-                                  headline timestamp)
-                         (not (memq (org-element-property :begin timestamp) seen)))
-                    (push (org-timegrid-org--event
-                           file headline timestamp 'timestamp
-                           (org-timegrid-org--timestamp-all-day-p timestamp))
-                          headline-events))))))
+          (when-let* ((section (cl-find-if
+                               (lambda (element) (eq (org-element-type element) 'section))
+                               (org-element-contents headline))))
+            (org-element-map section 'timestamp
+              (lambda (timestamp)
+                (let ((cancelled
+                       (and history
+                            (memq (org-element-property :type timestamp)
+                                  '(inactive inactive-range))
+                            (save-excursion
+                              (goto-char (org-element-property :begin timestamp))
+                              (looking-back "CANCELLED: [ \t]*" (line-beginning-position))))))
+                  (when (or cancelled
+                            (and (or (org-timegrid-org--timestamp-timed-p timestamp)
+                                     (org-timegrid-org--timestamp-all-day-p timestamp))
+                                 (funcall org-timegrid-org-filter-function headline timestamp)
+                                 (not (memq (org-element-property :begin timestamp) seen))))
+                    (let ((event (org-timegrid-org--event
+                                  file headline timestamp 'timestamp
+                                  (not (org-element-property :hour-start timestamp)))))
+                      (when cancelled
+                        (setf (org-timegrid-event-metadata event)
+                              (plist-put (org-timegrid-event-metadata event) :cancelled t)))
+                      (push event headline-events)))))))
+          (when history (org-timegrid-org--history-events headline-events))
           (setq events
                 (nconc (org-timegrid-org--mark-latest-done
                         headline-events

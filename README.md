@@ -93,6 +93,8 @@ inside `org-directory`, and enables the optional day strip in Org Agenda.
 
         ;; Set this to nil if repeating entries should be hidden.
         org-timegrid-org-show-repeaters t
+        ;; Set nil to keep independent Org repeaters under one heading.
+        org-timegrid-org-repeater-history t
 
         ;; The first matching tag supplies an event's colour.
         org-timegrid-org-tag-color-alist
@@ -175,13 +177,19 @@ end uses `org-timegrid-default-duration-minutes`, which defaults to 30 minutes.
 Inactive timestamps do not appear on the time grid.
 A separate date-only rail appears for active timestamp entries with no day times
 
-Repeaters are expanded into dated occurrences for display. Moving or resizing
-one occurrence edits the series anchor and preserves its repeater and warning
-modifiers. Edits leave source buffers modified but unsaved, like Org Agenda
-commands.
+### Repeaters
 
-Set `org-timegrid-org-show-repeaters` to nil to omit repeating timestamps and
-all of their occurrences.
+Repeaters are shown by default. Under a heading containing repeaters, a new timestamp ends the previous series before its date:
+
+```org
+* Daily walk
+<2026-10-01 Thu 17:00-17:30 +1d>
+<2026-10-06 Tue 18:00-18:30 +1d>
+```
+
+Here, 5pm ends October 5; 6pm starts October 6. Move, resize and delete offer **just this**, **this and future**, or **all** within the selected series. Deletes keep inactive `CANCELLED:` boundaries; edits remain unsaved.
+Disable history globally with `(setq org-timegrid-org-repeater-history nil)`, per file with `#+PROPERTY: TIMEGRID_REPEATER_HISTORY nil`, or per heading with `:TIMEGRID_REPEATER_HISTORY: nil` (nearest heading → file → global). Set `org-timegrid-org-show-repeaters` to `nil` to hide repeaters entirely.
+Limitations: Org Agenda ignores these cutoffs; independent series need separate headings; scoped moves stay on their date; hourly repeaters support **all** only.
 
 ## Week view
 
@@ -369,6 +377,7 @@ priority, property, or file.
 | `org-timegrid-org-capture-template`      |           top-level title and time range | Structure and location inside the capture file                        |
 | `org-timegrid-org-auto-save`             |                                    `nil` | Save the affected Org file after every calendar edit                  |
 | `org-timegrid-org-show-done`             |                                      `t` | Show timestamps belonging to headings in a done state                 |
+| `org-timegrid-org-repeater-history`      |                                      `t` | Interpret timestamps as successive schedule versions; prompt for edit scope |
 | `org-timegrid-org-show-repeaters`        |                                      `t` | Show repeater anchors and their generated occurrences                 |
 | `org-timegrid-org-exclude-tags`          |                                    `nil` | Hide headings carrying any listed tag                                 |
 | `org-timegrid-org-exclude-todo-states`   |                                    `nil` | Hide headings whose TODO keyword is listed                            |
