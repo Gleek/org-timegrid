@@ -1,0 +1,32 @@
+- M-< doesn't take the cursor to the first cell of the grid
+- On clicking a block that goes to the next day the focus gets jumped to the bottom (start of the block)
+- stack mode
+  + push things down when adding a block
+  + Would need pinning to make unmovable blocks
+- Other calendars
+  + macOS
+  + Hey
+    - horizontal day
+      + clocking creation
+    - habits
+    - maybe this week
+    - clocking
+      + view clocked in entries
+    - staging
+      + inbox / property filter
+  + https://structured.app/
+  + sunsama
+    - kanban board of every day (stack mode)..but calendar is different?
+      + it takes in tasks similar to my worklog with effort estimate
+      + Pinning of tasks so they don't move in stack
+      + Gaps in timeboxes. When stacking automatically keep a gap of x minutes
+      + Shutdown indicator
+    - weekly review
+  + notion
+  + amie
+    - setup repeating
+    - Share free times
+- Filter function (by tags, state, property, custom)
+- Jumping to date should use nano-calendar aesthetics -> many tasks darker background
+- The height of the block shouldn't go below 15 min size. So even if it's 2 minutes. It should show up as 15min height and overlap if there's a overlap (probably configurable with min-height)
+  + Also adhere and not cap to 15 min actual value
