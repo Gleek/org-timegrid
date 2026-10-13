@@ -1291,7 +1291,8 @@ DAYS controls the columns; WEEK-START enables weekend shading."
              (when (and hourp (< minute end-minute))
                (org-timegrid--draw-text svg (format "%02d:00" (/ minute 60))
                          :x (/ (org-timegrid--label-width) 2.0)
-                         :y (+ y (org-timegrid--scale-pixels 11))
+                         ;; Clock digits extend about 0.7 em above the baseline.
+                         :y (+ y (org-timegrid--scale-pixels 3.5))
                          :font-size (org-timegrid--font-size 10)
                          :font-family font-family
                          :text-anchor "middle"
