@@ -1,5 +1,7 @@
 # org-timegrid
 
+[![MELPA](https://melpa.org/packages/org-timegrid-badge.svg)](https://melpa.org/#/org-timegrid)
+
 `org-timegrid` is a beautiful SVG week calendar for Org mode. It reads timed active
 timestamps from your Org files and writes edits back to their source headings.
 

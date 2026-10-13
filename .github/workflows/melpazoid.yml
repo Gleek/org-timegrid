@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Reject top-level key bindings
         run: |
-          if rg -n '^\((keymap-set|define-key)\s' --glob 'org-timegrid*.el' .; then
+          if grep -nE '^\((keymap-set|define-key)[[:space:]]' org-timegrid*.el; then
             echo 'Initialize bindings inside the keymap defvar to preserve user customizations.'
             exit 1
           fi
@@ -34,5 +34,6 @@ jobs:
           LOCAL_REPO: ${{ github.workspace }}
           RECIPE: '(org-timegrid :fetcher github :repo "Gleek/org-timegrid")'
           WARN_IS_ERROR: 'false'
+          EXIST_OK: 'true'
           RUNNER: 'uv run'
         run: make -C "$RUNNER_TEMP/melpazoid"
