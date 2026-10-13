@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.0.3 — 2026-10-13
+- Repeating events now preserve history when editing or deleting just one occurrence, future occurrences, or the whole series. Added configurable history cutoffs and undo support.
+- Plain headings with active date-only timestamps now appear in completion when adding another calendar range.
+- Aligned hour labels with their grid lines.
+- Reloading the calendar now preserves custom isearch bindings.
+- Updated installation instructions for MELPA and fixed melpazoid tooling installation in CI.
+
 ## v0.0.2 — 2026-09-30
 - Fixed block selection when nearby start times share a cursor slot; navigation now selects blocks directly by ID.
 - Keyboard time moves now snap timed blocks to the configured slot interval while preserving duration. Day moves and resizing retain their existing precision.
