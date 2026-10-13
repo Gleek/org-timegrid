@@ -37,20 +37,22 @@ Agenda view:
 You need Emacs 29.1 or later with SVG support and Org 9.6 or later. Check SVG
 support with `(image-type-available-p 'svg)`. There are no other dependencies.
 
-With [Elpaca](https://github.com/progfolio/elpaca):
+`org-timegrid` is available on [MELPA](https://melpa.org/#/org-timegrid).
+With MELPA configured, run `M-x package-refresh-contents`, then
+`M-x package-install RET org-timegrid RET`, or use `use-package`:
 
 ```elisp
 (use-package org-timegrid
-  :ensure (:host github :repo "Gleek/org-timegrid")
+  :ensure t
   :commands (org-timegrid-week)
   :bind ("C-c c" . org-timegrid-week))
 ```
 
-With the built-in `package-vc` via `use-package` (Emacs 30 or later):
+To install directly from GitHub with [Elpaca](https://github.com/progfolio/elpaca):
 
 ```elisp
 (use-package org-timegrid
-  :vc (:url "https://github.com/Gleek/org-timegrid.git")
+  :ensure (:host github :repo "Gleek/org-timegrid")
   :commands (org-timegrid-week)
   :bind ("C-c c" . org-timegrid-week))
 ```
@@ -60,8 +62,8 @@ For a manual install, put the `.el` files on `load-path`, evaluate `(require
 
 ### Complete example configuration
 
-The following is a self-contained Elpaca configuration that can be pasted into
-your Emacs configuration. It reads events from your existing
+With MELPA configured, the following can be pasted into your Emacs
+configuration. It reads events from your existing
 `org-agenda-files`, writes entries created in the calendar to `calendar.org`
 inside `org-directory`, and enables the optional day strip in Org Agenda.
 
@@ -69,7 +71,7 @@ inside `org-directory`, and enables the optional day strip in Org Agenda.
 (require 'org)
 
 (use-package org-timegrid
-  :ensure (:host github :repo "Gleek/org-timegrid")
+  :ensure t
   :demand t
   :bind (("C-c a c" . org-timegrid-week))
   :init
