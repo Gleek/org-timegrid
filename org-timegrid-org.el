@@ -547,23 +547,24 @@ distinguishes date-only values from midnight-aligned timed values."
           (org-timegrid-org--note-edit)
           (message "Added %s" title)))))))
 
-(defun org-timegrid-org--headline-has-timed-range-p (headline)
-  "Return non-nil when HEADLINE's own section has a timed Org range."
+(defun org-timegrid-org--headline-has-active-timestamp-p (headline)
+  "Return non-nil when HEADLINE's own section has an active timestamp."
   (when-let* ((section (seq-find
                        (lambda (element)
                          (eq (org-element-type element) 'section))
                        (org-element-contents headline))))
-    (catch 'timed
+    (catch 'active
       (org-element-map section 'timestamp
         (lambda (timestamp)
-          (when (org-timegrid-org--timestamp-timed-p timestamp)
-            (throw 'timed t))))
+          (when (memq (org-element-property :type timestamp)
+                      '(active active-range))
+            (throw 'active t))))
       nil)))
 
 (defun org-timegrid-org--heading-candidates ()
   "Return headings eligible for adding another calendar range.
 This includes unfinished TODO headings and plain headings that already
-have a timed range in their own section."
+have an active timestamp in their own section."
   (let (candidates)
     (dolist (file (org-timegrid-org--files))
       (with-current-buffer (find-file-noselect file)
@@ -574,7 +575,7 @@ have a timed range in their own section."
                     (not (eq (org-element-property :todo-type headline)
                              'done))
                     (or (org-element-property :todo-keyword headline)
-                        (org-timegrid-org--headline-has-timed-range-p
+                        (org-timegrid-org--headline-has-active-timestamp-p
                          headline)))
                (let* ((title (org-element-property :raw-value headline))
                       (todo (org-element-property :todo-keyword headline))
