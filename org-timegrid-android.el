@@ -125,17 +125,27 @@ Enable this to use keyboard commands that have no touch gesture."
           (setq-local org-timegrid--scroll-boundary nil))
         (org-timegrid-scroll step window)))))
 
+(defun org-timegrid-android--proposal (origin target)
+  "Build a touch edit proposal between calendar ORIGIN and TARGET."
+  (if (and (eq (plist-get origin :surface) 'rail)
+           (null (plist-get origin :block-id)))
+      (if (eq (plist-get target :surface) 'rail)
+          (org-timegrid--all-day-create-proposal origin target)
+        (org-timegrid--operation-create :error "Release inside an all-day cell"))
+    (org-timegrid--proposal origin target nil)))
+
 (defun org-timegrid-android--drag-update (event data)
   "Update the calendar preview from raw touchscreen EVENT and DATA."
+  (aset data 2 nil)
   (when-let* ((tool (assq (aref data 0) (cadr event)))
               (position (cdr tool))
               (window (posn-window position))
               ((window-live-p window)))
-    (with-selected-window window
-      (when-let* ((target (org-timegrid--target position)))
-        (aset data 2 target)
-        (org-timegrid--set-preview
-         (org-timegrid--proposal (aref data 1) target nil))))))
+    (aset data 2 (org-timegrid--mouse-target position)))
+  (if (aref data 2)
+      (org-timegrid--set-preview
+       (org-timegrid-android--proposal (aref data 1) (aref data 2)))
+    (org-timegrid--clear-preview)))
 
 (defun org-timegrid-android-long-press (event)
   "Create, move, or resize a block using a held touch EVENT."
@@ -146,26 +156,25 @@ Enable this to use keyboard commands that have no touch gesture."
          (start-position (nth 4 touch-screen-current-tool)))
     (when (and tool-id start-position (window-live-p window))
       (with-selected-window window
-        (let* ((origin (org-timegrid--target position))
+        (let* ((origin (org-timegrid--mouse-target position))
                (data (vector tool-id origin origin))
                (start-event
-                (list 'touchscreen-begin (cons tool-id start-position)))
-               result)
+                (list 'touchscreen-begin (cons tool-id start-position))))
           (when origin
             (unwind-protect
-                (setq result
-                      (funcall (intern "touch-screen-track-drag")
-                               start-event
-                               #'org-timegrid-android--drag-update data))
-              (setq touch-screen-current-tool nil
-                    touch-screen-current-timer nil))
-            (cond
-             ((eq result t)
-              (org-timegrid--apply
-               (org-timegrid--proposal origin (aref data 2) nil)))
-             ((eq result 'no-drag)
-              (org-timegrid-context-menu (list 'mouse-3 position)))
-             (t (org-timegrid--clear-preview)))))))))
+                (let ((result
+                       (let ((org-timegrid--drag-rail-rows
+                              (org-timegrid--rail-row-count (org-timegrid--all-day-layout))))
+                         (funcall (intern "touch-screen-track-drag") start-event
+                                  #'org-timegrid-android--drag-update data))))
+                  (cond
+                   ((eq result t)
+                    (org-timegrid--apply
+                     (org-timegrid-android--proposal origin (aref data 2))))
+                   ((eq result 'no-drag)
+                    (org-timegrid-context-menu (list 'mouse-3 position)))))
+              (setq touch-screen-current-tool nil touch-screen-current-timer nil)
+              (org-timegrid--clear-preview))))))))
 
 (defun org-timegrid-android--configure-buffer ()
   "Apply the one-day touch layout without maintaining a second renderer."
@@ -217,7 +226,9 @@ Enable this to use keyboard commands that have no touch gesture."
                 #'org-timegrid-android-long-press))
   (dolist (area '(header-line calendar-rail-block calendar-rail-resize))
     (define-key org-timegrid--header-map (vector area 'touchscreen-scroll)
-                #'org-timegrid-android-scroll))
+                #'org-timegrid-android-scroll)
+    (define-key org-timegrid--header-map (vector area 'touchscreen-hold)
+                #'org-timegrid-android-long-press))
   (add-hook 'org-timegrid-mode-hook #'org-timegrid-android--configure-buffer)
   (when-let* ((buffer (get-buffer org-timegrid-buffer-name)))
     (with-current-buffer buffer

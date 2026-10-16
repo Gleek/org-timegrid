@@ -254,8 +254,15 @@ as current as the buffer around it."
                  #'org-timegrid-agenda--theme-changed)
     (remove-hook 'disable-theme-functions
                  #'org-timegrid-agenda--theme-changed)
+    (when (timerp org-timegrid-agenda--theme-timer)
+      (cancel-timer org-timegrid-agenda--theme-timer)
+      (setq org-timegrid-agenda--theme-timer nil))
     (dolist (buffer (buffer-list))
       (with-current-buffer buffer
+        (when (derived-mode-p 'org-agenda-mode)
+          (save-restriction
+            (widen)
+            (save-excursion (org-timegrid-agenda--remove))))
         (remove-hook 'text-scale-mode-hook
                      #'org-timegrid-agenda--text-scale-changed t)))))
 

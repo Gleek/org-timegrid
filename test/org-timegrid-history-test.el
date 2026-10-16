@@ -234,3 +234,87 @@
     (let ((events (org-timegrid-history-test--events)))
       (should (= 2 (length events)))
       (should-not (plist-get (org-timegrid-event-metadata (car events)) :history)))))
+
+(ert-deftest org-timegrid-history-refuses-undo-and-redo-after-source-edit ()
+  (dolist (redo '(nil t))
+    (org-timegrid-history-test--with-entry
+      (org-timegrid-org--add-range (copy-marker 1) 1065422040 1065422070)
+      (when redo (org-timegrid-org--undo nil nil))
+      (goto-char (point-max))
+      (insert "Manual source edit\n")
+      (undo-boundary)
+      (let ((before (buffer-string)))
+        (should-error (org-timegrid-org--undo nil redo) :type 'user-error)
+        (should (equal before (buffer-string)))))))
+
+(ert-deftest org-timegrid-history-new-edit-drops-invalidated-transactions ()
+  (org-timegrid-history-test--with-entry
+    (org-timegrid-org--add-range (copy-marker 1) 1065422040 1065422070)
+    (goto-char (point-max))
+    (insert "Manual source edit\n")
+    (undo-boundary)
+    (let ((before (buffer-string)))
+      (org-timegrid-org--add-range (copy-marker 1) 1065422100 1065422130)
+      (should (= 1 (length org-timegrid-org--undo-transactions)))
+      (org-timegrid-org--undo nil nil)
+      (should (equal before (buffer-string))))))
+
+(ert-deftest org-timegrid-history-checks-all-sources-before-undo ()
+  (org-timegrid-history-test--with-entry
+    (let ((first (current-buffer)))
+      (with-temp-buffer
+        (org-mode)
+        (buffer-enable-undo)
+        (insert "* Second\n")
+        (let ((second (current-buffer)))
+          (org-timegrid-org--transaction
+           (lambda ()
+             (dolist (buffer (list first second))
+               (with-current-buffer buffer
+                 (org-timegrid-org--add-range (copy-marker 1)
+                                              1065422040 1065422070)))))
+          ;; Make the final source invalid: an early mutation would otherwise
+          ;; partially undo the multi-buffer transaction before noticing it.
+          (with-current-buffer (caar (last (car org-timegrid-org--undo-transactions)))
+            (goto-char (point-max))
+            (insert "Manual source edit\n"))
+          (let ((before (mapcar (lambda (buffer)
+                                  (with-current-buffer buffer (buffer-string)))
+                                (list first second))))
+            (should-error (org-timegrid-org--undo nil nil) :type 'user-error)
+            (should (equal before
+                           (mapcar (lambda (buffer)
+                                     (with-current-buffer buffer (buffer-string)))
+                                   (list first second))))))))))
+
+(ert-deftest org-timegrid-history-rolls-back-failed-bulk-edits ()
+  (org-timegrid-history-test--with-entry
+    (let ((before (buffer-string)))
+      (should-error
+       (org-timegrid-org--transaction
+        (lambda ()
+          (org-timegrid-org--add-range (copy-marker 1) 1065422040 1065422070)
+          (org-timegrid-org--add-range (copy-marker 1) 1065422100 1065422130)
+          (error "Failed bulk edit"))))
+      (should (equal before (buffer-string)))
+      (should-not org-timegrid-org--undo-transactions))))
+
+(ert-deftest org-timegrid-history-old-fixed-repeaters-skip-to-query ()
+  (dolist (unit '(hour day week))
+    (let* ((step (pcase unit ('hour 60) ('day 1440) ('week 10080)))
+           (event (org-timegrid-event-create
+                   :id 'old :title "Old repeater" :start 1000000 :end 1000030
+                   :metadata (list :repeater-value 1 :repeater-unit unit)))
+           (start (+ 1000000 (* step 150000)))
+           (events (org-timegrid-org--expand-event event start (+ start (* 3 step)))))
+      (should (equal (mapcar #'org-timegrid-event-start events)
+                     (list start (+ start step) (+ start (* 2 step))))))))
+
+(ert-deftest org-timegrid-history-skipping-keeps-overlapping-occurrences ()
+  (let* ((event (org-timegrid-event-create
+                 :id 'overlap :title "Long repeater" :start 1000000 :end 1000180
+                 :metadata '(:repeater-value 1 :repeater-unit hour)))
+         (start (+ 1000000 (* 60 150000)))
+         (events (org-timegrid-org--expand-event event start (+ start 120))))
+    (should (equal (mapcar #'org-timegrid-event-start events)
+                   (list (- start 120) (- start 60) start (+ start 60))))))

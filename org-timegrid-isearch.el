@@ -43,7 +43,7 @@ finite horizon.  Events in the horizon are fetched once per search."
 (defvar-local org-timegrid-isearch--origin nil)
 (defvar-local org-timegrid-isearch--point nil)
 (defvar-local org-timegrid-isearch--anchors nil)
-(defvar-local org-timegrid-isearch--events nil)
+(defvar-local org-timegrid-isearch--events 'unqueried)
 
 (defun org-timegrid-isearch--index ()
   "Append invisible block titles in keyboard-navigation order."
@@ -78,12 +78,12 @@ finite horizon.  Events in the horizon are fetched once per search."
                   (car (last
                         (seq-take-while
                          (lambda (candidate)
-                           (<= (org-timegrid--block-absolute-start candidate)
+                           (<= (org-timegrid--block-visible-start candidate)
                                origin))
                          blocks)))
                 (seq-find
                  (lambda (candidate)
-                   (>= (org-timegrid--block-absolute-start candidate) origin))
+                   (>= (org-timegrid--block-visible-start candidate) origin))
                  blocks))
               (if backward (car (last blocks)) (car blocks))))
          (range (and block
@@ -113,15 +113,16 @@ finite horizon.  Events in the horizon are fetched once per search."
 
 (defun org-timegrid-isearch--events ()
   "Return and cache events inside the cross-week search horizon."
-  (or org-timegrid-isearch--events
-      (let* ((week (org-timegrid--calendar-state-week-start org-timegrid--state))
-             (span (* org-timegrid-isearch-week-limit
-                      org-timegrid-days 1440)))
-        (setq-local
-         org-timegrid-isearch--events
-         (org-timegrid-backend-list
-          org-timegrid--backend (- (* week 1440) span)
-          (+ (* (+ week org-timegrid-days) 1440) span))))))
+  (when (eq org-timegrid-isearch--events 'unqueried)
+    (let* ((week (org-timegrid--calendar-state-week-start org-timegrid--state))
+           (span (* org-timegrid-isearch-week-limit
+                    7 1440)))
+      (setq-local
+       org-timegrid-isearch--events
+       (org-timegrid-backend-list
+        org-timegrid--backend (- (* week 1440) span)
+        (+ (* (+ week org-timegrid-days) 1440) span)))))
+  org-timegrid-isearch--events)
 
 (defun org-timegrid-isearch--event-regexp (string)
   "Return the regexp with which Isearch interprets STRING."
@@ -139,22 +140,16 @@ finite horizon.  Events in the horizon are fetched once per search."
          (end (* (+ week org-timegrid-days) 1440))
          (regexp (org-timegrid-isearch--event-regexp string))
          (case-fold-search isearch-case-fold-search)
-         (events
-          (seq-filter
-           (lambda (event)
-             (and (if isearch-forward
-                      (>= (org-timegrid-event-start event) end)
-                    (< (org-timegrid-event-start event) start))
-                  (string-match-p regexp (org-timegrid-event-title event))))
-           (org-timegrid-isearch--events))))
-    (car (sort events
-               (if isearch-forward
-                   (lambda (left right)
-                     (< (org-timegrid-event-start left)
-                        (org-timegrid-event-start right)))
-                 (lambda (left right)
-                   (> (org-timegrid-event-start left)
-                      (org-timegrid-event-start right))))))))
+         nearest)
+    (dolist (event (org-timegrid-isearch--events) nearest)
+      (let ((minute (org-timegrid-event-start event)))
+        (when (and (if isearch-forward (>= minute end) (< minute start))
+                   (or (null nearest)
+                       (if isearch-forward
+                           (< minute (org-timegrid-event-start nearest))
+                         (> minute (org-timegrid-event-start nearest))))
+                   (string-match-p regexp (org-timegrid-event-title event)))
+          (setq nearest event))))))
 
 (defun org-timegrid-isearch--search-function ()
   "Return an Isearch function that continues across calendar weeks."
@@ -209,7 +204,7 @@ finite horizon.  Events in the horizon are fetched once per search."
          (org-timegrid--cursor-visible-p)
          (org-timegrid--calendar-state-selected-id org-timegrid--state))
    org-timegrid-isearch--point (point)
-   org-timegrid-isearch--events nil
+   org-timegrid-isearch--events 'unqueried
    isearch-search-fun-function #'org-timegrid-isearch--search-function
    isearch-push-state-function #'org-timegrid-isearch--push-state)
   (goto-char (org-timegrid-isearch--start-position backward))

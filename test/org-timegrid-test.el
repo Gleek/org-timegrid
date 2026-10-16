@@ -4,6 +4,109 @@
 (require 'org-timegrid-org)
 (require 'org-timegrid-agenda)
 
+(ert-deftest org-timegrid-test-drag-and-keyboard-share-boundary-rules ()
+  (let ((org-timegrid-days 7))
+    (dolist (case '((all-day -2 0 14400 0 0 1 0 nil 1440)
+                    (all-day 5 0 5760 5 0 6 0 nil 1440)
+                    (all-day -2 0 7200 0 0 1 0 top 4320)
+                    (all-day 5 0 5760 6 0 6 0 bottom -2880)
+                    (timed 0 30 90 0 30 0 0 top -30)
+                    (timed 6 1380 1440 6 1425 6 1430 bottom 5)))
+      (pcase-let* ((`(,kind ,day ,start ,end ,from-day ,from-minute
+                           ,to-day ,to-minute ,edge ,delta) case)
+                   (source (org-timegrid--make-block
+                            'event day start end "Event" nil nil kind))
+                   (org-timegrid--state
+                    (org-timegrid--calendar-state-create :blocks (list source)))
+                   (surface (if (eq kind 'all-day) 'rail 'grid))
+                   (drag (org-timegrid--proposal
+                          (list :surface surface :block-id 'event
+                                :day from-day :minute from-minute :edge edge)
+                          (list :surface surface :day to-day :minute to-minute) nil))
+                   (key (org-timegrid--keyboard-proposal source delta 0 edge)))
+        (should (equal (org-timegrid--operation-block drag)
+                       (org-timegrid--operation-block key)))))))
+
+(ert-deftest org-timegrid-test-narrow-window-clicks-match-rendered-columns ()
+  (with-temp-buffer
+    (let* ((org-timegrid-days 7)
+           (org-timegrid--state
+            (org-timegrid--calendar-state-create
+             :week-start 739900
+             :blocks (cl-loop for day below 7 collect
+                              (org-timegrid--make-block day day 600 660 "Event")))))
+      (cl-letf (((symbol-function 'org-timegrid--window-width) (lambda () 420)))
+        (org-timegrid--svg)
+        (dolist (geometry org-timegrid--geometry)
+          (let ((xy (cons (+ (plist-get geometry :x) 5)
+                          (+ (plist-get geometry :y) 5))))
+            (when (< (car xy) 420)
+              (cl-letf (((symbol-function 'org-timegrid--position-image-xy)
+                         (lambda (_) xy)))
+                (should (= (plist-get geometry :day)
+                           (plist-get (org-timegrid--target nil) :day)))))))))))
+
+(ert-deftest org-timegrid-test-reload-clears-only-missing-selection ()
+  (with-temp-buffer
+    (make-local-variable 'org-timegrid--state)
+    (let* ((event (org-timegrid-event-create
+                   :id 'event :title "Event" :start 144600 :end 144660))
+           (events (list event))
+           (org-timegrid--backend
+            (org-timegrid-backend-create :list-function (lambda (&rest _) events)))
+           (org-timegrid--state (org-timegrid--load-state 100)))
+      (org-timegrid--ensure-cursor)
+      (setf (org-timegrid--calendar-state-selected-id org-timegrid--state) 'event
+            (org-timegrid--calendar-state-cursor-visible org-timegrid--state) t)
+      (org-timegrid--reload-state 100)
+      (should (eq (org-timegrid--selected-id) 'event))
+      (setq events nil)
+      (org-timegrid--reload-state 100)
+      (should-not (org-timegrid--selected-id))
+      (should (org-timegrid--cursor-visible-p)))))
+
+(ert-deftest org-timegrid-test-empty-calendar-commands-handle-unset-cursor ()
+  (let ((org-timegrid--state
+         (org-timegrid--calendar-state-create :week-start 739900)))
+    (should-not (org-timegrid--block-at-cursor))
+    (should-error (org-timegrid--logical-selection) :type 'user-error)
+    (cl-letf (((symbol-function 'org-timegrid--target) (lambda (_) nil)))
+      (org-timegrid-visit '(double-mouse-1 nil)))))
+
+(ert-deftest org-timegrid-test-layout-reuse-and-invalidation ()
+  (with-temp-buffer
+    (let* ((timed (org-timegrid--make-block 'timed 0 600 660 "Timed"))
+           (all-day (org-timegrid--make-block 'all-day 0 0 1440 "All-day" nil nil 'all-day))
+           (org-timegrid--state
+            (org-timegrid--calendar-state-create :blocks (list timed all-day)))
+           (timed-layout (org-timegrid--timed-layout))
+           (rail-layout (org-timegrid--all-day-layout)))
+      (org-timegrid--set-cursor 0 600)
+      (should (eq timed-layout (org-timegrid--timed-layout)))
+      (should (eq rail-layout (org-timegrid--all-day-layout)))
+      (setf (org-timegrid--calendar-state-preview org-timegrid--state)
+            (org-timegrid--keyboard-proposal timed 15 0 nil))
+      (should (seq-some (lambda (block)
+                          (and (org-timegrid-block-preview block)
+                               (= 615 (org-timegrid-block-start block))))
+                        (org-timegrid--timed-layout)))
+      (setf (org-timegrid--calendar-state-preview org-timegrid--state) nil
+            (org-timegrid--calendar-state-blocks org-timegrid--state)
+            (list (org-timegrid--make-block 'all-day 2 0 1440 "Changed" nil nil 'all-day)))
+      (should-not (org-timegrid--timed-layout))
+      (should (= 2880 (org-timegrid-block-rail-start
+                       (car (org-timegrid--all-day-layout))))))))
+
+(ert-deftest org-timegrid-test-isearch-caches-empty-horizon ()
+  (with-temp-buffer
+    (let* ((calls 0)
+           (org-timegrid--state (org-timegrid--calendar-state-create :week-start 100))
+           (org-timegrid--backend
+            (org-timegrid-backend-create
+             :list-function (lambda (&rest _) (cl-incf calls) nil))))
+      (dotimes (_ 3) (should-not (org-timegrid-isearch--events)))
+      (should (= 1 calls)))))
+
 (ert-deftest org-timegrid-test-isearch-reload-preserves-custom-bindings ()
   (should (eq (keymap-lookup org-timegrid-mode-map "C-s")
               #'org-timegrid-isearch-forward))

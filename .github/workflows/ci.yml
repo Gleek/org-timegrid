@@ -52,9 +52,7 @@ jobs:
       - name: Run ERT suite
         run: >-
           emacs -Q --batch -L .
-          -l ./org-timegrid.el
-          -l test/org-timegrid-test.el
-          -f ert-run-tests-batch-and-exit
+          -l test/run-tests.el
 
   svg-integration:
     name: Real SVG integration
@@ -74,6 +72,4 @@ jobs:
       - name: Run ERT suite with real SVG rendering
         run: >-
           emacs -Q --batch -L .
-          -l ./org-timegrid.el
-          -l test/org-timegrid-test.el
-          -f ert-run-tests-batch-and-exit
+          -l test/run-tests.el

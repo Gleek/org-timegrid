@@ -450,6 +450,14 @@ value is `timed` or `all-day`. This distinguishes date-only entries from timed
 entries that happen to span whole days; callbacks using the older arity remain
 supported.
 
+## Development
+
+Run all ERT tests, including repeater history:
+
+```sh
+emacs -Q --batch -L . -l test/run-tests.el
+```
+
 ## Credits and status
 
 The visual design and interaction borrow from macOS Calendar. [`org-timeblock`](https://github.com/ichernyshovvv/org-timeblock)

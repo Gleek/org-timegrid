@@ -46,6 +46,9 @@
 (require 'org-timegrid)
 (require 'org-timegrid-calendar)
 
+(defvar org-time-was-given)
+(defvar org-end-time-was-given)
+
 (defgroup org-timegrid-org nil
   "Org data support for `org-timegrid'."
   :group 'org-timegrid
@@ -227,14 +230,6 @@ priority, property, or file as easily as by tag."
               (cdr (assoc tag org-timegrid-org-tag-color-alist)))
             (org-element-property :tags headline)))
 
-(defun org-timegrid-org--capture-target ()
-  "Return the file calendar entries are written to, or nil.
-Named apart from `org-timegrid-org-capture-file': a function and a user
-option sharing one name is legal and confusing, and it also makes a
-minor mode indistinguishable from an option to any code that inspects
-symbols."
-  org-timegrid-org-capture-file)
-
 (defun org-timegrid-org--files ()
   "Return the existing, deduplicated Org files to query."
   (let ((files
@@ -246,8 +241,8 @@ symbols."
                 ((listp org-timegrid-org-files)
                  org-timegrid-org-files)
                 (t nil))
-          (and (org-timegrid-org--capture-target)
-               (list (org-timegrid-org--capture-target))))))
+          (and org-timegrid-org-capture-file
+               (list org-timegrid-org-capture-file)))))
     (delete-dups
      (cl-loop for file in files
               for expanded = (expand-file-name file)
@@ -381,10 +376,11 @@ default tag."
                  (nth 1 date) (nth 0 date) (nth 2 date))))
 
 (defun org-timegrid-org--expand-capture-template
-    (title start end &optional all-day)
+    (title start end &optional all-day cursor-token)
   "Expand the calendar template for TITLE and range START through END.
 When ALL-DAY is non-nil, timestamp substitutions contain dates without
-clock times and END is treated as an exclusive midnight bound."
+clock times and END is treated as an exclusive midnight bound.
+CURSOR-TOKEN, when provided, replaces template `%?' placeholders."
   (let ((text (plist-get org-timegrid-org-capture-template :template))
         (range (if all-day
                    (org-timegrid-org--format-all-day-range start end)
@@ -399,19 +395,20 @@ clock times and END is treated as an exclusive midnight bound."
                     (org-timegrid-org--format-instant end))))
     (unless (stringp text)
       (user-error "The timegrid capture template needs a :template string"))
-    (dolist (replacement
-             `(("%{title}" . ,title)
-               ("%{time-range}" . ,range)
-               ("%{start}" . ,start-text)
-               ("%{end}" . ,end-text)
-               ("%{duration}" . ,(number-to-string (- end start)))))
-      (setq text (string-replace (car replacement) (cdr replacement) text)))
-    (replace-regexp-in-string
-     "%<\\([^>\n]+\\)>"
-     (lambda (match)
-       (format-time-string (substring match 2 -1)
-                           (org-timegrid-org--absolute-time start)))
-     text t t)))
+    (let ((replacements
+           `(("%{title}" . ,title) ("%{time-range}" . ,range)
+             ("%{start}" . ,start-text) ("%{end}" . ,end-text)
+             ("%{duration}" . ,(number-to-string (- end start)))
+             ("%?" . ,(or cursor-token "%?")))))
+      (replace-regexp-in-string
+       "%{[^}\n]+}\\|%<[^>\n]+>\\|%\\?"
+       (lambda (match)
+         (or (cdr (assoc match replacements))
+             (if (string-prefix-p "%<" match)
+                 (format-time-string (substring match 2 -1)
+                                     (org-timegrid-org--absolute-time start))
+               match)))
+       text t t))))
 
 (defun org-timegrid-org--capture-parent (target start)
   "Move to TARGET for an entry starting at START and return its level."
@@ -450,46 +447,65 @@ When ALL-DAY is non-nil, write the range without times.
 Return markers for its beginning and the position selected by `%?'."
   (let* ((target (or (plist-get org-timegrid-org-capture-template :target)
                      'file))
-         (cursor-token "<<org-timegrid-final-point>>")
-         (template (string-replace
-                    "%?" cursor-token
-                    (org-timegrid-org--expand-capture-template
-                     title start end all-day)))
+         (cursor-token (make-temp-name "org-timegrid-final-point-"))
+         (template (org-timegrid-org--expand-capture-template
+                    title start end all-day cursor-token))
          (parent-level (org-timegrid-org--capture-parent target start)))
     (unless (or (= (point-min) (point-max)) (bolp))
       (insert "\n"))
     (let ((beginning (point)))
       (insert (org-timegrid-org--relative-template template parent-level))
       (unless (bolp) (insert "\n"))
-      (goto-char beginning)
-      (if (search-forward cursor-token nil t)
-          (replace-match "" t t)
-        (goto-char beginning))
+      (let ((end (point)))
+        (goto-char beginning)
+        (if (search-forward cursor-token end t)
+            (replace-match "" t t)
+          (goto-char beginning)))
       (list (copy-marker beginning) (copy-marker (point))))))
 
+(defmacro org-timegrid-org--with-edit (location &rest body)
+  "Run BODY at live buffer or marker LOCATION as one recorded Org edit."
+  (declare (indent 1) (debug (form body)))
+  (let ((origin (make-symbol "location"))
+        (tick (make-symbol "tick")))
+    `(let ((,origin ,location))
+       (unless (if (markerp ,origin) (marker-buffer ,origin)
+                 (buffer-live-p ,origin))
+         (user-error "The Org source is no longer live"))
+       (with-current-buffer (if (markerp ,origin) (marker-buffer ,origin) ,origin)
+         (org-with-wide-buffer
+          (when buffer-read-only (user-error "The source Org buffer is read-only"))
+          (org-timegrid-org--prepare-history)
+          (when (markerp ,origin) (goto-char ,origin))
+          (undo-boundary)
+          (when (and org-timegrid-org--transaction-edits
+                     (not (gethash (current-buffer) org-timegrid-org--transaction-edits)))
+            (let ((handle (prepare-change-group)))
+              (puthash (current-buffer) (cons handle 0) org-timegrid-org--transaction-edits)
+              (activate-change-group handle)))
+          (let ((,tick (buffer-chars-modified-tick)))
+            (prog1
+                (condition-case error-data
+                    (atomic-change-group ,@body)
+                  ((error quit)
+                   (setq org-timegrid-org--history-tick (buffer-chars-modified-tick))
+                   (signal (car error-data) (cdr error-data))))
+              (unless (= ,tick (buffer-chars-modified-tick))
+                (undo-boundary)
+                (org-timegrid-org--note-edit)))))))))
+
 (defun org-timegrid-org--add-range (record start end &optional all-day)
-  "Add the range from START to END to the heading identified by RECORD.
-RECORD is either a marker selected interactively or an event source
-plist retained while cutting a calendar block."
-  (let ((marker (if (markerp record)
-                    record
-                  (plist-get record :marker))))
-    (unless (and (markerp marker) (marker-buffer marker))
-      (user-error "The selected Org heading is no longer live"))
-    (with-current-buffer (marker-buffer marker)
-      (org-with-wide-buffer
-       (goto-char marker)
-       (org-back-to-heading t)
-       (undo-boundary)
-       (atomic-change-group
-         (org-end-of-meta-data t)
-         (unless (bolp) (insert "\n"))
-         (insert (if all-day
-                     (org-timegrid-org--format-all-day-range start end)
-                   (org-timegrid-org--format-range start end))
-                 "\n"))
-       (undo-boundary)
-       (org-timegrid-org--note-edit)))))
+  "Add START through END to the heading identified by RECORD.
+RECORD is a heading marker or an event source retained while cutting."
+  (org-timegrid-org--with-edit (if (markerp record) record
+                                 (plist-get record :marker))
+    (org-back-to-heading t)
+    (org-end-of-meta-data t)
+    (unless (bolp) (insert "\n"))
+    (insert (if all-day
+                (org-timegrid-org--format-all-day-range start end)
+              (org-timegrid-org--format-range start end))
+            "\n")))
 
 (defun org-timegrid-org--create-event
     (title start end &optional source target time-kind)
@@ -500,52 +516,48 @@ distinguishes date-only values from midnight-aligned timed values."
   (let ((all-day (if time-kind
                      (eq time-kind 'all-day)
                    (org-timegrid-org--all-day-range-p start end))))
-   (when (and all-day (not (org-timegrid-org--all-day-range-p start end)))
-     (user-error "All-day ranges must span whole days"))
-   (if target
-      (progn
-        (org-timegrid-org--add-range target start end all-day)
-        (message "Added time block to %s" title))
-    (let ((file (org-timegrid-org--capture-target))
-          (entry (and source
-                      (org-timegrid-org--duplicate-entry-string
-                       source title start end all-day))))
-      (unless file
-        (user-error "Set `org-timegrid-org-capture-file' first"))
-      (let ((buffer (find-file-noselect (expand-file-name file))))
-        (with-current-buffer buffer
-          (unless (derived-mode-p 'org-mode)
-            (org-mode))
-          (org-with-wide-buffer
-           (goto-char (point-max))
-           (undo-boundary)
-           (atomic-change-group
-             (let* ((positions
-                     (if entry
-                         (progn
-                           (unless (or (= (point-min) (point-max)) (bolp))
-                             (insert "\n"))
-                           (unless (or (= (point-min) (point-max))
-                                       (save-excursion
-                                         (forward-line -1)
-                                         (looking-at-p "[[:space:]]*$")))
-                             (insert "\n"))
-                           (let ((beginning (copy-marker (point))))
-                             (insert entry)
-                             (list beginning beginning)))
-                       (org-timegrid-org--insert-capture-template
-                        title start end all-day)))
-                    (beginning (car positions))
-                    (final-point (cadr positions)))
-               ;; Run the hook inside the change group, with point on the new
-               ;; heading, so anything it adds belongs to the same undo step as
-               ;; the entry rather than needing a second undo of its own.
-               (goto-char beginning)
-               (run-hooks 'org-timegrid-org-after-create-hook)
-               (goto-char final-point)))
-           (undo-boundary))
-          (org-timegrid-org--note-edit)
-          (message "Added %s" title)))))))
+    (when (and all-day (not (org-timegrid-org--all-day-range-p start end)))
+      (user-error "All-day ranges must span whole days"))
+    (if target
+        (progn
+          (org-timegrid-org--add-range target start end all-day)
+          (message "Added time block to %s" title))
+      (let ((file org-timegrid-org-capture-file)
+            (entry (and source
+                        (org-timegrid-org--duplicate-entry-string
+                         source title start end all-day))))
+        (unless file
+          (user-error "Set `org-timegrid-org-capture-file' first"))
+        (let ((buffer (find-file-noselect (expand-file-name file))))
+          (with-current-buffer buffer
+            (unless (derived-mode-p 'org-mode)
+              (org-mode))
+            (org-timegrid-org--with-edit buffer
+              (goto-char (point-max))
+              (let* ((positions
+                      (if entry
+                          (progn
+                            (unless (or (= (point-min) (point-max)) (bolp))
+                              (insert "\n"))
+                            (unless (or (= (point-min) (point-max))
+                                        (save-excursion
+                                          (forward-line -1)
+                                          (looking-at-p "[[:space:]]*$")))
+                              (insert "\n"))
+                            (let ((beginning (copy-marker (point))))
+                              (insert entry)
+                              (list beginning beginning)))
+                        (org-timegrid-org--insert-capture-template
+                         title start end all-day)))
+                     (beginning (car positions))
+                     (final-point (cadr positions)))
+                ;; Run the hook inside the change group, with point on the new
+                ;; heading, so anything it adds belongs to the same undo step as
+                ;; the entry rather than needing a second undo of its own.
+                (goto-char beginning)
+                (run-hooks 'org-timegrid-org-after-create-hook)
+                (goto-char final-point)))
+            (message "Added %s" title)))))))
 
 (defun org-timegrid-org--headline-has-active-timestamp-p (headline)
   "Return non-nil when HEADLINE's own section has an active timestamp."
@@ -619,35 +631,55 @@ have an active timestamp in their own section."
 (defvar org-timegrid-org--undo-transactions nil)
 (defvar org-timegrid-org--redo-transactions nil)
 (defvar org-timegrid-org--transaction-edits nil)
+(defvar org-timegrid-org--transaction-deletions nil)
 (defvar org-timegrid-org--undo-direction nil
   "Direction of the current undo run: nil for undo and `redo' for redo.")
+
+(defvar-local org-timegrid-org--history-tick nil
+  "Source modification tick after the last calendar edit or undo.")
+
+(defun org-timegrid-org--prepare-history ()
+  "Drop transactions invalidated by intervening edits to this source buffer."
+  (unless (equal org-timegrid-org--history-tick (buffer-chars-modified-tick))
+    (dolist (stack '(org-timegrid-org--undo-transactions
+                     org-timegrid-org--redo-transactions))
+      (set stack (seq-remove (lambda (transaction)
+                               (assq (current-buffer) transaction))
+                             (symbol-value stack))))))
+
+(defun org-timegrid-org--save-buffer ()
+  "Save the current Org buffer when calendar auto-save is enabled."
+  (when (and org-timegrid-org-auto-save buffer-file-name (buffer-modified-p))
+    (save-buffer)))
 
 (defun org-timegrid-org--note-edit ()
   "Record one calendar edit in the current source buffer.
 Save immediately outside a transaction; transactions save once at commit."
   (if org-timegrid-org--transaction-edits
-      (puthash (current-buffer)
-               (1+ (gethash (current-buffer)
-                            org-timegrid-org--transaction-edits 0))
-               org-timegrid-org--transaction-edits)
+      (cl-incf (cdr (gethash (current-buffer) org-timegrid-org--transaction-edits)))
     (push (list (cons (current-buffer) 1))
           org-timegrid-org--undo-transactions)
     (setq org-timegrid-org--redo-transactions nil
           org-timegrid-org--undo-direction nil))
-  (when (and (null org-timegrid-org--transaction-edits)
-             org-timegrid-org-auto-save
-             buffer-file-name
-             (buffer-modified-p))
-    (save-buffer)))
+  (setq org-timegrid-org--history-tick (buffer-chars-modified-tick))
+  (unless org-timegrid-org--transaction-edits
+    (org-timegrid-org--save-buffer)))
 
 (defun org-timegrid-org--apply-history (transaction redo)
-  "Apply TRANSACTION as undo, or as REDO when non-nil."
+  "Apply TRANSACTION as undo, or as REDO when non-nil.
+Check every source before changing any buffer."
+  (dolist (edit transaction)
+    (unless (buffer-live-p (car edit))
+      (user-error "A source buffer needed for undo is no longer live"))
+    (with-current-buffer (car edit)
+      (when buffer-read-only (user-error "%s is read-only" (buffer-name)))
+      (when (eq buffer-undo-list t)
+        (user-error "Undo is disabled in %s" (buffer-name)))
+      (unless (equal org-timegrid-org--history-tick (buffer-chars-modified-tick))
+        (user-error "Org source changed outside the calendar; undo in the source buffer"))))
   (dolist (edit transaction)
     (let ((buffer (car edit)) (count (cdr edit)))
-      (unless (buffer-live-p buffer)
-        (user-error "A source buffer needed for undo is no longer live"))
       (with-current-buffer buffer
-        (when buffer-read-only (user-error "%s is read-only" (buffer-name)))
         ;; A continued run of `undo' calls becomes one redo unit in Emacs.
         (dotimes (index (if redo 1 count))
           (let ((last-command (and (> index 0) (if redo 'undo-redo 'undo)))
@@ -657,34 +689,38 @@ Save immediately outside a transaction; transactions save once at commit."
         ;; drives them.  Establish the boundary that Emacs would normally add
         ;; after an interactive undo command.
         (undo-boundary)
-        (when (and org-timegrid-org-auto-save buffer-file-name
-                   (buffer-modified-p))
-          (save-buffer))))))
+        (setq org-timegrid-org--history-tick (buffer-chars-modified-tick))))))
 
 (defun org-timegrid-org--transaction (function)
   "Run FUNCTION as one atomic backend transaction."
-  (let ((org-timegrid-org--transaction-edits (make-hash-table :test #'eq)))
-    (condition-case error-data
-        (prog1 (funcall function)
-          (let (transaction)
-            (maphash (lambda (buffer count)
-                       (push (cons buffer count) transaction))
-                     org-timegrid-org--transaction-edits)
-            (when transaction
-              (push transaction org-timegrid-org--undo-transactions)
-              (setq org-timegrid-org--redo-transactions nil
-                    org-timegrid-org--undo-direction nil)
-              (dolist (edit transaction)
-                (with-current-buffer (car edit)
-                  (when (and org-timegrid-org-auto-save buffer-file-name
-                             (buffer-modified-p))
-                    (save-buffer)))))))
-      ((error quit)
-       (let (transaction)
-         (maphash (lambda (buffer count) (push (cons buffer count) transaction))
-                  org-timegrid-org--transaction-edits)
-         (when transaction (org-timegrid-org--apply-history transaction nil)))
-       (signal (car error-data) (cdr error-data))))))
+  (if org-timegrid-org--transaction-edits
+      (funcall function)
+    (let ((org-timegrid-org--transaction-edits (make-hash-table :test #'eq))
+          (org-timegrid-org--transaction-deletions (make-hash-table :test #'eq))
+          accepted result transaction)
+      (unwind-protect
+          (setq result (funcall function) accepted t)
+        (maphash
+         (lambda (buffer edit)
+           (when (buffer-live-p buffer)
+             (with-current-buffer buffer
+               (let ((inhibit-read-only t))
+                 (if accepted
+                     (progn
+                       (undo-amalgamate-change-group (car edit))
+                       (accept-change-group (car edit))
+                       (when (> (cdr edit) 0) (push (cons buffer 1) transaction)))
+                   (cancel-change-group (car edit))))
+               (undo-boundary)
+               (setq org-timegrid-org--history-tick (buffer-chars-modified-tick)))))
+         org-timegrid-org--transaction-edits))
+      (when transaction
+        (push transaction org-timegrid-org--undo-transactions)
+        (setq org-timegrid-org--redo-transactions nil
+              org-timegrid-org--undo-direction nil)
+        (dolist (edit transaction)
+          (with-current-buffer (car edit) (org-timegrid-org--save-buffer))))
+      result)))
 
 (defun org-timegrid-org--undo (continue redo)
   "Undo, or REDO, the calendar's most recent Org edit.
@@ -709,27 +745,17 @@ undoing the previous undo.  Each calendar edit is bracketed by
           (setq org-timegrid-org--redo-transactions (cdr from))
           (push transaction org-timegrid-org--undo-transactions))
       (setq org-timegrid-org--undo-transactions (cdr from))
-      (push transaction org-timegrid-org--redo-transactions))))
+      (push transaction org-timegrid-org--redo-transactions))
+    (dolist (edit transaction)
+      (with-current-buffer (car edit) (org-timegrid-org--save-buffer)))))
 
 (defun org-timegrid-org--remove-entry (event)
-  "Delete the whole Org heading that owned EVENT.
-Its timestamp has already gone by the time this runs, so the marker is
-the only identity left to check."
-  (let ((marker (plist-get (org-timegrid-event-source event) :marker)))
-    (unless (and (markerp marker) (marker-buffer marker))
-      (user-error "The Org source marker is no longer live"))
-    (with-current-buffer (marker-buffer marker)
-      (org-with-wide-buffer
-       (when buffer-read-only
-         (user-error "The source Org buffer is read-only"))
-       (goto-char marker)
-       (org-back-to-heading t)
-       (undo-boundary)
-       (delete-region (point)
-                      (save-excursion (org-end-of-subtree t t) (point)))
-       (undo-boundary))
-      (org-timegrid-org--note-edit))
-    (message "Deleted %s" (org-timegrid-event-title event))))
+  "Delete the whole Org heading that owned EVENT."
+  (org-timegrid-org--with-edit (plist-get (org-timegrid-event-source event) :marker)
+    (org-back-to-heading t)
+    (delete-region (point)
+                   (save-excursion (org-end-of-subtree t t) (point))))
+  (message "Deleted %s" (org-timegrid-event-title event)))
 
 (defun org-timegrid-org--timestamp-at-marker (marker)
   "Return the Org timestamp element at MARKER, or signal an error."
@@ -837,57 +863,50 @@ END is exclusive internally; Org's written date-range endpoint is inclusive."
          (marker (plist-get source :marker))
          (timestamp (org-timegrid-org--timestamp-at-marker marker)))
     (org-timegrid-org--validate-event-source event timestamp)
-    (with-current-buffer (marker-buffer marker)
-      (org-with-wide-buffer
-       (when buffer-read-only
-         (user-error "The source Org buffer is read-only"))
-       (undo-boundary)
-       (atomic-change-group
-         (let* ((all-day (org-timegrid-event-all-day event))
-                (base-start
-                 (if all-day
-                     (org-timegrid-org--timestamp-all-day-minutes timestamp nil)
-                   (org-timegrid-org--timestamp-minutes timestamp nil)))
-                (occurrence-start (org-timegrid-event-start event))
-                (new-base-start (+ base-start (- start occurrence-start)))
-                (new-base-end (+ new-base-start (- end start)))
-                (new-all-day
-                 (if time-kind
-                     (eq time-kind 'all-day)
-                   (and all-day
-                        (= (% new-base-start 1440) 0)
-                        (= (% new-base-end 1440) 0)
-                        (>= (- new-base-end new-base-start) 1440))))
-                (replacement
-                 (if (and new-all-day
-                          (not (org-timegrid-org--all-day-range-p
-                                new-base-start new-base-end)))
-                     (user-error "All-day ranges must span whole days")
-                   (if new-all-day
-                     (org-timegrid-org--rewrite-all-day-timestamp
-                      timestamp new-base-start new-base-end)
-                   (org-timegrid-org--rewrite-timestamp
-                    timestamp new-base-start new-base-end)))))
-           (goto-char (org-element-property :begin timestamp))
-           (delete-region (org-element-property :begin timestamp)
-                          (org-element-property :end timestamp))
-           (insert replacement))
-         (when title
-           (org-timegrid-org--rename-heading marker title)))
-       (undo-boundary))
-      (org-timegrid-org--note-edit)
-      ;; Keep validation metadata coherent for another optimistic update.
-      (let* ((updated (org-timegrid-org--timestamp-at-marker marker))
-             (metadata (copy-sequence (org-timegrid-event-metadata event))))
-        (setf (org-timegrid-event-start event) start
-              (org-timegrid-event-end event) end
-              (org-timegrid-event-all-day event)
+    (org-timegrid-org--with-edit marker
+      (let* ((all-day (org-timegrid-event-all-day event))
+             (base-start
+              (if all-day
+                  (org-timegrid-org--timestamp-all-day-minutes timestamp nil)
+                (org-timegrid-org--timestamp-minutes timestamp nil)))
+             (occurrence-start (org-timegrid-event-start event))
+             (new-base-start (+ base-start (- start occurrence-start)))
+             (new-base-end (+ new-base-start (- end start)))
+             (new-all-day
               (if time-kind
                   (eq time-kind 'all-day)
-                (org-timegrid-org--timestamp-all-day-p updated))
-              (plist-get metadata :raw-value)
-              (org-element-property :raw-value updated)
-              (org-timegrid-event-metadata event) metadata)))
+                (and all-day
+                     (= (% new-base-start 1440) 0)
+                     (= (% new-base-end 1440) 0)
+                     (>= (- new-base-end new-base-start) 1440))))
+             (replacement
+              (if (and new-all-day
+                       (not (org-timegrid-org--all-day-range-p
+                             new-base-start new-base-end)))
+                  (user-error "All-day ranges must span whole days")
+                (if new-all-day
+                    (org-timegrid-org--rewrite-all-day-timestamp
+                     timestamp new-base-start new-base-end)
+                  (org-timegrid-org--rewrite-timestamp
+                   timestamp new-base-start new-base-end)))))
+        (goto-char (org-element-property :begin timestamp))
+        (delete-region (org-element-property :begin timestamp)
+                       (org-element-property :end timestamp))
+        (insert replacement))
+      (when title
+        (org-timegrid-org--rename-heading marker title)))
+    ;; Keep validation metadata coherent for another optimistic update.
+    (let* ((updated (org-timegrid-org--timestamp-at-marker marker))
+           (metadata (copy-sequence (org-timegrid-event-metadata event))))
+      (setf (org-timegrid-event-start event) start
+            (org-timegrid-event-end event) end
+            (org-timegrid-event-all-day event)
+            (if time-kind
+                (eq time-kind 'all-day)
+              (org-timegrid-org--timestamp-all-day-p updated))
+            (plist-get metadata :raw-value)
+            (org-element-property :raw-value updated)
+            (org-timegrid-event-metadata event) metadata))
     (message "%s %s" (if title "Renamed" "Retimed")
              (org-timegrid-event-title event))))
 
@@ -982,9 +1001,9 @@ ALL-DAY and SCOPE describe the edit; LOCATION is a (MARKER . KIND) pair."
           (list :marker (copy-marker marker) :start start
                 :scope (if (eq scope 'this) 'direct scope)))))
 
-(defun org-timegrid-org--update-history-range (event start end time-kind &optional deleting)
+(defun org-timegrid-org--update-history-range (event start end time-kind &optional deleting scope)
   "Edit EVENT's series to START and END with TIME-KIND, or cancel if DELETING."
-  (let* ((scope (org-timegrid-org--prepare-history-edit event deleting))
+  (let* ((scope (or scope (org-timegrid-org--prepare-history-edit event deleting)))
          (marker (plist-get (org-timegrid-event-source event) :marker))
          (timestamp (org-timegrid-org--timestamp-at-marker marker))
          (all-day (if time-kind (eq time-kind 'all-day)
@@ -992,15 +1011,9 @@ ALL-DAY and SCOPE describe the edit; LOCATION is a (MARKER . KIND) pair."
          location)
     (org-timegrid-org--validate-event-source event timestamp)
     (org-timegrid-org--validate-history-range event start end all-day scope)
-    (with-current-buffer (marker-buffer marker)
-      (org-with-wide-buffer
-       (when buffer-read-only (user-error "The source Org buffer is read-only"))
-       (undo-boundary)
-       (atomic-change-group
-         (setq location (org-timegrid-org--write-history-range
-                         event timestamp start end all-day scope deleting)))
-       (undo-boundary)
-       (org-timegrid-org--note-edit)))
+    (org-timegrid-org--with-edit marker
+      (setq location (org-timegrid-org--write-history-range
+                      event timestamp start end all-day scope deleting)))
     (org-timegrid-org--sync-history-event event location start end all-day scope)))
 
 (defun org-timegrid-org--timestamp-region (timestamp kind)
@@ -1021,13 +1034,41 @@ gone plans nothing.  Everything after this point treats them alike."
             (user-error "The planning timestamp label changed"))
           (cons (match-beginning 0) end))))))
 
+(defun org-timegrid-org--current-occurrence (event)
+  "Resolve EVENT again after another occurrence changed its source series."
+  (let ((key (org-timegrid-org--entry-key event))
+        (start (org-timegrid-event-start event)))
+    (with-current-buffer (car key)
+      (org-with-wide-buffer
+       (seq-find
+        (lambda (candidate) (= start (org-timegrid-event-start candidate)))
+        (mapcan (lambda (anchor)
+                  (when (equal key (org-timegrid-org--entry-key anchor))
+                    (org-timegrid-org--expand-event anchor start (1+ start))))
+                (org-timegrid-org--buffer-events
+                 (plist-get (org-timegrid-event-source event) :file))))))))
+
 (defun org-timegrid-org--remove-event (event)
-  "Remove EVENT's time from its Org heading, keeping the heading itself."
-  (if (plist-get (org-timegrid-event-metadata event) :history)
-      (org-timegrid-org--update-history-range
-       event (org-timegrid-event-start event) (org-timegrid-event-end event)
-       nil t)
-    (org-timegrid-org--remove-anchor event)))
+  "Remove EVENT's time, reusing a series' deletion scope during bulk edits."
+  (let* ((marker (plist-get (org-timegrid-event-source event) :marker))
+         (start (org-timegrid-event-start event))
+         (previous (and org-timegrid-org--transaction-deletions
+                        (gethash marker org-timegrid-org--transaction-deletions)))
+         (history (plist-get (org-timegrid-event-metadata event) :history)))
+    (unless (and previous
+                 (or (eq (car previous) 'all)
+                     (= start (cdr previous))
+                     (and (eq (car previous) 'future) (>= start (cdr previous)))))
+      (let ((scope (if previous (car previous)
+                     (if history (org-timegrid-org--prepare-history-edit event t) 'all)))
+            (current (if previous (org-timegrid-org--current-occurrence event) event)))
+        (when current
+          (if history
+              (org-timegrid-org--update-history-range
+               current start (org-timegrid-event-end current) nil t scope)
+            (org-timegrid-org--remove-anchor current))
+          (when org-timegrid-org--transaction-deletions
+            (puthash marker (cons scope start) org-timegrid-org--transaction-deletions)))))))
 
 (defun org-timegrid-org--remove-anchor (event)
   "Remove EVENT's original timestamp without history semantics."
@@ -1035,36 +1076,29 @@ gone plans nothing.  Everything after this point treats them alike."
          (marker (plist-get source :marker))
          (timestamp (org-timegrid-org--timestamp-at-marker marker)))
     (org-timegrid-org--validate-event-source event timestamp)
-    (with-current-buffer (marker-buffer marker)
-      (org-with-wide-buffer
-       (when buffer-read-only
-         (user-error "The source Org buffer is read-only"))
-       ;; The cut payload retains this marker for paste.  Keep it on its
-       ;; heading before deleting the timestamp underneath it, and advance
-       ;; it when paste inserts text at the end of the preceding heading.
-       (save-excursion
-         (goto-char marker)
-         (org-back-to-heading t)
-         (set-marker marker (point))
-         (set-marker-insertion-type marker t))
-       (undo-boundary)
-       (atomic-change-group
-         (let ((region (org-timegrid-org--timestamp-region
-                        timestamp (plist-get source :kind))))
-           (delete-region (car region) (cdr region))
-           (goto-char (car region))
-           ;; What is left behind belongs to neither the entry nor the
-           ;; calendar: a gap between two values sharing a planning line,
-           ;; or an empty line where the value stood alone.
-           (when (looking-at "[ \t]\\{2,\\}")
-             (replace-match " "))
-           (when (save-excursion
-                   (beginning-of-line)
-                   (looking-at-p "[ \t]*$"))
-             (delete-region (line-beginning-position)
-                            (min (point-max) (1+ (line-end-position)))))))
-       (undo-boundary))
-      (org-timegrid-org--note-edit))
+    (org-timegrid-org--with-edit marker
+      ;; The cut payload retains this marker for paste.  Keep it on its
+      ;; heading before deleting the timestamp underneath it, and advance
+      ;; it when paste inserts text at the end of the preceding heading.
+      (save-excursion
+        (goto-char marker)
+        (org-back-to-heading t)
+        (set-marker marker (point))
+        (set-marker-insertion-type marker t))
+      (let ((region (org-timegrid-org--timestamp-region
+                     timestamp (plist-get source :kind))))
+        (delete-region (car region) (cdr region))
+        (goto-char (car region))
+        ;; What is left behind belongs to neither the entry nor the
+        ;; calendar: a gap between two values sharing a planning line,
+        ;; or an empty line where the value stood alone.
+        (when (looking-at "[ \t]\\{2,\\}")
+          (replace-match " "))
+        (when (save-excursion
+                (beginning-of-line)
+                (looking-at-p "[ \t]*$"))
+          (delete-region (line-beginning-position)
+                         (min (point-max) (1+ (line-end-position)))))))
     (message "Untimed %s" (org-timegrid-event-title event))))
 
 (defun org-timegrid-org--entry-empty-p (event)
@@ -1206,8 +1240,7 @@ ALL-DAY records that the timestamp has dates but no times."
      :color (funcall org-timegrid-org-color-function headline)
      :source (list :file file :marker (copy-marker begin) :kind kind)
      :metadata
-     (list :planning-type kind
-           :raw-value (org-element-property :raw-value timestamp)
+     (list :raw-value (org-element-property :raw-value timestamp)
            :repeater-type (org-element-property :repeater-type timestamp)
            :repeater-value (org-element-property :repeater-value timestamp)
            :repeater-unit (org-element-property :repeater-unit timestamp)))))
@@ -1247,13 +1280,22 @@ ALL-DAY records that the timestamp has dates but no times."
     (cond
      ((plist-get metadata :cancelled) nil)
      ((not (and (integerp value) (> value 0) unit))
-        (and (< base-start query-end)
-             (> (+ base-start duration) query-start)
-             (list event)))
+      (and (< base-start query-end)
+           (> (+ base-start duration) query-start)
+           (list event)))
      (t
-      (let ((occurrence-start base-start)
-            (iterations 0)
-            occurrences)
+      (let* ((step (pcase unit
+                     ('hour (* value 60))
+                     ('day (* value 1440))
+                     ('week (* value 7 1440))))
+             (occurrence-start
+              (if step
+                  (+ base-start
+                     (* step (max 0 (1+ (floor (- query-start base-start duration)
+                                               step)))))
+                base-start))
+             (iterations 0)
+             occurrences)
         (while (and (< occurrence-start query-end)
                     (< iterations 100000))
           (when (> (+ occurrence-start duration) query-start)
@@ -1265,9 +1307,10 @@ ALL-DAY records that the timestamp has dates but no times."
                     occurrence-start
                     (org-timegrid-event-end occurrence)
                     (+ occurrence-start duration)
+                    (org-timegrid-event-source occurrence)
+                    (copy-sequence (org-timegrid-event-source event))
                     (org-timegrid-event-metadata occurrence)
-                    (plist-put (copy-sequence metadata)
-                               :occurrence-start occurrence-start))
+                    (copy-sequence metadata))
               (push occurrence occurrences)))
           (let ((next (org-timegrid-org--next-repetition
                        occurrence-start value unit)))
@@ -1528,6 +1571,7 @@ it.  DURATION is unused because only a typed range can supply one here."
          (date (calendar-gregorian-from-absolute day))
          (default-time (encode-time 0 (% minute 60) (/ minute 60)
                                     (nth 1 date) (nth 0 date) (nth 2 date)))
+         (org-time-was-given nil)
          (org-end-time-was-given nil)
          (answer (org-timegrid-calendar-read-date
                   org-timegrid-org-backend t nil nil "Time"
@@ -1546,7 +1590,7 @@ it.  DURATION is unused because only a typed range can supply one here."
                              (match-string 1 org-end-time-was-given)))
                       (string-to-number
                        (match-string 2 org-end-time-was-given))))))
-    (cons start (and end (> end clock) (- end clock)))))
+    (cons start (and end (+ (- end clock) (if (<= end clock) 1440 0))))))
 
 ;;;###autoload
 (defun org-timegrid-week (&optional absolute-date)

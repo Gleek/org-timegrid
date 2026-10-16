@@ -47,8 +47,8 @@ SOURCE is opaque to the renderer and belongs to the backend."
 TIME-KIND is either `timed' or `all-day'.  The remaining layout slots are
 filled by the renderers without changing the event's calendar meaning."
   id day start end title time-kind tags state color done event preview
-  source-day source-start source-end allow-top allow-bottom boundary-edge
-  nest-depth root-id parent-id layout-path nested-family lane lanes
+  source-start source-end allow-top allow-bottom boundary-edge
+  nest-depth parent-id layout-path lane lanes
   rail-start rail-end continues-left continues-right rail-lane)
 
 (defun org-timegrid-block-all-day-p (block)

@@ -95,10 +95,11 @@ def main():
         help="literal characters to include (default: calendar subset)",
     )
     args = parser.parse_args()
+    characters = "".join(dict.fromkeys(args.characters + "?"))
 
     bold_source = args.bold_font or args.font
-    units, regular = extract(args.font, args.regular_weight, args.characters)
-    bold_units, bold = extract(bold_source, args.bold_weight, args.characters)
+    units, regular = extract(args.font, args.regular_weight, characters)
+    bold_units, bold = extract(bold_source, args.bold_weight, characters)
     if units != bold_units:
         raise ValueError("font instances have different units per em")
 
