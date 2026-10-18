@@ -265,7 +265,7 @@
 (ert-deftest org-timegrid-regression-clock-uses-supplied-minute ()
   (let ((svg (svg-create 900 1400)))
     (org-timegrid--draw-current-time svg 900 1400 100 '(:red "#ff0000") "monospace" 0 1 83 0)
-    (should (string-match-p ">01:23<" (with-temp-buffer (svg-print svg) (buffer-string))))))
+    (should (string-match-p ">[[:space:]]*01:23[[:space:]]*<" (with-temp-buffer (svg-print svg) (buffer-string))))))
 
 (ert-deftest org-timegrid-regression-time-readers-reject-invalid-input ()
   (dolist (answer '("2026-02-30 10:00" "2026-10-01 24:00" "2026-10-01 10:99" "junk"))

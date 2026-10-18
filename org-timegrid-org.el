@@ -587,7 +587,7 @@ Only timestamps in the heading's own section count."
             (when (or (null start) (> time start))
               (setq latest timestamp start time))))))
     (when (and latest
-               (org-element-property :range-type latest)
+               (org-timegrid-org--timestamp-range-p latest)
                (integerp (org-element-property :hour-end latest)))
       (- (org-timegrid-org--timestamp-minutes latest t) start))))
 
@@ -1206,6 +1206,11 @@ still have no place on a time grid."
        (integerp (org-element-property :hour-start timestamp))
        (integerp (org-element-property :minute-start timestamp))))
 
+(defun org-timegrid-org--timestamp-range-p (timestamp)
+  "Return non-nil when TIMESTAMP has an explicit range, across Org versions."
+  (or (org-element-property :range-type timestamp)
+      (memq (org-element-property :type timestamp) '(active-range inactive-range))))
+
 (defun org-timegrid-org--timestamp-all-day-p (timestamp)
   "Return non-nil when TIMESTAMP is an active date without a clock time."
   (and timestamp
@@ -1219,7 +1224,7 @@ ENDP selects the end rather than the start of a timestamp range.
 Org writes an inclusive final date, whereas the renderer uses a half-open
 interval.  Thus an Org range through August 27 ends internally at the start
 of August 28, without displaying or writing an August 28 occurrence."
-  (let* ((suffix (if (and endp (org-element-property :range-type timestamp))
+  (let* ((suffix (if (and endp (org-timegrid-org--timestamp-range-p timestamp))
                      "-end"
                    "-start"))
          (year (org-element-property (intern (format ":year%s" suffix)) timestamp))
@@ -1234,8 +1239,8 @@ ENDP selects the endpoint.  A clock-only range whose endpoint is not later
 than its start is treated as ending on the following day.  A timestamp
 with no end time gets `org-timegrid-default-duration-minutes'."
   ;; A plain timestamp reports its end hour as a copy of its start, so
-  ;; `range-type' is the only trustworthy sign that an end was written.
-  (if (and endp (not (org-element-property :range-type timestamp)))
+  ;; Check range metadata to distinguish an explicit end from that copy.
+  (if (and endp (not (org-timegrid-org--timestamp-range-p timestamp)))
       (+ (org-timegrid-org--timestamp-minutes timestamp nil)
          org-timegrid-default-duration-minutes)
     (let* ((suffix (if endp "-end" "-start"))

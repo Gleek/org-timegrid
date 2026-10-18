@@ -21,6 +21,18 @@
         (should (equal (org-timegrid-org--heading-last-duration headline)
                        (cadr example)))))))
 
+(ert-deftest org-timegrid-completion-legacy-org-ranges ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Task\n<2026-10-15 Thu 10:00-10:45>\n")
+    (let* ((headline (car (org-element-map (org-element-parse-buffer)
+                            'headline #'identity)))
+           (timestamp (car (org-element-map headline 'timestamp #'identity))))
+      ;; Org 9.6 uses :type without the newer :range-type property.
+      (org-element-put-property timestamp :range-type nil)
+      (org-element-put-property timestamp :type 'active-range)
+      (should (= 45 (org-timegrid-org--heading-last-duration headline))))))
+
 (ert-deftest org-timegrid-completion-annotations-and-selection ()
   (with-temp-buffer
     (org-mode)

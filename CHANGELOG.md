@@ -1,6 +1,7 @@
 # Changelog
 
 ## v0.0.4 — 2026-10-18
+- Preserved explicit timestamp range durations with older Org versions bundled in Emacs 29.
 - Task completion now shows aligned annotations for the latest explicitly recorded block duration, inherited tags, and file/outline context, using Emacs's built-in completion API without a Marginalia dependency.
 - Simplified calendar rendering, cached timed and all-day layouts, and fixed duplicate painting of selected blocks and hit testing in narrow windows.
 - Made bulk Org edits atomic, including nested transactions and rollback after errors. Calendar undo/redo now checks all source buffers and refuses to overwrite intervening source edits.
