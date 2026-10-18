@@ -127,7 +127,8 @@ This convention applies only to Timegrid, not Org Agenda."
   events)
 
 (defun org-timegrid-org--prepare-history-edit (event &optional deleting)
-  "Return EVENT's scope, prompting once per editing session."
+  "Return EVENT's scope, prompting once per editing session.
+DELETING selects the deletion prompt."
   (let ((marker (plist-get (org-timegrid-event-source event) :marker)))
     (unless (and (not deleting)
                  (equal marker (plist-get org-timegrid--edit-context :marker))
@@ -463,6 +464,17 @@ Return markers for its beginning and the position selected by `%?'."
           (goto-char beginning)))
       (list (copy-marker beginning) (copy-marker (point))))))
 
+(defvar org-timegrid-org--undo-transactions nil)
+(defvar org-timegrid-org--redo-transactions nil)
+(defvar org-timegrid-org--transaction-edits nil)
+(defvar org-timegrid-org--transaction-deletions nil)
+(defvar org-timegrid-org--undo-direction nil
+  "Direction of the current undo run: nil for undo and `redo' for redo.")
+
+(defvar-local org-timegrid-org--history-tick nil
+  "Source modification tick after the last calendar edit or undo.")
+
+
 (defmacro org-timegrid-org--with-edit (location &rest body)
   "Run BODY at live buffer or marker LOCATION as one recorded Org edit."
   (declare (indent 1) (debug (form body)))
@@ -695,15 +707,6 @@ have an active timestamp in their own section."
         (cdr match)
       (cons choice nil))))
 
-(defvar org-timegrid-org--undo-transactions nil)
-(defvar org-timegrid-org--redo-transactions nil)
-(defvar org-timegrid-org--transaction-edits nil)
-(defvar org-timegrid-org--transaction-deletions nil)
-(defvar org-timegrid-org--undo-direction nil
-  "Direction of the current undo run: nil for undo and `redo' for redo.")
-
-(defvar-local org-timegrid-org--history-tick nil
-  "Source modification tick after the last calendar edit or undo.")
 
 (defun org-timegrid-org--prepare-history ()
   "Drop transactions invalidated by intervening edits to this source buffer."
@@ -925,7 +928,8 @@ END is exclusive internally; Org's written date-range endpoint is inclusive."
 
 (defun org-timegrid-org--update-anchor-range
     (event start end &optional title time-kind)
-  "Update EVENT's original anchor to START and END."
+  "Update EVENT's original anchor to START and END.
+TITLE and TIME-KIND, when non-nil, replace its title and timestamp kind."
   (let* ((source (org-timegrid-event-source event))
          (marker (plist-get source :marker))
          (timestamp (org-timegrid-org--timestamp-at-marker marker)))
@@ -979,7 +983,8 @@ END is exclusive internally; Org's written date-range endpoint is inclusive."
 
 (defun org-timegrid-org--history-replacement (timestamp start end all-day
                                                         &optional single cancelled)
-  "Rewrite TIMESTAMP to START and END, optionally as a SINGLE occurrence."
+  "Rewrite TIMESTAMP to START and END, optionally as a SINGLE occurrence.
+ALL-DAY selects date-only output; CANCELLED makes the timestamp inactive."
   (let ((copy (copy-tree timestamp)))
     (when single
       (dolist (key '(:repeater-type :repeater-value :repeater-unit))
@@ -1014,7 +1019,7 @@ buffer selection, validation and the atomic change group."
          (base (if (org-timegrid-event-all-day event)
                    (org-timegrid-org--timestamp-all-day-minutes timestamp nil)
                  (org-timegrid-org--timestamp-minutes timestamp nil)))
-         (replace (or (memq scope '(all direct)) (= base old-start)))
+         (replace (or (memq scope '(direct all)) (= base old-start)))
          (offset (if (eq scope 'all) (- base old-start) 0))
          (value (plist-get metadata :repeater-value))
          (resume (and value (org-timegrid-org--next-repetition
@@ -1069,7 +1074,8 @@ ALL-DAY and SCOPE describe the edit; LOCATION is a (MARKER . KIND) pair."
                 :scope (if (eq scope 'this) 'direct scope)))))
 
 (defun org-timegrid-org--update-history-range (event start end time-kind &optional deleting scope)
-  "Edit EVENT's series to START and END with TIME-KIND, or cancel if DELETING."
+  "Edit EVENT's series to START and END with TIME-KIND, or cancel if DELETING.
+SCOPE, when non-nil, supplies the edit scope without prompting."
   (let* ((scope (or scope (org-timegrid-org--prepare-history-edit event deleting)))
          (marker (plist-get (org-timegrid-event-source event) :marker))
          (timestamp (org-timegrid-org--timestamp-at-marker marker))
