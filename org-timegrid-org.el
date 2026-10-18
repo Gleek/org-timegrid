@@ -573,11 +573,30 @@ distinguishes date-only values from midnight-aligned timed values."
             (throw 'active t))))
       nil)))
 
+(defun org-timegrid-org--heading-last-duration (headline)
+  "Return HEADLINE's latest timed block duration, when explicitly recorded.
+Only timestamps in the heading's own section count."
+  (let ((section (seq-find (lambda (element)
+                             (eq (org-element-type element) 'section))
+                           (org-element-contents headline)))
+        latest start)
+    (org-element-map section 'timestamp
+      (lambda (timestamp)
+        (when (org-timegrid-org--timestamp-timed-p timestamp)
+          (let ((time (org-timegrid-org--timestamp-minutes timestamp nil)))
+            (when (or (null start) (> time start))
+              (setq latest timestamp start time))))))
+    (when (and latest
+               (org-element-property :range-type latest)
+               (integerp (org-element-property :hour-end latest)))
+      (- (org-timegrid-org--timestamp-minutes latest t) start))))
+
 (defun org-timegrid-org--heading-candidates ()
   "Return headings eligible for adding another calendar range.
 This includes unfinished TODO headings and plain headings that already
 have an active timestamp in their own section."
-  (let (candidates)
+  (let ((counts (make-hash-table :test #'equal))
+        candidates)
     (dolist (file (org-timegrid-org--files))
       (with-current-buffer (find-file-noselect file)
         (org-with-wide-buffer
@@ -591,9 +610,12 @@ have an active timestamp in their own section."
                          headline)))
                (let* ((title (org-element-property :raw-value headline))
                       (todo (org-element-property :todo-keyword headline))
-                      (tags (org-element-property :tags headline))
                       (marker (copy-marker
                                (org-element-property :begin headline)))
+                      (tags (save-excursion
+                              (goto-char marker)
+                              (org-get-tags)))
+                      (duration (org-timegrid-org--heading-last-duration headline))
                       (path (save-excursion
                               (goto-char marker)
                               (org-get-outline-path)))
@@ -610,19 +632,64 @@ have an active timestamp in their own section."
                                          (propertize
                                           todo 'face
                                           (org-get-todo-face todo)))
-                                    title
-                                    (and tag-text
-                                         (propertize tag-text 'face 'org-tag))
-                                    (propertize (format "[%s]" context)
-                                                'face 'shadow)))
-                        "  ")))
+                                    title))
+                        "  "))
+                      (columns
+                       (list (propertize (if duration (format "last: %dm" duration) "")
+                                         'face 'shadow)
+                             (propertize (or tag-text "") 'face 'org-tag)
+                             (propertize context 'face 'shadow))))
+                 (put-text-property 0 (length display)
+                                    'org-timegrid-columns columns display)
+                 (puthash display (1+ (gethash display counts 0)) counts)
                  (push (cons display (cons title marker)) candidates))))))))
-    (nreverse candidates)))
+    ;; Keep identical titles selectable without adding context to every title.
+    (mapcar (lambda (entry)
+              (if (= (gethash (car entry) counts) 1)
+                  entry
+                (cons (concat (car entry) "  ["
+                              (nth 2 (get-text-property
+                                      0 'org-timegrid-columns (car entry))) "]")
+                      (cdr entry))))
+            (nreverse candidates))))
+
+(defun org-timegrid-org--affix-entries (entries candidates)
+  "Align annotations for completion ENTRIES from CANDIDATES."
+  (let* ((rows (mapcar
+                (lambda (entry)
+                  (cons entry (get-text-property
+                               0 'org-timegrid-columns
+                               (car (assoc entry candidates)))))
+                entries))
+         (widths (mapcar (lambda (column)
+                           (apply #'max 0
+                                  (mapcar (lambda (row)
+                                            (string-width (nth column row)))
+                                          rows)))
+                         '(0 1 2))))
+    (mapcar
+     (lambda (row)
+       (list (car row) ""
+             (mapconcat (lambda (column)
+                          (concat (make-string
+                                   (+ 2 (- (nth column widths)
+                                           (string-width (nth column row))))
+                                   ?\s)
+                                  (nth (1+ column) row)))
+                        '(0 1 2) "")))
+     rows)))
 
 (defun org-timegrid-org-read-entry ()
   "Read an eligible Org heading, or a title for a new capture entry."
   (let* ((candidates (org-timegrid-org--heading-candidates))
-         (choice (completing-read "Task: " candidates nil nil))
+         (affix (lambda (entries)
+                  (org-timegrid-org--affix-entries entries candidates)))
+         (table (lambda (string predicate action)
+                  (if (eq action 'metadata)
+                      `(metadata (category . org-timegrid-entry)
+                                 (affixation-function . ,affix))
+                    (complete-with-action action candidates string predicate))))
+         (choice (completing-read "Task: " table nil nil))
          (match (assoc choice candidates)))
     (if match
         (cdr match)

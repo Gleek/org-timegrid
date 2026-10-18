@@ -390,10 +390,13 @@ priority, property, or file.
 | `org-timegrid-org-tag-color-alist`       |                                    `nil` | Tag-to-colour mapping                                                 |
 
 On an empty slot, `RET` and mouse-drag creation complete against unfinished
-TODO headings in the configured Org files. Choosing one adds the new time
-range to that heading. Entering text that does not match a candidate creates a
-heading in `org-timegrid-org-capture-file`, as before. This uses Org's parser
-and works with any `completion-styles`.
+TODO headings and plain headings with active timestamps in the configured Org
+files. Choosing one adds the new time range to that heading. Aligned annotations
+show the latest timed block's duration when it has an explicit end time, tags
+(including inherited tags), and file/outline context. These use Emacs's built-in
+completion API and do not require Marginalia. Entering text that does not match
+a candidate creates a heading in `org-timegrid-org-capture-file`, as before.
+This uses Org's parser and works with any `completion-styles`.
 
 The default template is `(:target file :template "* %{title}\n%{time-range}\n%?")`.
 Its target may also be `datetree`, `(headline "Name")`, or
