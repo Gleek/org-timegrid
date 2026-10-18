@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.0.4 — 2026-10-18
+- Task completion now shows aligned annotations for the latest explicitly recorded block duration, inherited tags, and file/outline context, using Emacs's built-in completion API without a Marginalia dependency.
+- Simplified calendar rendering, cached timed and all-day layouts, and fixed duplicate painting of selected blocks and hit testing in narrow windows.
+- Made bulk Org edits atomic, including nested transactions and rollback after errors. Calendar undo/redo now checks all source buffers and refuses to overwrite intervening source edits.
+- Fixed bulk deletion of repeating occurrences to reuse the chosen scope and resolve remaining occurrences after the series changes. Old fixed-interval repeaters now skip directly to the queried dates.
+- Fixed cancelled mouse/touch gestures leaving previews behind, releases outside the calendar using stale targets, and Android long-press handling in the all-day rail.
+- Made events continuing into the visible range reachable by keyboard and kept clicks on continuation segments on the clicked day. All-day navigation no longer scrolls the timed grid.
+- Fixed cross-week search horizons for non-seven-day views and cached empty search results. Disabling the agenda integration now removes its calendar strips and cancels pending theme refreshes.
+- Preserved literal capture/clipboard template values, validated pasted calendar data before undoing a previous paste, and kept the kill ring intact when cutting fails. Improved date/time validation and overnight range input.
+- Added regression coverage and a shared ERT runner, expanded CI checks, and updated MELPA lint support and development documentation.
+
 ## v0.0.3 — 2026-10-13
 - Repeating events now preserve history when editing or deleting just one occurrence, future occurrences, or the whole series. Added configurable history cutoffs and undo support.
 - Plain headings with active date-only timestamps now appear in completion when adding another calendar range.
