@@ -263,6 +263,39 @@
     (should (equal (org-timegrid--face-color 'error :foreground "#d94b4b")
                    "#ff0000"))))
 
+(ert-deftest org-timegrid-test-font-size-uses-resolved-pixels ()
+  (with-temp-buffer
+    (let ((org-timegrid-default-zoom 1.0))
+      (cl-letf (((symbol-function 'display-graphic-p) (lambda (&optional _) t))
+                ((symbol-function 'face-attribute)
+                 (lambda (_face attribute &rest _)
+                   (pcase attribute
+                     (:font (font-spec :family "Monospace" :size 0))
+                     (:height 140))))
+                ((symbol-function 'face-font)
+                 (lambda (face frame)
+                   (should (eq face 'default))
+                   (should-not frame)
+                   "resolved-font"))
+                ((symbol-function 'font-info)
+                 (lambda (name frame)
+                   (should (equal name "resolved-font"))
+                   (should-not frame)
+                   ["resolved-font" "resolved-font" 19 24]))
+                ((symbol-function 'frame-char-height) (lambda (&optional _) 24))
+                ((symbol-function 'org-timegrid--default-font-height)
+                 (lambda (&optional _) 48)))
+        (should (= (org-timegrid--frame-font-size) 19))
+        (should (= (org-timegrid--default-font-size) 38))))))
+
+(ert-deftest org-timegrid-test-terminal-font-size-uses-reference ()
+  (with-temp-buffer
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda (&optional _) nil))
+              ((symbol-function 'font-info)
+               (lambda (&rest _) (ert-fail "Terminal has no pixel font"))))
+      (should (= (org-timegrid--frame-font-size)
+                 org-timegrid--reference-font-size)))))
+
 (ert-deftest org-timegrid-test-text-scale-controls-svg-scale ()
   (with-temp-buffer
     (let ((org-timegrid-pixels-per-minute 0.9)

@@ -263,14 +263,13 @@ fallback for buffers that are not displayed."
       (default-font-height))))
 
 (defun org-timegrid--frame-font-size (&optional window)
-  "Return WINDOW's unscaled default-face font size in pixels."
+  "Return WINDOW's resolved, unscaled default-face font size in pixels.
+Use the reference size on terminal frames, which have no pixel font size."
   (let* ((window (or window (get-buffer-window (current-buffer) t)))
-         (frame (and (window-live-p window) (window-frame window)))
-         (font (face-attribute 'default :font frame t))
-         (size (and (fontp font) (font-get font :size))))
-    (if (numberp size)
-        size
-      (/ (face-attribute 'default :height frame t) 10.0))))
+         (frame (and (window-live-p window) (window-frame window))))
+    (if (display-graphic-p frame)
+        (aref (font-info (face-font 'default frame) frame) 2)
+      org-timegrid--reference-font-size)))
 
 (defun org-timegrid--default-font-size (&optional window)
   "Return WINDOW's effective default-face font size in SVG pixels."
