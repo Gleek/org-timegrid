@@ -1,16 +1,27 @@
 # Changelog
 
 ## v0.0.4 — 2026-10-18
-- Preserved explicit timestamp range durations with older Org versions bundled in Emacs 29.
-- Task completion now shows aligned annotations for the latest explicitly recorded block duration, inherited tags, and file/outline context, using Emacs's built-in completion API without a Marginalia dependency.
-- Simplified calendar rendering, cached timed and all-day layouts, and fixed duplicate painting of selected blocks and hit testing in narrow windows.
-- Made bulk Org edits atomic, including nested transactions and rollback after errors. Calendar undo/redo now checks all source buffers and refuses to overwrite intervening source edits.
-- Fixed bulk deletion of repeating occurrences to reuse the chosen scope and resolve remaining occurrences after the series changes. Old fixed-interval repeaters now skip directly to the queried dates.
-- Fixed cancelled mouse/touch gestures leaving previews behind, releases outside the calendar using stale targets, and Android long-press handling in the all-day rail.
-- Made events continuing into the visible range reachable by keyboard and kept clicks on continuation segments on the clicked day. All-day navigation no longer scrolls the timed grid.
-- Fixed cross-week search horizons for non-seven-day views and cached empty search results. Disabling the agenda integration now removes its calendar strips and cancels pending theme refreshes.
-- Preserved literal capture/clipboard template values, validated pasted calendar data before undoing a previous paste, and kept the kill ring intact when cutting fails. Improved date/time validation and overnight range input.
-- Added regression coverage and a shared ERT runner, expanded CI checks, and updated MELPA lint support and development documentation.
+
+### Features
+
+- Task suggestions now show the last block’s duration, tags, and file location in aligned columns.
+- Calendar blocks now have translucent backgrounds and cleaner spacing, making the grid easier to see.
+- Smoother calendar navigation and faster loading of long-running repeating events.
+
+### Bug fixes
+
+- Calendar undo now protects changes made directly in your Org files. Failed edits involving several blocks no longer leave partial changes behind.
+- Deleting several repeating blocks now applies your chosen scope consistently.
+- Cancelled drags no longer leave previews behind or move blocks to an outdated position.
+- Long-press editing now works in the all-day row on Android.
+- Fixed selecting blocks in narrow windows and blocks that continue from another day.
+- Selecting all-day events no longer scrolls the hourly grid. Adding a clock time correctly turns an all-day event into a timed block.
+- Fixed searching across weeks when showing fewer than seven days.
+- Turning off the Org Agenda integration now removes its calendar strip.
+- Fixed missing block durations with older Org versions.
+- Improved date validation and handling of overnight time ranges.
+- Failed cuts now preserve your clipboard. Cycling through pasted items checks the next item before removing the previous paste.
+- Titles containing template placeholders are now preserved as typed.
 
 ## v0.0.3 — 2026-10-13
 - Repeating events now preserve history when editing or deleting just one occurrence, future occurrences, or the whole series. Added configurable history cutoffs and undo support.
