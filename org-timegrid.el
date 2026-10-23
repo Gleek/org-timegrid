@@ -5,7 +5,7 @@
 ;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Assisted-by: Codex:gpt-5.6-sol
 ;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
-;; Version: 0.0.4
+;; Version: 0.0.5
 ;; Package-Requires: ((emacs "29.1") (org "9.6"))
 ;; Keywords: calendar, outlines, convenience
 ;; URL: https://github.com/Gleek/org-timegrid
@@ -64,6 +64,14 @@
 (defcustom org-timegrid-end-hour 24
   "Hour at the bottom edge of the week canvas."
   :type 'integer)
+
+(defcustom org-timegrid-time-format '24-hour
+  "Clock format for calendar labels and displayed time ranges.
+With `12-hour', hour labels use smaller AM/PM suffixes.
+Org timestamps retain their standard 24-hour format.
+Run `org-timegrid-refresh' after changing this option in an open calendar."
+  :type '(choice (const :tag "24-hour (15:00)" 24-hour)
+                 (const :tag "12-hour (3 PM)" 12-hour)))
 
 (defcustom org-timegrid-days 7
   "Number of consecutive days displayed in the calendar.
@@ -321,9 +329,22 @@ Typography and geometry share this factor so their alignment is preserved."
 
 (defun org-timegrid--draw-text (svg text &rest args)
   "Draw TEXT in SVG using ARGS accepted by `svg-text'.
+The extra :small-period option draws AM/PM at 80 percent of the font size.
 Platform support files may advise this small seam when their SVG renderer
 cannot display text elements."
-  (apply #'svg-text svg text args))
+  (if (not (plist-get args :small-period))
+      (apply #'svg-text svg text args)
+    (let ((size (plist-get args :font-size))
+          (start 0))
+      (cl-remf args :small-period)
+      (let ((node (apply #'svg-node svg 'text args)))
+        (while (string-match "[AP]M" text start)
+          (dom-append-child node (substring text start (match-beginning 0)))
+          (dom-append-child node
+                            `(tspan ((font-size . ,(* size 0.8)))
+                                    ,(match-string 0 text)))
+          (setq start (match-end 0)))
+        (dom-append-child node (substring text start))))))
 
 (defun org-timegrid--label-width ()
   "Return the width of the time-label gutter.
@@ -900,7 +921,9 @@ six-digit value as three one-digit components in `color-values'."
           :time-background
           (org-timegrid--blend foreground background 0.035)
           :time-label
-          (org-timegrid--blend foreground background 0.64)
+          (org-timegrid--blend foreground background 0.82)
+          :time-period
+          (org-timegrid--blend foreground background 0.70)
           :secondary-text
           (org-timegrid--blend foreground background 0.72)
           :weekend (org-timegrid--blend foreground background 0.025)
@@ -1055,17 +1078,52 @@ DAY-X and COLUMN-WIDTH describe the full column."
                                   (if (and space (= end space)) (1+ end) end))))))))))
     (nreverse lines)))
 
-(defun org-timegrid--format-minute (minute)
-  "Format MINUTE as a clock time normalized to the 24-hour day."
-  (let ((normalized (% minute 1440)))
-    (format "%02d:%02d" (/ normalized 60) (% normalized 60))))
+(defun org-timegrid--format-minute (minute &optional style)
+  "Format MINUTE using `org-timegrid-time-format', wrapping at midnight.
+STYLE `hour' omits minutes in 12-hour grid labels; `compact' omits zero
+minutes and suffix spacing; `clock' omits AM/PM for the current-time pill."
+  (let* ((hour (/ (mod minute 1440) 60))
+         (minutes (mod minute 60)))
+    (if (eq org-timegrid-time-format '24-hour)
+        (format "%02d:%02d" hour minutes)
+      (concat (number-to-string (1+ (mod (1- hour) 12)))
+              (unless (or (eq style 'hour) (and (eq style 'compact) (zerop minutes)))
+                (format ":%02d" minutes))
+              (unless (eq style 'clock)
+                (concat (unless (eq style 'compact) " ")
+                        (if (< hour 12) "AM" "PM")))))))
+
+(defun org-timegrid--draw-hour-label (svg minute y palette font-family)
+  "Draw MINUTE's grid label on SVG at Y using PALETTE and FONT-FAMILY."
+  (let* ((parts (split-string (org-timegrid--format-minute minute 'hour)))
+         (suffix (cadr parts))
+         (x (if suffix
+                (- (org-timegrid--label-width) (org-timegrid--scale-pixels 22))
+              (/ (org-timegrid--label-width) 2.0)))
+         ;; Clock digits extend about 0.7 em above the baseline.
+         (baseline (+ y (org-timegrid--scale-pixels 3.5))))
+    (org-timegrid--draw-text
+     svg (car parts) :x x :y baseline
+     :font-size (org-timegrid--font-size 10) :font-family font-family
+     :text-anchor (if suffix "end" "middle")
+     :fill (plist-get palette :time-label))
+    (when suffix
+      (org-timegrid--draw-text
+       svg suffix :x (+ x (org-timegrid--scale-pixels 3)) :y baseline
+       :font-size (org-timegrid--font-size 7) :font-family font-family
+       :text-anchor "start"
+       :fill (plist-get palette :time-period)))))
 
 (defun org-timegrid--format-range (start end)
-  "Format logical START and END minutes, including the end-day offset."
-  (let ((day-offset (floor end 1440)))
-    (format "%s–%s%s"
-            (org-timegrid--format-minute start)
-            (org-timegrid--format-minute end)
+  "Format START and END minutes, omitting repeated AM/PM and zero minutes."
+  (let* ((day-offset (floor end 1440))
+         (twelve-hour (eq org-timegrid-time-format '12-hour))
+         (start-label (org-timegrid--format-minute start 'compact))
+         (end-label (org-timegrid--format-minute end 'compact)))
+    (when twelve-hour
+      (setq start-label (string-remove-suffix (substring end-label -2) start-label)))
+    (format "%s%s%s%s"
+            start-label (if twelve-hour " – " "–") end-label
             (if (> day-offset 0) (format " (+%d)" day-offset) ""))))
 
 (defun org-timegrid--block-details (block)
@@ -1257,14 +1315,8 @@ DAYS controls the columns; WEEK-START enables weekend shading."
                                           (if hourp :grid :half-grid))
                        :stroke-width 1)
              (when (and hourp (< minute end-minute))
-               (org-timegrid--draw-text svg (format "%02d:00" (/ minute 60))
-                         :x (/ (org-timegrid--label-width) 2.0)
-                         ;; Clock digits extend about 0.7 em above the baseline.
-                         :y (+ y (org-timegrid--scale-pixels 3.5))
-                         :font-size (org-timegrid--font-size 10)
-                         :font-family font-family
-                         :text-anchor "middle"
-                         :fill (plist-get palette :time-label))))))
+               (org-timegrid--draw-hour-label
+                svg minute y palette font-family)))))
 
 (defun org-timegrid-day-image (blocks start-minute end-minute width
                                       &optional now)
@@ -1454,6 +1506,7 @@ Keep existing blocks when possible, but reconstruct missing date metadata."
                 :y (+ y (org-timegrid--scale-pixels 10)
                       (* (length title-lines) line-height))
                 :font-size (org-timegrid--font-size 9) :font-family font-family
+                :small-period t
                 :clip-path (format "url(#%s)" clip-id)
                 :fill (plist-get palette :secondary-text)))
     (list :id (org-timegrid-block-id block) :day day
@@ -1485,7 +1538,7 @@ geometry.  Return the marker's Y coordinate."
                    (* (- now-minute start-minute) scale)))
              (today-x (+ (org-timegrid--label-width)
                          (* today-day column-width)))
-             (label (org-timegrid--format-minute now-minute))
+             (label (org-timegrid--format-minute now-minute 'clock))
              (bubble-width (org-timegrid--scale-pixels 36))
              (bubble-height (org-timegrid--scale-pixels 14))
              (bubble-x (/ (- (org-timegrid--label-width) bubble-width) 2.0))

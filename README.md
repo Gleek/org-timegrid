@@ -351,6 +351,7 @@ priority, property, or file.
 | `org-timegrid-days`                                 |        `7` | Consecutive days shown in the main view               |
 | `org-timegrid-range-alignment`                      |     `week` | Set to `center` to center today (or a date you jump to); even day counts put it just right of center |
 | `org-timegrid-start-hour` / `org-timegrid-end-hour` | `0` / `24` | Hours drawn                                           |
+| `org-timegrid-time-format`                         |  `24-hour` | Clock format: `12-hour` or `24-hour`                   |
 | `org-timegrid-pixels-per-minute`                    |      `0.9` | Week-view scale                                       |
 | `org-timegrid-default-zoom`                         |      `0.7` | Initial zoom; `1.0` matches Emacs's default font size |
 | `org-timegrid-slot-minutes`                         |       `15` | Cursor and edit granularity                           |

@@ -5,7 +5,7 @@
 ;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Assisted-by: Codex:gpt-5.6-sol
 ;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
-;; Version: 0.0.4
+;; Version: 0.0.5
 ;; Keywords: calendar, outlines, convenience
 ;; URL: https://github.com/Gleek/org-timegrid
 
@@ -648,9 +648,9 @@ have an active timestamp in their own section."
                         "  "))
                       (columns
                        (list (propertize (if duration (format "last: %dm" duration) "")
-                                         'face 'shadow)
+                                         'face 'font-lock-doc-face)
                              (propertize (or tag-text "") 'face 'org-tag)
-                             (propertize context 'face 'shadow))))
+                             (propertize context 'face 'font-lock-doc-face))))
                  (put-text-property 0 (length display)
                                     'org-timegrid-columns columns display)
                  (puthash display (1+ (gethash display counts 0)) counts)

@@ -4,7 +4,7 @@
 ;; Author: Umar Ahmad <Gleek@users.noreply.github.com>
 ;; Assisted-by: Codex:gpt-5.6-sol
 ;; Maintainer: Umar Ahmad <Gleek@users.noreply.github.com>
-;; Version: 0.0.4
+;; Version: 0.0.5
 ;; Keywords: calendar, outlines, convenience
 ;; URL: https://github.com/Gleek/org-timegrid
 
@@ -86,7 +86,12 @@ Enable this to use keyboard commands that have no touch gesture."
          (glyphs (mapcar (lambda (character)
                            (or (assq character font) fallback))
                          (string-to-list text)))
-         (width (* scale (apply #'+ (mapcar #'cadr glyphs))))
+         (small-period (plist-get args :small-period))
+         (width (* scale (cl-loop for glyph in glyphs
+                                  sum (* (cadr glyph)
+                                         (if (and small-period
+                                                  (memq (car glyph) '(?A ?P ?M)))
+                                             0.8 1)))))
          (anchor (plist-get args :text-anchor))
          (x (float (or (plist-get args :x) 0)))
          (y (float (or (plist-get args :y) size)))
@@ -104,10 +109,11 @@ Enable this to use keyboard commands that have no touch gesture."
                  :fill-opacity (or (plist-get args :fill-opacity) 1))))
     (let ((offset 0))
       (dolist (glyph glyphs)
-        (unless (string-empty-p (caddr glyph))
-          (svg-node group 'path :d (caddr glyph)
-                    :transform (format "translate(%d 0)" offset)))
-        (setq offset (+ offset (cadr glyph)))))))
+        (let ((size (if (and small-period (memq (car glyph) '(?A ?P ?M))) 0.8 1)))
+          (unless (string-empty-p (caddr glyph))
+            (svg-node group 'path :d (caddr glyph)
+                      :transform (format "translate(%g 0) scale(%g)" offset size)))
+          (setq offset (+ offset (* size (cadr glyph)))))))))
 
 (defun org-timegrid-android-scroll (event)
   "Scroll the calendar by the native pixel delta in touch EVENT."

@@ -4,6 +4,65 @@
 (require 'org-timegrid-org)
 (require 'org-timegrid-agenda)
 
+(ert-deftest org-timegrid-test-clock-formats ()
+  ;; Minutes since midnight, full 24h time, full 12h time, 12h grid label.
+  (cl-loop for (minute clock-24 clock-12 hour-12) in
+           '((0    "00:00" "12:00 AM" "12 AM")
+             (65   "01:05" "1:05 AM"  "1 AM")
+             (720  "12:00" "12:00 PM" "12 PM")
+             (905  "15:05" "3:05 PM"  "3 PM")
+             (1439 "23:59" "11:59 PM" "11 PM")
+             (1440 "00:00" "12:00 AM" "12 AM"))
+           do
+           (let ((org-timegrid-time-format '24-hour))
+             (should (equal (org-timegrid--format-minute minute) clock-24)))
+           (let ((org-timegrid-time-format '12-hour))
+             (should (equal (org-timegrid--format-minute minute) clock-12))
+             (should (equal (org-timegrid--format-minute minute 'hour) hour-12)))))
+
+(ert-deftest org-timegrid-test-compact-block-ranges ()
+  ;; Start/end minutes, expected 12h range, expected 24h range.
+  (cl-loop for (start end range-12 range-24) in
+           '((1020 1050 "5 – 5:30PM"       "17:00–17:30")
+             (675  795  "11:15AM – 1:15PM" "11:15–13:15")
+             (540  600  "9 – 10AM"         "09:00–10:00")
+             (720  750  "12 – 12:30PM"     "12:00–12:30")
+             (0    30   "12 – 12:30AM"     "00:00–00:30")
+             (1380 1440 "11PM – 12AM (+1)" "23:00–00:00 (+1)")
+             (1380 1500 "11PM – 1AM (+1)"  "23:00–01:00 (+1)"))
+           do
+           (let ((org-timegrid-time-format '12-hour))
+             (should (equal (org-timegrid--format-range start end) range-12)))
+           (let ((org-timegrid-time-format '24-hour))
+             (should (equal (org-timegrid--format-range start end) range-24)))))
+
+(ert-deftest org-timegrid-test-current-time-pill-omits-period ()
+  (cl-loop for (org-timegrid-time-format minute expected) in
+           '((12-hour 0   "12:00")
+             (12-hour 720 "12:00")
+             (12-hour 905 "3:05")
+             (24-hour 905 "15:05"))
+           do
+           (let ((svg (svg-create 200 2000)))
+             (org-timegrid--draw-current-time
+              svg 200 2000 146 (org-timegrid--palette) "sans-serif" 0 1 minute 0)
+             (should (equal (dom-texts (car (dom-by-tag svg 'text))) expected)))))
+
+(ert-deftest org-timegrid-test-hour-labels ()
+  (cl-loop for (org-timegrid-time-format minute expected) in
+           '((24-hour 0    ("00:00"))
+             (24-hour 1380 ("23:00"))
+             (12-hour 0    ("12" "AM"))
+             (12-hour 720  ("12" "PM"))
+             (12-hour 1380 ("11" "PM")))
+           do
+           (let ((svg (svg-create 200 100)))
+             (org-timegrid--draw-timed-background
+              svg 200 100 146 (org-timegrid--palette) "sans-serif"
+              minute (+ minute 60) 1 1)
+             (should (equal (mapcar #'dom-texts (dom-by-tag svg 'text))
+                            expected)))))
+
 (ert-deftest org-timegrid-test-drag-and-keyboard-share-boundary-rules ()
   (let ((org-timegrid-days 7))
     (dolist (case '((all-day -2 0 14400 0 0 1 0 nil 1440)

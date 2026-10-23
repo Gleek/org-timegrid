@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.0.5 — 2026-10-23
+
+- Added `org-timegrid-time-format` to choose `12-hour` or `24-hour` time labels (default: `24-hour`).
+- Refined time labels with smaller AM/PM suffixes, compact block ranges, and stronger grid-label contrast.
+- Made task suggestion durations and file locations easier to read.
+- Fixed agenda strips showing “TODAY” when displaying another date.
+- Fixed calendar scaling to use the font’s actual pixel size.
+
 ## v0.0.4 — 2026-10-18
 
 ### Features
