@@ -70,7 +70,8 @@ is what you want when the block below is the same day's untimed items."
   :type 'boolean)
 
 (defcustom org-timegrid-agenda-heading-format "TODAY · %s"
-  "Format string for the strip's heading, given a formatted date."
+  "Format string for today's strip heading, given a formatted date.
+For other days, the heading displays just the formatted date."
   :type 'string)
 
 (defvar org-timegrid-agenda--theme-timer nil
@@ -180,7 +181,9 @@ the usual way to install it."
         (setq start (point))
         (insert
          (propertize
-          (concat (format org-timegrid-agenda-heading-format
+          (concat (format (if (= day today)
+                              org-timegrid-agenda-heading-format
+                            "%s")
                           (format-time-string
                            "%A %-d %B"
                            (encode-time 0 0 0

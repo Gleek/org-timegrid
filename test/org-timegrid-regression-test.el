@@ -110,6 +110,25 @@
       (org-timegrid-isearch--events)
       (should (equal query (list (* 86 1440) (* 115 1440)))))))
 
+(ert-deftest org-timegrid-regression-agenda-heading-only-labels-today ()
+  (let ((today (calendar-absolute-from-gregorian '(10 22 2026)))
+        (system-time-locale "C")
+        (org-timegrid-agenda-insert-after nil)
+        (org-timegrid-agenda-heading-format "TODAY · %s"))
+    (dolist (case '((-1 "Wednesday 21 October")
+                    (0 "TODAY · Thursday 22 October")
+                    (1 "Friday 23 October")))
+      (with-temp-buffer
+        (org-agenda-mode)
+        (setq-local org-starting-day (+ today (car case)))
+        (cl-letf (((symbol-function 'calendar-current-date)
+                   (lambda () '(10 22 2026)))
+                  ((symbol-function 'org-timegrid-day-blocks) #'ignore)
+                  ((symbol-function 'org-timegrid-day-image) #'ignore))
+          (org-timegrid-agenda-insert))
+        (goto-char (point-min))
+        (should (looking-at-p (regexp-quote (concat (cadr case) "  "))))))))
+
 (ert-deftest org-timegrid-regression-disabling-agenda-removes-strip ()
   (with-temp-buffer
     (org-agenda-mode)
