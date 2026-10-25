@@ -2,37 +2,28 @@
 
 [![MELPA](https://melpa.org/packages/org-timegrid-badge.svg)](https://melpa.org/#/org-timegrid)
 
-`org-timegrid` is a beautiful SVG week calendar for Org mode. It reads timed active
+`org-timegrid` is an SVG calendar for Org mode. It reads timed active
 timestamps from your Org files and writes edits back to their source headings.
 
 Create, move, resize, copy, rename, and remove calendar blocks with the mouse
 or keyboard. The same renderer can add a compact, read-only day view to an
 existing Org Agenda.
 
-
-
-
-
 https://github.com/user-attachments/assets/2e1df1c3-d0f0-419d-b5f2-66d876753872
-
-
-
-
 
 ## Screenshots
 
 The palette comes from the theme, and is redrawn when the theme changes.
 
-| | |
-|---|---|
+|  |  |
+| --- | --- |
 | ![Week, light](screenshots/week-light.png) | ![Week, dark](screenshots/week-dark.png) |
 
 Agenda view:
 
-| | |
-|---|---|
+|  |  |
+| --- | --- |
 | ![Agenda, light](screenshots/agenda-light.png) | ![Agenda, dark](screenshots/agenda-dark.png) |
-
 
 ## Requirements and installation
 
@@ -64,99 +55,36 @@ For a manual install, put the `.el` files on `load-path`, evaluate `(require
 
 ### Complete example configuration
 
-With MELPA configured, the following can be pasted into your Emacs
-configuration. It reads events from your existing
-`org-agenda-files`, writes entries created in the calendar to `calendar.org`
-inside `org-directory`, and enables the optional day strip in Org Agenda.
+This reads `org-agenda-files`, saves new entries in `~/org/calendar.org`,
+and adds the optional Agenda strip.
 
 ```elisp
-(require 'org)
-
 (use-package org-timegrid
   :ensure t
-  :demand t
-  :bind (("C-c a c" . org-timegrid-week))
+  :bind ("C-c a c" . org-timegrid-week)
   :init
-  ;; The symbol `agenda' means: read events from `org-agenda-files'.
-  (setq org-timegrid-org-files 'agenda
-
-        ;; Center today (or a date you jump to) in the visible range.
-        org-timegrid-range-alignment 'center
-
-        ;; Recommended compact scale; use 1.0 to match Emacs's default font.
-        org-timegrid-default-zoom 0.7
-
-        org-timegrid-org-capture-file
-        (expand-file-name "calendar.org" org-directory)
-        org-timegrid-org-capture-template
-        '(:target file
-          :template "* %{title}\n%{time-range}\n%?")
-
-        ;; Save Org buffers immediately after edits made in the calendar.
-        org-timegrid-org-auto-save t
-
-        ;; Set this to nil if repeating entries should be hidden.
-        org-timegrid-org-show-repeaters t
-        ;; Set nil to keep independent Org repeaters under one heading.
-        org-timegrid-org-repeater-history t
-
-        ;; The first matching tag supplies an event's colour.
+  (setq org-timegrid-org-capture-file "~/org/calendar.org"
         org-timegrid-org-tag-color-alist
-        '(("work"     . indigo)
-          ("personal" . green)
-          ("reading"  . yellow)
-          ("errand"   . cyan)))
+        '(("work" . indigo) ("personal" . green)))
   :config
   (require 'org-timegrid-org))
 
-;; This is part of the same package. It adds a read-only day strip to Org
-;; Agenda; pressing RET on the strip opens the editable week view.
 (use-package org-timegrid-agenda
   :ensure nil
   :after org-agenda
-  :demand t
-  :init
-  ;; nil inserts the strip at the top. To place it after a particular custom
-  ;; agenda block, use a regexp matching that block's heading instead.
-  (setq org-timegrid-agenda-insert-after nil
-        org-timegrid-agenda-separator t
-        org-timegrid-agenda-minutes-before 180
-        org-timegrid-agenda-minutes-after 180)
   :config
   (org-timegrid-agenda-mode 1))
 ```
 
-Change `org-timegrid-org-capture-file` if new entries should go somewhere
-else. The file does not need to be in `org-agenda-files`; org-timegrid always
-queries its capture file as well. If you do not want the Org Agenda strip,
-omit the second `use-package` form.
+The capture file is always included in calendar queries.
 
 ### Android Emacs
 
-See [`ANDROID.org`](ANDROID.org) for a complete phone setup without ADB, Git,
-Termux, or other command-line binaries, plus optional Syncthing instructions.
-
-On Android, `org-timegrid` adds native touch scrolling and long-press editing,
-prevents calendar gestures from opening the software keyboard, and uses a
-one-day layout suitable for a phone. Set
-`org-timegrid-android-display-keyboard` to non-nil to keep the on-screen
-keyboard available for commands that have no touch gesture.
-
-Here's a screencast:
-
+See [`ANDROID.org`](ANDROID.org) for setup. Android uses a one-day view,
+native scrolling, and long-press editing. Set
+`org-timegrid-android-display-keyboard` to non-nil to enable the on-screen keyboard.
 
 https://github.com/user-attachments/assets/fc368b76-4b29-40d0-8a0a-536ac526f6e0
-
-
-
-Android Emacs bundles librsvg without the font support needed to display SVG
-text. The Android layer therefore draws calendar text from bundled Noto Sans
-glyph outlines while retaining the shared SVG renderer and layout. Printable
-ASCII and common calendar punctuation are included; unsupported characters use
-a question-mark glyph. The outline subset is roughly 59 KB, and its source font
-is licensed under the SIL Open Font License 1.1. You can generate the resource
-from another font with
-[`builds/generate-android-font.py`](builds/generate-android-font.py).
 
 ## What appears on the calendar
 
@@ -174,12 +102,12 @@ SCHEDULED: <2026-08-24 Mon 09:00-09:15>
 <2026-08-24 Mon 15:00>
 ```
 
-The last heading appears even though it has no TODO keyword. A timed active
-timestamp is enough to put a heading on the calendar. A timestamp without an
-end uses `org-timegrid-default-duration-minutes`, which defaults to 30 minutes.
+A TODO keyword is optional. Timestamps without an end use
+`org-timegrid-default-duration-minutes` (30 minutes).
+Date-only entries appear in the all-day rail.
 
-Inactive timestamps do not appear on the time grid.
-A separate date-only rail appears for active timestamp entries with no day times
+Org clocks appear along the day's right boundary. Finished clocks can be
+edited; stop running clocks first. Other inactive timestamps are hidden.
 
 ### Repeaters
 
@@ -201,71 +129,66 @@ Run `M-x org-timegrid-week` to open the week containing today.
 
 ### Mouse
 
-| Gesture                           | Action                                |
-|-----------------------------------|---------------------------------------|
-| Drag empty space                  | Create an entry for that range        |
-| Drag a block                      | Move it                               |
-| Drag a block's top or bottom edge | Resize it                             |
-| super-drag a block                | Duplicate it as an independent entry  |
-| shift-drag a block                | Add another time to its source entry  |
-| Click                             | Put the cursor there                  |
-| Double-click a block              | Visit its Org heading                 |
-| Wheel                             | Scroll the day                        |
+| Gesture | Action |
+| --- | --- |
+| Drag empty space | Create an entry for that range |
+| Drag a block | Move it |
+| Drag a block's top or bottom edge | Resize it |
+| super-drag a block | Duplicate it as an independent entry |
+| shift-drag a block | Add another time to its source entry |
+| Click | Put the cursor there |
+| Double-click a block | Visit its Org heading |
+| Wheel | Scroll the day |
 
 Mouse edits snap to 15 minutes and use a 15-minute minimum. Release commits a
 drag. Press `C-g` before releasing to cancel it.
 
 ### Keyboard
 
-The calendar cursor acts as point. `C-SPC` sets a calendar mark, and every
-keyboard movement extends the highlighted half-open time region. With no active
-region, edit commands operate on the block at point. Calendar copies use the
-normal Emacs kill ring, so they paste as readable text outside the calendar.
+Use `C-SPC` and movement to select a region. Without a region, edits apply to
+the selected block. Copies use the Emacs kill ring.
 
-| Key                       | Action                                                                               |
-|---------------------------|--------------------------------------------------------------------------------------|
-| `C-n` / `C-p`, up/down    | Move the cursor by 15 minutes (configurable)                                         |
-| `C-f` / `C-b`, left/right | Move through overlapping lanes, then days                                            |
-| `C-v` / `M-v`, `SPC`      | Move by one screen                                                                   |
-| `C-a` / `C-e`             | Go to the first or last slot of the day                                              |
-| `C-l`                     | Center the view on the cursor                                                        |
-| `C-x +` / `C-x C--` / `C-x C-0` | Zoom in, zoom out, or reset zoom                                              |
-| `n` / `p`                 | Select the next or previous block                                                    |
-| `C-SPC`, `C-x C-x`        | Set/deactivate the calendar mark, or exchange point and mark                         |
-| `RET`                     | Visit/create at point, or create one block spanning the active region                |
-| `C-g`                     | Deactivate the region, then hide the cursor                                           |
-| `M-down` / `M-up`         | Move the selected block by 15 minutes                                                |
-| `M-right` / `M-left`      | Move the block by one day                                                            |
-| `S-down` / `S-up`         | Move the end time                                                                    |
-| `C-S-up` / `C-S-down`     | Move the start time                                                                  |
-| `t`                       | Enter a new time or range                                                            |
-| `e`                       | Rename the heading                                                                   |
-| `d`, backspace            | Remove selected timestamps; offer deletion only for timestamp-free headings          |
-| `M-w`, then `C-y`         | Copy/paste selected blocks as independent entries via the Emacs kill ring             |
-| `C-w`, then `C-y`         | Cut selected timestamps and restore them at point                                    |
-| `M-w`, then `C-u C-y`     | Add pasted timestamps to their existing entries                                      |
-| `M-y`                     | Replace the preceding calendar paste with an older kill-ring entry                   |
-| `C-/`, `C-x u`            | Undo the last calendar transaction, including an entire bulk edit                    |
-| `:`, `C-c C-q`            | Change the selected entry's tags                                                     |
-| `C-c C-t`                 | Change the selected entry's TODO state                                               |
-| `,`, `C-c ,`              | Set the selected entry's priority                                                    |
-| `i`                       | Clock in to the selected entry                                                       |
-| `O`                       | Clock out                                                                            |
-| `z`, `C-c C-z`            | Add a note to the selected entry                                                     |
-| `C-c C-x e`               | Set the selected entry's effort                                                      |
-| `C-c C-w`                 | Refile the selected entry                                                            |
-| `$`                       | Archive the selected entry                                                           |
-| `b` / `f`, `M-b` / `M-f`  | Shift by a day or week                                                               |
-| `j` / `.`                 | Jump to a date or today                                                              |
-| `g`                       | Reload the week from the backend                                                     |
-| `q`                       | Quit                                                                                 |
-| `C-s`, `C-r`              | Native Isearch through block titles and adjacent weeks; movement accepts the match, `C-g` resets |
+| Key | Action |
+| --- | --- |
+| `C-n` / `C-p`, up/down | Move through times and blocks |
+| `C-f` / `C-b`, left/right | Move through overlapping blocks and days |
+| `C-v` / `M-v`, `SPC` | Move by one screen |
+| `C-a` / `C-e` | Go to the first or last slot of the day |
+| `C-l` | Center the view on the cursor |
+| `C-x +` / `C-x C--` / `C-x C-0` | Zoom in, out, or reset |
+| `n` / `p` | Select the next or previous block |
+| `C-SPC`, `C-x C-x` | Set mark, or exchange point and mark |
+| `RET` | Visit or create a block |
+| `C-g` | Clear the region or hide the cursor |
+| `M-down` / `M-up` | Move the selected block by 15 minutes |
+| `M-right` / `M-left` | Move the block by one day |
+| `S-down` / `S-up` | Move the end time |
+| `C-S-up` / `C-S-down` | Move the start time |
+| `t` | Enter a new time or range |
+| `e` | Rename the heading |
+| `d`, backspace | Remove selected blocks |
+| `M-w`, then `C-y` | Copy and paste as new entries |
+| `C-w`, then `C-y` | Cut and paste |
+| `M-w`, then `C-u C-y` | Paste into the original entries |
+| `M-y` | Cycle through earlier copies |
+| `C-/`, `C-x u` | Undo |
+| `:`, `C-c C-q` | Change the selected entry's tags |
+| `C-c C-t` | Change the selected entry's TODO state |
+| `,`, `C-c ,` | Set the selected entry's priority |
+| `i` | Clock in to the selected entry |
+| `O` | Clock out |
+| `z`, `C-c C-z` | Add a note to the selected entry |
+| `C-c C-x e` | Set the selected entry's effort |
+| `C-c C-w` | Refile the selected entry |
+| `$` | Archive the selected entry |
+| `b` / `f`, `M-b` / `M-f` | Shift by a day or week |
+| `j` / `.` | Jump to a date or today |
+| `g` | Reload the calendar |
+| `q` | Quit |
+| `C-s`, `C-r` | Search block titles |
 
-The Org backend can wrap other interactive commands for use in the calendar.
-`org-timegrid-org-command` runs a command at the selected source heading.
-`org-timegrid-org-agenda-command` finds the corresponding line in a live Org
-Agenda buffer and runs the command there. Both wrappers return to the calendar
-and reload it without resetting the cursor or scroll position.
+Use `org-timegrid-org-command` to bind commands at the selected heading,
+or `org-timegrid-org-agenda-command` for commands requiring a live Agenda entry:
 
 ```elisp
 (keymap-set org-timegrid-mode-map "i"
@@ -273,11 +196,6 @@ and reload it without resetting the cursor or scroll position.
 (keymap-set org-timegrid-mode-map ","
             (org-timegrid-org-agenda-command #'org-agenda-priority))
 ```
-
-The Agenda wrapper signals a user error when no live Agenda buffer contains
-the selected entry. Prefer the Org wrapper when the underlying Org command is
-available, since it does not depend on an Agenda view being open.
-
 
 ## Org Agenda strip
 
@@ -288,39 +206,21 @@ Enable the optional integration after loading `org-timegrid-agenda`:
 (org-timegrid-agenda-mode 1)
 ```
 
-Org continues to build the agenda buffer. A finalize hook inserts a read-only
-SVG view of the hours around the current time. Press `RET` on the image to open
-the editable week view.
+The strip shows the hours around now. Press `RET` to open the calendar.
 
 ```elisp
 (setq org-timegrid-agenda-insert-after "To Refile"
       org-timegrid-agenda-separator nil)
 ```
 
-The first option matches the agenda block above the strip. A nil separator lets
-the following block read as the untimed part of the same day section. The strip
-shades an edge only when an event continues beyond the visible window.
-
-`org-timegrid-day-blocks` gets and lays out one day's blocks.
-`org-timegrid-day-image` draws a chosen minute range as an SVG image. Neither
-function needs a calendar buffer.
+`org-timegrid-agenda-insert-after` names the block above the strip.
+Set `org-timegrid-agenda-separator` to nil to omit its separator.
 
 ### Org date picker
 
-The standard Calendar opened by `org-read-date` shows dates containing events
-in bold coloured text.  The Org backend enables this by default for the `j`
-date prompt.  Other backends can reuse the integration directly:
-
-```elisp
-(require 'org-timegrid-calendar)
-(org-timegrid-calendar-read-date backend t nil nil "Time" default-time)
-```
-
-Calendar still owns its buffer, navigation, and selection; the integration
-only adds standard temporary Calendar marks while the prompt is active.  Set
-`org-timegrid-calendar-highlight-dates` to nil to disable them.  Customize
-`org-timegrid-calendar-event-face` to change their appearance, or set
-`org-timegrid-calendar-event-predicate` to choose which backend events count.
+The `j` date picker highlights dates containing events. Set
+`org-timegrid-calendar-highlight-dates` to nil to disable this, or customize
+`org-timegrid-calendar-event-face` to change its appearance.
 
 ## Colours
 
@@ -346,58 +246,53 @@ priority, property, or file.
 
 ## Configuration
 
-| Variable                                            |    Default | Meaning                                               |
-|-----------------------------------------------------|-----------:|-------------------------------------------------------|
-| `org-timegrid-days`                                 |        `7` | Consecutive days shown in the main view               |
-| `org-timegrid-range-alignment`                      |     `week` | Set to `center` to center today (or a date you jump to); even day counts put it just right of center |
-| `org-timegrid-start-hour` / `org-timegrid-end-hour` | `0` / `24` | Hours drawn                                           |
-| `org-timegrid-time-format`                         |  `24-hour` | Clock format: `12-hour` or `24-hour`                   |
-| `org-timegrid-pixels-per-minute`                    |      `0.9` | Week-view scale                                       |
-| `org-timegrid-default-zoom`                         |      `0.7` | Initial zoom; `1.0` matches Emacs's default font size |
-| `org-timegrid-slot-minutes`                         |       `15` | Cursor and edit granularity                           |
-| `org-timegrid-cursor-step-minutes`                  |       `15` | Normal keyboard step                                  |
-| `org-timegrid-keyboard-commit-delay`                |     `0.25` | Idle delay before a moved block is saved              |
-| `org-timegrid-default-duration-minutes`             |       `30` | Length used when no end is present                    |
-| `org-timegrid-block-gap`                            |        `1` | Gap between blocks, in pixels                         |
-| `org-timegrid-copy-date-format`                     | `%a %d %b %Y` | Date heading in copied text                        |
-| `org-timegrid-copy-item-template`                   | `%{start}–%{end}  %{title}` | Copied block/free-time line           |
-| `org-timegrid-copy-day-separator`                   | blank line | Separator between copied days                         |
-| `org-timegrid-corner-radius`                        |        `0` | Block corner radius                                   |
-| `org-timegrid-nesting-indent`                       |        `8` | Indent for contained events                           |
-| `org-timegrid-title-clearance`                      |       `18` | Space a parent keeps for its title                    |
-| `org-timegrid-data-refresh-seconds`                 |      `300` | Backend reload interval                               |
+| Variable | Default | Meaning |
+| --- | ---: | --- |
+| `org-timegrid-days` | `7` | Consecutive days shown in the main view |
+| `org-timegrid-range-alignment` | `week` | Align to `week` or `center` |
+| `org-timegrid-now-alignment` | `top` | Position now at `top` or `center` |
+| `org-timegrid-start-hour` / `org-timegrid-end-hour` | `0` / `24` | Hours drawn |
+| `org-timegrid-time-format` | `24-hour` | Clock format: `12-hour` or `24-hour` |
+| `org-timegrid-pixels-per-minute` | `0.9` | Week-view scale |
+| `org-timegrid-default-zoom` | `0.7` | Initial zoom |
+| `org-timegrid-slot-minutes` | `15` | Cursor and edit granularity |
+| `org-timegrid-cursor-step-minutes` | `15` | Normal keyboard step |
+| `org-timegrid-keyboard-commit-delay` | `0.25` | Idle delay before a moved block is saved |
+| `org-timegrid-default-duration-minutes` | `30` | Length used when no end is present |
+| `org-timegrid-block-gap` | `1` | Gap between blocks, in pixels |
+| `org-timegrid-copy-date-format` | `%a %d %b %Y` | Date heading in copied text |
+| `org-timegrid-copy-item-template` | `%{start}–%{end}  %{title}` | Copied block/free-time line |
+| `org-timegrid-copy-day-separator` | blank line | Separator between copied days |
+| `org-timegrid-nesting-indent` | `8` | Indent for contained events |
+| `org-timegrid-title-clearance` | `18` | Space a parent keeps for its title |
+| `org-timegrid-data-refresh-seconds` | `300` | Backend reload interval |
 
-| Agenda variable                                 |       Default | Meaning                   |
-|-------------------------------------------------|--------------:|---------------------------|
+| Agenda variable | Default | Meaning |
+| --- | ---: | --- |
 | `org-timegrid-agenda-minutes-before` / `-after` | `180` / `180` | Visible window around now |
-| `org-timegrid-agenda-insert-after`              | `"To Refile"` | Block above the strip     |
-| `org-timegrid-agenda-separator`                 |           `t` | Separator after the strip |
-| `org-timegrid-compact-pixels-per-minute`        |        `0.95` | Strip scale               |
-| `org-timegrid-compact-font-size`                |          `11` | Strip text size           |
+| `org-timegrid-agenda-insert-after` | `"To Refile"` | Block above the strip |
+| `org-timegrid-agenda-separator` | `t` | Separator after the strip |
+| `org-timegrid-compact-pixels-per-minute` | `0.95` | Strip scale |
+| `org-timegrid-compact-font-size` | `11` | Strip text size |
 
-| Org variable                             |                                  Default | Meaning                                                               |
-|------------------------------------------|-----------------------------------------:|-----------------------------------------------------------------------|
-| `org-timegrid-org-files`                 |                                 `agenda` | Files to query; a list is literal                                     |
-| `org-timegrid-org-capture-file`          | `calendar.org` in `user-emacs-directory` | Target for new entries; always queried                                |
-| `org-timegrid-org-capture-template`      |           top-level title and time range | Structure and location inside the capture file                        |
-| `org-timegrid-org-auto-save`             |                                    `nil` | Save the affected Org file after every calendar edit                  |
-| `org-timegrid-org-show-done`             |                                      `t` | Show timestamps belonging to headings in a done state                 |
-| `org-timegrid-org-repeater-history`      |                                      `t` | Interpret timestamps as successive schedule versions; prompt for edit scope |
-| `org-timegrid-org-show-repeaters`        |                                      `t` | Show repeater anchors and their generated occurrences                 |
-| `org-timegrid-org-exclude-tags`          |                                    `nil` | Hide headings carrying any listed tag                                 |
-| `org-timegrid-org-exclude-todo-states`   |                                    `nil` | Hide headings whose TODO keyword is listed                            |
-| `org-timegrid-org-exclude-properties`    |                                    `nil` | Hide headings matching `(PROPERTY . VALUE)`; nil matches any value    |
-| `org-timegrid-org-filter-function`       | `org-timegrid-org-default-filter`        | Keep-predicate called with headline and timestamp Org elements        |
-| `org-timegrid-org-tag-color-alist`       |                                    `nil` | Tag-to-colour mapping                                                 |
+| Org variable | Default | Meaning |
+| --- | ---: | --- |
+| `org-timegrid-org-files` | `agenda` | Files to query; a list is literal |
+| `org-timegrid-org-capture-file` | `calendar.org` in `user-emacs-directory` | Target for new entries; always queried |
+| `org-timegrid-org-capture-template` | top-level title and time range | Structure and location inside the capture file |
+| `org-timegrid-org-auto-save` | `nil` | Save the affected Org file after every calendar edit |
+| `org-timegrid-org-show-done` | `t` | Show done entries |
+| `org-timegrid-org-repeater-history` | `t` | Keep repeater schedule history |
+| `org-timegrid-org-show-repeaters` | `t` | Show repeaters |
+| `org-timegrid-org-show-clocks` | `t` | Show finished and running clocks |
+| `org-timegrid-org-exclude-tags` | `nil` | Hide headings carrying any listed tag |
+| `org-timegrid-org-exclude-todo-states` | `nil` | Hide headings whose TODO keyword is listed |
+| `org-timegrid-org-exclude-properties` | `nil` | Hide headings matching `(PROPERTY . VALUE)`; nil matches any value |
+| `org-timegrid-org-filter-function` | `org-timegrid-org-default-filter` | Custom event filter |
+| `org-timegrid-org-tag-color-alist` | `nil` | Tag-to-colour mapping |
 
-On an empty slot, `RET` and mouse-drag creation complete against unfinished
-TODO headings and plain headings with active timestamps in the configured Org
-files. Choosing one adds the new time range to that heading. Aligned annotations
-show the latest timed block's duration when it has an explicit end time, tags
-(including inherited tags), and file/outline context. These use Emacs's built-in
-completion API and do not require Marginalia. Entering text that does not match
-a candidate creates a heading in `org-timegrid-org-capture-file`, as before.
-This uses Org's parser and works with any `completion-styles`.
+Creating a block offers existing headings. Choose one to add a timestamp,
+or enter a new title to create a heading in `org-timegrid-org-capture-file`.
 
 The default template is `(:target file :template "* %{title}\n%{time-range}\n%?")`.
 Its target may also be `datetree`, `(headline "Name")`, or
@@ -415,20 +310,6 @@ To keep calendar entries in a dedicated file organized by their start date:
         :template "* %{title}\n%{time-range}\n%?"))
 ```
 
-Creating “Project review” on August 25, 2026 produces a child of that date:
-
-```org
-* 2026
-** 2026-08 August
-*** 2026-08-25 Tuesday
-**** Project review
-<2026-08-25 Tue 10:00-11:00>
-```
-
-The datetree date comes from the block's selected start time, including when
-creating an entry in a past or future week. The capture file is also searched
-and displayed automatically; it need not be added to `org-agenda-files`.
-
 ## Hooks and custom backends
 
 `org-timegrid-org-after-create-hook` runs with point on a newly created Org
@@ -441,22 +322,12 @@ heading. Hook edits join the same undo step.
              "CREATED_AT" (format-time-string "[%F %a %R]"))))
 ```
 
-The renderer itself does not require Org. `org-timegrid-open` accepts an
-`org-timegrid-backend` with a listing function and optional callbacks for
-create, update, delete, undo, visit, entry completion, and date input. A
-backend with only a listing function is read-only. Bulk-capable backends can
-provide a transaction function which receives a zero-argument mutation thunk;
-undo and redo remain backend-owned. See
-`org-timegrid-backend-create` for the full contract.
-
-Create and update callbacks can accept a final `time-kind` argument whose
-value is `timed` or `all-day`. This distinguishes date-only entries from timed
-entries that happen to span whole days; callbacks using the older arity remain
-supported.
+For other sources, pass a backend to `org-timegrid-open`.
+See `org-timegrid-backend-create` for the backend API.
 
 ## Development
 
-Run all ERT tests, including repeater history:
+Run the tests:
 
 ```sh
 emacs -Q --batch -L . -l test/run-tests.el

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Added Org clock strips and editing for finished clocks.
+- Clock strips span days and overlap on the same day boundary.
+- Keyboard navigation visits block starts between calendar slots.
+- Refresh keeps the current view; `org-timegrid-now-alignment` controls the initial time position.
+- Short blocks occupy at least one calendar slot.
+- Removed `org-timegrid-corner-radius`; calendar blocks use square corners.
+
 ## v0.0.5 — 2026-10-23
 
 - Added `org-timegrid-time-format` to choose `12-hour` or `24-hour` time labels (default: `24-hour`).

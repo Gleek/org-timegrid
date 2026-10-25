@@ -7,6 +7,128 @@
 (defvar touch-screen-current-tool)
 (defvar touch-screen-current-timer)
 
+(ert-deftest org-timegrid-regression-motion-visits-boundaries-and-block-starts ()
+  (let* ((org-timegrid-slot-minutes 15)
+         (org-timegrid-cursor-step-minutes 15)
+         (org-timegrid--state
+          (org-timegrid--calendar-state-create
+           :cursor-visible t
+           :blocks (list (org-timegrid--make-block 'a 3 870 930 "A")
+                         (org-timegrid--make-block 'b 3 875 880 "B")
+                         (org-timegrid--make-block 'd 3 876 890 "D")
+                         (org-timegrid--make-block 'c 3 876 877 "C")
+                         (org-timegrid--make-block 'test 3 885 890 "test")
+                         (org-timegrid--make-block 'hello 3 885 915 "hello")))))
+    (cl-letf (((symbol-function 'org-timegrid--cursor-moved) #'ignore))
+      (org-timegrid--set-cursor 3 855)
+      ;; Key    Time     Selected block.  The reverse walk retraces every stop.
+      (cl-loop for (key (hour minute) selected) in
+               '((nil   (14 15) nil)
+                 ("C-n" (14 30) a)
+                 ("C-n" (14 35) b)
+                 ("C-n" (14 36) c)
+                 ("C-n" (14 36) d)
+                 ("C-n" (14 45) hello)
+                 ("C-n" (14 45) test)
+                 ("C-n" (15  0) nil)
+                 ("C-p" (14 45) test)
+                 ("C-p" (14 45) hello)
+                 ("C-p" (14 36) d)
+                 ("C-p" (14 36) c)
+                 ("C-p" (14 35) b)
+                 ("C-p" (14 30) a)
+                 ("C-p" (14 15) nil))
+               do
+               (ert-info ((format "Key: %S, expected: %02d:%02d %S"
+                                  key hour minute selected))
+                 (when key
+                   (funcall (lookup-key org-timegrid-mode-map (kbd key))))
+                 (should (= (org-timegrid--cursor-state-day (org-timegrid--cursor)) 3))
+                 (should (= (org-timegrid--cursor-state-minute (org-timegrid--cursor))
+                            (+ (* hour 60) minute)))
+                 (should (eq (org-timegrid--selected-id) selected))
+                 (should (equal (org-timegrid--block-at-cursor)
+                                (org-timegrid--block selected))))))))
+
+(ert-deftest org-timegrid-regression-motion-selects-running-clock-once ()
+  (let* ((org-timegrid-slot-minutes 15)
+         (org-timegrid-cursor-step-minutes 15)
+         (block (org-timegrid--make-block 'clock 3 874 891 "Running clock"))
+         (org-timegrid--state
+          (org-timegrid--calendar-state-create :cursor-visible t :blocks (list block))))
+    (setf (org-timegrid-block-event block)
+          (org-timegrid-event-create :metadata '(:clock t :running t)))
+    (cl-letf (((symbol-function 'org-timegrid--cursor-moved) #'ignore))
+      (org-timegrid--set-cursor 3 855)
+      ;; Key    Time     Selected block, including empty slots inside the clock.
+      (cl-loop for (key (hour minute) selected) in
+               '(("C-n" (14 30) nil)
+                 ("C-n" (14 34) clock)
+                 ("C-n" (14 45) nil)
+                 ("C-n" (15  0) nil)
+                 ("C-p" (14 45) nil)
+                 ("C-p" (14 34) clock)
+                 ("C-p" (14 30) nil)
+                 ("C-p" (14 15) nil))
+               do
+               (ert-info ((format "Key: %S, expected: %02d:%02d %S"
+                                  key hour minute selected))
+                 (funcall (lookup-key org-timegrid-mode-map (kbd key)))
+                 (should (= (org-timegrid--cursor-state-minute (org-timegrid--cursor))
+                            (+ (* hour 60) minute)))
+                 (should (eq (org-timegrid--selected-id) selected))
+                 (should (equal (org-timegrid--block-at-cursor)
+                                (org-timegrid--block selected))))))))
+
+(ert-deftest org-timegrid-regression-motion-between-rail-and-shared-starts ()
+  (let* ((org-timegrid-start-hour 0)
+         (org-timegrid-end-hour 24)
+         (org-timegrid-cursor-step-minutes 15)
+         (org-timegrid--state
+          (org-timegrid--calendar-state-create
+           :cursor-visible t
+           :blocks (list (org-timegrid--make-block 'a 0 0 60 "A")
+                         (org-timegrid--make-block 'b 0 0 5 "B")))))
+    (cl-letf (((symbol-function 'org-timegrid--cursor-moved) #'ignore))
+      (org-timegrid--set-all-day-cursor 0 0)
+      ;; Key    Surface Minute Selected block.
+      (cl-loop for (key surface minute selected) in
+               '(("C-n" grid  0 a)
+                 ("C-n" grid  0 b)
+                 ("C-n" grid 15 nil)
+                 ("C-p" grid  0 b)
+                 ("C-p" grid  0 a)
+                 ("C-p" rail  0 nil))
+               do
+               (ert-info ((format "Key: %s, expected: %S %d %S"
+                                  key surface minute selected))
+                 (funcall (lookup-key org-timegrid-mode-map (kbd key)))
+                 (should (eq (org-timegrid--cursor-state-surface (org-timegrid--cursor))
+                             surface))
+                 (should (= (org-timegrid--cursor-state-minute (org-timegrid--cursor))
+                            minute))
+                 (should (eq (org-timegrid--selected-id) selected)))))))
+
+(ert-deftest org-timegrid-regression-short-blocks-fill-one-slot ()
+  (let ((org-timegrid-slot-minutes 15)
+        (org-timegrid--static-render t))
+    (dolist (scale '(0.882 1 2))
+      (cl-labels ((render (duration)
+                    (org-timegrid--draw-block
+                     (svg-create 300 3000)
+                     (org-timegrid--make-block
+                      'short 0 541 (+ 541 duration) "Short task")
+                     3000 0 scale 200 (org-timegrid--palette) "sans-serif")))
+        (let ((slot (render 15)))
+          (dolist (duration '(0 0.1 1 6 10 15))
+            (let ((geometry (render duration)))
+              (should (= (plist-get geometry :height) (plist-get slot :height)))
+              (should (= (plist-get geometry :y) (plist-get slot :y)))
+              (should (= (plist-get geometry :start) 541))
+              (should (= (plist-get geometry :end) (+ 541 duration)))))
+          (should (> (plist-get (render 30) :height)
+                     (plist-get slot :height))))))))
+
 (defmacro org-timegrid-regression--with-source (&rest body)
   (declare (indent 0) (debug t))
   `(with-temp-buffer

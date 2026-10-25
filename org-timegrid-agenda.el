@@ -105,9 +105,8 @@ For other days, the heading displays just the formatted date."
 The range is clamped to the day, and keeps its full length when NOW sits
 near midnight: a window that shrank at 23:00 would show almost nothing
 at the time of day it matters most."
-  (let* ((span (+ org-timegrid-agenda-minutes-before
-                  org-timegrid-agenda-minutes-after))
-         (span (min span 1440))
+  (let* ((span (min 1440 (+ org-timegrid-agenda-minutes-before
+                            org-timegrid-agenda-minutes-after)))
          (start (max 0 (min (- 1440 span)
                             (- now org-timegrid-agenda-minutes-before)))))
     (cons start (+ start span))))
@@ -158,9 +157,7 @@ your own wrapper around this function to choose the date yourself."
     (add-hook 'text-scale-mode-hook
               #'org-timegrid-agenda--text-scale-changed nil t)
     (save-excursion
-      (let* ((decoded (decode-time))
-             (now (+ (* 60 (decoded-time-hour decoded))
-                     (decoded-time-minute decoded)))
+      (let* ((now (org-timegrid--now-minute))
              (today (calendar-absolute-from-gregorian (calendar-current-date)))
              (date (calendar-gregorian-from-absolute day))
              (window (org-timegrid-agenda--window now))

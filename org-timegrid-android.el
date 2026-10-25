@@ -170,7 +170,11 @@ Enable this to use keyboard commands that have no touch gesture."
             (unwind-protect
                 (let ((result
                        (let ((org-timegrid--drag-rail-rows
-                              (org-timegrid--rail-row-count (org-timegrid--all-day-layout))))
+                              (org-timegrid--rail-row-count (org-timegrid--all-day-layout)))
+                             (org-timegrid--drag-clock-p
+                              (when-let* ((id (plist-get origin :block-id))
+                                          (block (org-timegrid--block id)))
+                                (org-timegrid--clock-block-p block))))
                          (funcall (intern "touch-screen-track-drag") start-event
                                   #'org-timegrid-android--drag-update data))))
                   (cond
