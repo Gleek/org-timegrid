@@ -79,6 +79,9 @@ For other days, the heading displays just the formatted date."
 
 (defvar org-timegrid-agenda-mode nil)
 
+(defvar-local org-timegrid-agenda--day nil
+  "Absolute date of the inserted strip.")
+
 (defvar org-timegrid-agenda-map
   (let ((map (make-sparse-keymap)))
     (keymap-set map "RET" #'org-timegrid-agenda-open-week)
@@ -89,7 +92,8 @@ For other days, the heading displays just the formatted date."
 (defun org-timegrid-agenda-open-week ()
   "Open the standalone Week calendar on the strip's displayed day."
   (interactive)
-  (org-timegrid-week (org-timegrid-agenda--display-day)))
+  (org-timegrid-week (or org-timegrid-agenda--day
+                        (org-timegrid-agenda--display-day))))
 
 (defun org-timegrid-agenda--display-day ()
   "Return the absolute day displayed by the current Agenda buffer."
@@ -124,6 +128,7 @@ assume it is starting from a freshly generated buffer.  Without this the
 strips stack up, one per finalize."
   (let ((inhibit-read-only t)
         (position (point-min)))
+    (setq org-timegrid-agenda--day nil)
     (while (setq position (text-property-any position (point-max)
                                              'org-timegrid-strip t))
       (delete-region position
@@ -141,6 +146,13 @@ strips stack up, one per finalize."
   "Insert the compact day strip into the current Org Agenda buffer.
 Suitable for `org-agenda-finalize-hook'; `org-timegrid-agenda-mode' is
 the usual way to install it."
+  (org-timegrid-agenda-insert-day (org-timegrid-agenda--display-day)))
+
+;;;###autoload
+(defun org-timegrid-agenda-insert-day (day)
+  "Insert a compact strip for absolute date DAY in the current Org Agenda.
+Replace `org-timegrid-agenda-insert' in `org-agenda-finalize-hook' with
+your own wrapper around this function to choose the date yourself."
   (when (and (derived-mode-p 'org-agenda-mode)
              (not (buffer-narrowed-p)))
     (add-hook 'text-scale-mode-hook
@@ -150,7 +162,6 @@ the usual way to install it."
              (now (+ (* 60 (decoded-time-hour decoded))
                      (decoded-time-minute decoded)))
              (today (calendar-absolute-from-gregorian (calendar-current-date)))
-             (day (org-timegrid-agenda--display-day))
              (date (calendar-gregorian-from-absolute day))
              (window (org-timegrid-agenda--window now))
              (blocks (org-timegrid-day-blocks org-timegrid-org-backend day))
@@ -209,7 +220,8 @@ the usual way to install it."
                   "\n"))
         ;; Mark the whole insertion so the next finalize can find and replace
         ;; it instead of adding a second one.
-        (put-text-property start (point) 'org-timegrid-strip t)))))
+        (put-text-property start (point) 'org-timegrid-strip t)
+        (setq org-timegrid-agenda--day day)))))
 
 (defun org-timegrid-agenda--theme-changed (&rest _ignored)
   "Redraw inserted strips after an Emacs theme face change.
@@ -228,15 +240,14 @@ disables another, so the work is deferred and coalesced."
                (when (and (derived-mode-p 'org-agenda-mode)
                           (text-property-any (point-min) (point-max)
                                              'org-timegrid-strip t))
-                 (org-timegrid-agenda-insert))))))))
+                 (org-timegrid-agenda-insert-day org-timegrid-agenda--day))))))))
 
 (defun org-timegrid-agenda--text-scale-changed ()
   "Redraw the compact strip after an Agenda buffer text-scale change."
-  (when (and org-timegrid-agenda-mode
-             (derived-mode-p 'org-agenda-mode)
+  (when (and (derived-mode-p 'org-agenda-mode)
              (text-property-any (point-min) (point-max)
                                 'org-timegrid-strip t))
-    (org-timegrid-agenda-insert)))
+    (org-timegrid-agenda-insert-day org-timegrid-agenda--day)))
 
 ;;;###autoload
 (define-minor-mode org-timegrid-agenda-mode
