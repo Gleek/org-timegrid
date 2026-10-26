@@ -7,6 +7,44 @@
 (defvar touch-screen-current-tool)
 (defvar touch-screen-current-timer)
 
+(ert-deftest org-timegrid-regression-removal-keeps-cursor-at-nearest-stop ()
+  (dolist (command '(org-timegrid-remove-selected org-timegrid-cut-selected))
+    (dolist (case '((grid 15 607 600) (grid 15 608 615)
+                    (grid 30 620 630) (rail 15 0 0)))
+      (with-temp-buffer
+        (pcase-let* ((`(,surface ,org-timegrid-cursor-step-minutes ,minute ,expected) case)
+                     (org-timegrid-slot-minutes 15)
+                     (org-timegrid-start-hour 0)
+                     (org-timegrid-end-hour 24)
+                     (event (org-timegrid-event-create :id 'event :title "Event"
+                                                      :start 144608 :end 144638))
+                     (org-timegrid--state
+                      (org-timegrid--calendar-state-create
+                       :week-start 100 :selected-id 'event :cursor-visible t
+                       :region-active t :mark 144600
+                       :cursor (org-timegrid--cursor-state-create
+                                :surface surface :day 3 :minute minute :lane 2)))
+                     (org-timegrid--backend
+                      (org-timegrid-backend-create :delete-function #'ignore))
+                     (kill-ring nil))
+          (cl-letf (((symbol-function 'org-timegrid--logical-selection)
+                     (lambda () (list :start 144608 :end 144638 :events (list event))))
+                    ((symbol-function 'org-timegrid--load-state)
+                     ;; An older occurrence can reuse the removed block's id.
+                     (lambda (week)
+                       (org-timegrid--calendar-state-create
+                        :week-start week
+                        :blocks (list (org-timegrid--make-block 'event 1 600 630 "Earlier")))))
+                    ((symbol-function 'org-timegrid--refresh) #'ignore)
+                    ((symbol-function 'org-timegrid--render-ui-change) #'ignore))
+            (funcall command)
+            (should-not (org-timegrid--selected-id))
+            (should-not (org-timegrid-region-active-p))
+            (should (org-timegrid--cursor-visible-p))
+            (should (= 3 (org-timegrid--cursor-state-day (org-timegrid--cursor))))
+            (should (eq surface (org-timegrid--cursor-state-surface (org-timegrid--cursor))))
+            (should (= expected (org-timegrid--cursor-state-minute (org-timegrid--cursor))))))))))
+
 (ert-deftest org-timegrid-regression-motion-visits-boundaries-and-block-starts ()
   (let* ((org-timegrid-slot-minutes 15)
          (org-timegrid-cursor-step-minutes 15)

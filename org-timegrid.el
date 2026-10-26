@@ -2856,8 +2856,9 @@ KEEP-ENTRY never offers to remove timestamp-free entries."
                        (format "Delete %d timestamp-free entr%s too? "
                                (length eligible)
                                (if (= (length eligible) 1) "y" "ies"))))
-             (dolist (event eligible) (funcall entry-deleter event)))))))
-    (org-timegrid--deactivate-region)
+             (dolist (event eligible) (funcall entry-deleter event)))))
+       (org-timegrid--deactivate-region)
+       (org-timegrid--deselect-block)))
     (message "Removed %d timestamp%s" (length events)
              (if (= (length events) 1) "" "s"))))
 
@@ -4450,6 +4451,20 @@ time-grid cells prompt for the timed duration as usual."
   "Deactivate the calendar region without forgetting its mark."
   (setf (org-timegrid--calendar-state-region-active org-timegrid--state) nil))
 
+(defun org-timegrid--deselect-block ()
+  "Clear the block selection, keeping the cursor at the nearest regular stop."
+  (setf (org-timegrid--calendar-state-selected-id org-timegrid--state) nil)
+  (let ((cursor (org-timegrid--cursor)))
+    (when (eq (org-timegrid--cursor-state-surface cursor) 'grid)
+      (org-timegrid--set-grid-stop
+       (org-timegrid--cursor-state-day cursor)
+       (cons (max (* 60 org-timegrid-start-hour)
+                  (min (- (* 60 org-timegrid-end-hour) org-timegrid-slot-minutes)
+                       (* org-timegrid-cursor-step-minutes
+                          (round (org-timegrid--cursor-state-minute cursor)
+                                 org-timegrid-cursor-step-minutes))))
+             nil)))))
+
 (defun org-timegrid--transaction (function)
   "Run FUNCTION as one backend transaction and refresh once."
   (let ((transaction
@@ -4485,7 +4500,9 @@ time-grid cells prompt for the timed duration as usual."
     (when events
       (unless (functionp deleter) (user-error "This backend cannot cut events"))
       (org-timegrid--transaction
-       (lambda () (dolist (event events) (funcall deleter event)))))
+       (lambda ()
+         (dolist (event events) (funcall deleter event))
+         (org-timegrid--deselect-block))))
     (kill-new text)
     (org-timegrid--deactivate-region)
     (org-timegrid--render-ui-change)
