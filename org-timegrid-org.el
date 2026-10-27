@@ -636,10 +636,25 @@ Only timestamps in the heading's own section count."
                (integerp (org-element-property :hour-end latest)))
       (- (org-timegrid-org--timestamp-minutes latest t) start))))
 
+(defcustom org-timegrid-org-entry-filter-function
+  #'org-timegrid-org-default-entry-filter
+  "Function deciding which headings are offered when creating a block.
+Called with the headline's `org-element' object in its source buffer,
+with point at the heading.  Return non-nil to include it.  The function
+can inspect tags, properties, or `buffer-file-name'.  Set to `always' to
+offer every heading in `org-timegrid-org-files' and the capture file.
+The default includes unfinished TODO headings and plain headings with
+an active timestamp in their own section."
+  :type 'function)
+
+(defun org-timegrid-org-default-entry-filter (headline)
+  "Return non-nil when HEADLINE is unfinished and has a TODO or active date."
+  (and (not (eq (org-element-property :todo-type headline) 'done))
+       (or (org-element-property :todo-keyword headline)
+           (org-timegrid-org--headline-has-active-timestamp-p headline))))
+
 (defun org-timegrid-org--heading-candidates ()
-  "Return headings eligible for adding another calendar range.
-This includes unfinished TODO headings and plain headings that already
-have an active timestamp in their own section."
+  "Return headings accepted by `org-timegrid-org-entry-filter-function'."
   (let ((counts (make-hash-table :test #'equal))
         candidates)
     (dolist (file (org-timegrid-org--files))
@@ -647,12 +662,9 @@ have an active timestamp in their own section."
         (org-with-wide-buffer
          (org-element-map (org-element-parse-buffer) 'headline
            (lambda (headline)
-             (when (and
-                    (not (eq (org-element-property :todo-type headline)
-                             'done))
-                    (or (org-element-property :todo-keyword headline)
-                        (org-timegrid-org--headline-has-active-timestamp-p
-                         headline)))
+             (when (save-excursion
+                     (goto-char (org-element-property :begin headline))
+                     (funcall org-timegrid-org-entry-filter-function headline))
                (let* ((title (org-element-property :raw-value headline))
                       (todo (org-element-property :todo-keyword headline))
                       (marker (copy-marker

@@ -289,6 +289,7 @@ priority, property, or file.
 | `org-timegrid-org-exclude-todo-states` | `nil` | Hide headings whose TODO keyword is listed |
 | `org-timegrid-org-exclude-properties` | `nil` | Hide headings matching `(PROPERTY . VALUE)`; nil matches any value |
 | `org-timegrid-org-filter-function` | `org-timegrid-org-default-filter` | Custom event filter |
+| `org-timegrid-org-entry-filter-function` | `org-timegrid-org-default-entry-filter` | Filter headings offered when creating a block; use `always` for all headings |
 | `org-timegrid-org-tag-color-alist` | `nil` | Tag-to-colour mapping |
 
 Creating a block offers existing headings. Choose one to add a timestamp,

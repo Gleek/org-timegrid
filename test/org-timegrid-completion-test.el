@@ -3,6 +3,31 @@
 (require 'ert)
 (require 'org-timegrid-org)
 
+(ert-deftest org-timegrid-completion-entry-filter ()
+  (with-temp-buffer
+    (org-mode)
+    (setq buffer-file-name "/tmp/timegrid-completion.org")
+    (insert "* Plain\n* TODO Task\n* Dated\n<2026-10-15 Thu>\n"
+            "* DONE Finished\n<2026-10-15 Thu>\n"
+            "* Selected :work:\n:PROPERTIES:\n:BLOCK: yes\n:END:\n")
+    (let ((source (current-buffer)))
+      (cl-letf (((symbol-function 'org-timegrid-org--files)
+                 (lambda () '("/tmp/timegrid-completion.org")))
+                ((symbol-function 'find-file-noselect) (lambda (_) source)))
+        (dolist (example
+                 `((org-timegrid-org-default-entry-filter ("Task" "Dated"))
+                   (always ("Plain" "Task" "Dated" "Finished" "Selected"))
+                   (,(lambda (headline)
+                       (should (eq (current-buffer) source))
+                       (should (= (point) (org-element-property :begin headline)))
+                       (and (equal buffer-file-name "/tmp/timegrid-completion.org")
+                            (member "work" (org-get-tags))
+                            (equal (org-entry-get nil "BLOCK") "yes")))
+                    ("Selected"))))
+          (let ((org-timegrid-org-entry-filter-function (car example)))
+            (should (equal (mapcar #'cadr (org-timegrid-org--heading-candidates))
+                           (cadr example)))))))))
+
 (ert-deftest org-timegrid-completion-last-duration ()
   (dolist (example
            '(("<2026-10-15 Thu 10:00-10:45>\n<2026-10-10 Sat 10:00-12:00>" 45)
