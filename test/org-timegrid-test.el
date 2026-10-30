@@ -519,10 +519,11 @@
     (let* ((range 700000)
            (org-timegrid--state
             (org-timegrid--calendar-state-create :week-start range))
-           reloaded refreshed)
-      (cl-letf (((symbol-function 'org-timegrid--reload-state)
-                 (lambda (start) (setq reloaded start)))
-                ((symbol-function 'org-timegrid--refresh)
+           reloaded refreshed
+           (org-timegrid--backend
+            (org-timegrid-backend-create
+             :list-function (lambda (start _end) (setq reloaded (/ start 1440)) nil))))
+      (cl-letf (((symbol-function 'org-timegrid--refresh)
                  (lambda (&optional preserve minute alignment)
                    (setq refreshed (list preserve minute alignment)))))
         (org-timegrid-refresh)
@@ -982,7 +983,7 @@
           :cursor (org-timegrid--cursor-state-create
                    :surface 'grid :day 2 :minute 600 :lane 0)
           :cursor-visible t)))
-    (cl-letf (((symbol-function 'org-timegrid--render-ui-change) #'ignore))
+    (cl-letf (((symbol-function 'org-timegrid--reconcile) #'ignore))
       (org-timegrid-set-mark-command))
     (should (equal (org-timegrid--region-range)
                    (cons (+ (* 102 1440) 600) (+ (* 102 1440) 600))))
@@ -1015,7 +1016,7 @@
                     :surface 'grid :day 0 :minute 660 :lane 0)
            :cursor-visible t))
          kill-ring)
-    (cl-letf (((symbol-function 'org-timegrid--render-ui-change) #'ignore))
+    (cl-letf (((symbol-function 'org-timegrid--reconcile) #'ignore))
       (org-timegrid-copy-selected))
     (should (string-match-p "\n[0-9:]+–[0-9:]+  Free" (car kill-ring)))
     (should-not (get-text-property 0 'org-timegrid-payload (car kill-ring)))))
@@ -1245,8 +1246,9 @@
                      (org-timegrid--set-cursor day minute 0)
                      (pcase-let* ((`(,count . ,rendered)
                                    (render-and-count-cursors
-                                    #'org-timegrid--dynamic-fragment))
-                                  (tiles (cdr rendered)))
+                                    (lambda ()
+                                      (org-timegrid--scene-patch (org-timegrid--build-scene)))))
+                                  (tiles (cadr rendered)))
                        (should (= count 1))
                        (should tiles)
                        (dolist (tile tiles)
@@ -1261,7 +1263,7 @@
             (pcase-let ((`(,count . ,_)
                          (render-and-count-cursors
                           (lambda ()
-                            (org-timegrid--dynamic-fragment)
+                            (org-timegrid--scene-patch (org-timegrid--build-scene))
                             (org-timegrid--header)))))
               (should (= count 1))))))))))
 
@@ -1299,9 +1301,12 @@
         (org-timegrid--backend-update block))
       ;; Updater was called with the block's new absolute range.
       (should (= updated-start new-start))
-      ;; Event updated in-memory without waiting for a re-parse.
-      (should (= (org-timegrid-event-start event) new-start))
-      (should (= (org-timegrid-event-end   event) new-end))
+      ;; A replacement snapshot updates immediately; the original stays unchanged.
+      (let ((updated (car (org-timegrid--calendar-state-events org-timegrid--state))))
+        (should (= (org-timegrid-event-start updated) new-start))
+        (should (= (org-timegrid-event-end updated) new-end)))
+      (should (= (org-timegrid-event-start event) old-start))
+      (should (= (org-timegrid-event-end event) old-end))
       (should-not (org-timegrid-event-all-day event))
       ;; Only the in-memory redraw ran; the backend was not reloaded.
       (should (equal calls '(redraw))))))

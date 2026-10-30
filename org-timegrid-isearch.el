@@ -108,8 +108,8 @@ finite horizon.  Events in the horizon are fetched once per search."
 
 (defun org-timegrid-isearch--visit-week (week)
   "Load and display WEEK while preserving active Isearch machinery."
-  (org-timegrid--reload-state week)
-  (org-timegrid--refresh t))
+  (org-timegrid--with-update 'preserve
+    (org-timegrid--reload-state week)))
 
 (defun org-timegrid-isearch--events ()
   "Return and cache events inside the cross-week search horizon."
@@ -183,13 +183,11 @@ finite horizon.  Events in the horizon are fetched once per search."
   (when isearch-mode-end-hook-quit
     (pcase-let ((`(,week ,cursor ,visible ,selected)
                  org-timegrid-isearch--origin))
-      (org-timegrid--reload-state week)
-      (setf (org-timegrid--calendar-state-cursor org-timegrid--state) cursor
-            (org-timegrid--calendar-state-cursor-visible org-timegrid--state)
-            visible
-            (org-timegrid--calendar-state-selected-id org-timegrid--state)
-            selected)
-      (org-timegrid--refresh t)))
+      (org-timegrid--with-update 'preserve
+        (org-timegrid--reload-state week)
+        (setf (org-timegrid--calendar-state-cursor org-timegrid--state) cursor
+              (org-timegrid--calendar-state-cursor-visible org-timegrid--state) visible
+              (org-timegrid--calendar-state-selected-id org-timegrid--state) selected))))
   (goto-char (min org-timegrid-isearch--point (point-max)))
   (remove-hook 'isearch-update-post-hook #'org-timegrid-isearch--sync t)
   (remove-hook 'isearch-mode-end-hook #'org-timegrid-isearch--finish t))

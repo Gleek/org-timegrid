@@ -36,7 +36,7 @@
                         :week-start week
                         :blocks (list (org-timegrid--make-block 'event 1 600 630 "Earlier")))))
                     ((symbol-function 'org-timegrid--refresh) #'ignore)
-                    ((symbol-function 'org-timegrid--render-ui-change) #'ignore))
+                    ((symbol-function 'org-timegrid--reconcile) #'ignore))
             (funcall command)
             (should-not (org-timegrid--selected-id))
             (should-not (org-timegrid-region-active-p))
@@ -57,7 +57,8 @@
                          (org-timegrid--make-block 'c 3 876 877 "C")
                          (org-timegrid--make-block 'test 3 885 890 "test")
                          (org-timegrid--make-block 'hello 3 885 915 "hello")))))
-    (cl-letf (((symbol-function 'org-timegrid--cursor-moved) #'ignore))
+    (cl-letf (((symbol-function 'org-timegrid--cursor-moved) #'ignore)
+              ((symbol-function 'org-timegrid--reconcile) #'ignore))
       (org-timegrid--set-cursor 3 855)
       ;; Key    Time     Selected block.  The reverse walk retraces every stop.
       (cl-loop for (key (hour minute) selected) in
@@ -96,7 +97,8 @@
           (org-timegrid--calendar-state-create :cursor-visible t :blocks (list block))))
     (setf (org-timegrid-block-event block)
           (org-timegrid-event-create :metadata '(:clock t :running t)))
-    (cl-letf (((symbol-function 'org-timegrid--cursor-moved) #'ignore))
+    (cl-letf (((symbol-function 'org-timegrid--cursor-moved) #'ignore)
+              ((symbol-function 'org-timegrid--reconcile) #'ignore))
       (org-timegrid--set-cursor 3 855)
       ;; Key    Time     Selected block, including empty slots inside the clock.
       (cl-loop for (key (hour minute) selected) in
@@ -127,7 +129,8 @@
            :cursor-visible t
            :blocks (list (org-timegrid--make-block 'a 0 0 60 "A")
                          (org-timegrid--make-block 'b 0 0 5 "B")))))
-    (cl-letf (((symbol-function 'org-timegrid--cursor-moved) #'ignore))
+    (cl-letf (((symbol-function 'org-timegrid--cursor-moved) #'ignore)
+              ((symbol-function 'org-timegrid--reconcile) #'ignore))
       (org-timegrid--set-all-day-cursor 0 0)
       ;; Key    Surface Minute Selected block.
       (cl-loop for (key surface minute selected) in
@@ -152,11 +155,10 @@
         (org-timegrid--static-render t))
     (dolist (scale '(0.882 1 2))
       (cl-labels ((render (duration)
-                    (org-timegrid--draw-block
-                     (svg-create 300 3000)
+                    (org-timegrid--block-geometry
                      (org-timegrid--make-block
                       'short 0 541 (+ 541 duration) "Short task")
-                     3000 0 scale 200 (org-timegrid--palette) "sans-serif")))
+                     3000 0 scale 200)))
         (let ((slot (render 15)))
           (dolist (duration '(0 0.1 1 6 10 15))
             (let ((geometry (render duration)))
@@ -301,7 +303,8 @@
 (ert-deftest org-timegrid-regression-quit-clears-drag-preview ()
   (let ((org-timegrid--state (org-timegrid--calendar-state-create))
         cleared)
-    (cl-letf (((symbol-function 'org-timegrid--all-day-layout) #'ignore)
+    (cl-letf (((symbol-function 'org-timegrid--reconcile) #'ignore)
+              ((symbol-function 'org-timegrid--all-day-layout) #'ignore)
               ((symbol-function 'read-event) (lambda (&rest _) (signal 'quit nil)))
               ((symbol-function 'org-timegrid--clear-preview)
                (lambda () (setq cleared t))))
@@ -397,7 +400,8 @@
          (org-timegrid--state
           (org-timegrid--calendar-state-create :week-start 100 :blocks (list block))))
     (should (equal (org-timegrid--ordered-blocks) (list block)))
-    (cl-letf (((symbol-function 'org-timegrid--cursor-moved) #'ignore))
+    (cl-letf (((symbol-function 'org-timegrid--cursor-moved) #'ignore)
+              ((symbol-function 'org-timegrid--reconcile) #'ignore))
              (org-timegrid--goto-block block))
     (should (= 0 (org-timegrid--cursor-state-day (org-timegrid--cursor))))
     (should (= 0 (org-timegrid--cursor-state-minute (org-timegrid--cursor))))))
@@ -466,7 +470,8 @@
 (ert-deftest org-timegrid-regression-click-continuation-stays-on-its-day ()
   (let* ((block (org-timegrid--make-block 'event 0 1380 1500 "Overnight"))
          (org-timegrid--state (org-timegrid--calendar-state-create :blocks (list block))))
-    (cl-letf (((symbol-function 'org-timegrid--cursor-moved) #'ignore))
+    (cl-letf (((symbol-function 'org-timegrid--cursor-moved) #'ignore)
+              ((symbol-function 'org-timegrid--reconcile) #'ignore))
              (org-timegrid--goto-block block 1))
     (should (= 1 (org-timegrid--cursor-state-day (org-timegrid--cursor))))
     (should (= 0 (org-timegrid--cursor-state-minute (org-timegrid--cursor))))))
@@ -483,15 +488,17 @@
            (org-timegrid--tile-count 24)
            (static-svg (org-timegrid--svg))
            (static (with-temp-buffer (svg-print static-svg) (buffer-string))))
-      (insert static (car (org-timegrid--dynamic-fragment)))
+      (insert static (car (org-timegrid--scene-patch (org-timegrid--build-scene))))
       (should (= 1 (how-many "UniqueTitle" (point-min) (point-max)))))))
 
 (ert-deftest org-timegrid-regression-android-quit-clears-preview-and-touch-state ()
   (require 'org-timegrid-android)
-  (let ((touch-screen-current-tool '(1 nil nil nil start))
+  (let ((org-timegrid--state (org-timegrid--calendar-state-create))
+        (touch-screen-current-tool '(1 nil nil nil start))
         (touch-screen-current-timer 'timer)
         cleared)
-    (cl-letf (((symbol-function 'posn-window) (lambda (_) (selected-window)))
+    (cl-letf (((symbol-function 'org-timegrid--reconcile) #'ignore)
+              ((symbol-function 'posn-window) (lambda (_) (selected-window)))
               ((symbol-function 'org-timegrid--mouse-target)
                (lambda (_) '(:surface grid :day 0 :minute 600)))
               ((symbol-function 'org-timegrid--all-day-layout) #'ignore)

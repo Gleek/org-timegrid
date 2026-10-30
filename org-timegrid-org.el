@@ -1571,15 +1571,51 @@ Planned timestamps remain unbounded so repeaters can expand into the range."
                        events)))))
     (nreverse events)))
 
+(defvar-local org-timegrid-org--events-cache nil)
+
+(defun org-timegrid-org--cached-events (file start end)
+  "Return FILE's events for START through END, reusing nearby queries.
+The cache lives in the source buffer, so edits, undo, and buffer reverts
+invalidate it without installing change hooks in the user's Org files."
+  (let* ((key (list (buffer-chars-modified-tick) file
+                    org-timegrid-org-filter-function org-timegrid-org-color-function
+                    (copy-tree
+                     (list org-timegrid-org-show-clocks org-timegrid-org-show-repeaters
+                           org-timegrid-org-repeater-history org-timegrid-org-show-done
+                           org-timegrid-org-exclude-tags org-timegrid-org-exclude-todo-states
+                           org-timegrid-org-exclude-properties org-timegrid-org-tag-color-alist
+                           org-todo-keywords-1 org-done-keywords org-use-property-inheritance))))
+         (minute (floor (float-time) 60))
+         (cache org-timegrid-org--events-cache))
+    (unless (and (not (plist-get org-timegrid-query-options :force))
+                 (equal key (nth 0 cache))
+                 (<= (or (nth 1 cache) start) start)
+                 (>= (or (nth 2 cache) end) end)
+                 (or (not (nth 4 cache)) (= minute (nth 5 cache))))
+      (let* ((range (plist-get org-timegrid-query-options :cache-range))
+             (from (min start (or (car range) (- start (* 14 1440)))))
+             (to (max end (or (cdr range) (+ end (* 7 1440)))))
+             (events (mapcan (lambda (event)
+                               (org-timegrid-org--expand-event event from to))
+                             (org-timegrid-org--buffer-events file from to))))
+        (setq cache (list key from to events
+                          (seq-some (lambda (event)
+                                      (plist-get (org-timegrid-event-metadata event) :running))
+                                    events)
+                          minute)
+              org-timegrid-org--events-cache cache)))
+    (seq-filter (lambda (event)
+                  (and (< (org-timegrid-event-start event) end)
+                       (> (org-timegrid-event-end event) start)))
+                (nth 3 cache))))
+
 (defun org-timegrid-org--list-events (start end)
   "Return Org events intersecting absolute minutes START through END."
   (cl-loop for file in (org-timegrid-org--files)
            append
            (with-current-buffer (find-file-noselect file)
              (org-with-wide-buffer
-              (mapcan (lambda (event)
-                        (org-timegrid-org--expand-event event start end))
-                      (org-timegrid-org--buffer-events file start end))))))
+              (org-timegrid-org--cached-events file start end)))))
 
 (defun org-timegrid-org--visit-event (event)
   "Visit the Org heading that owns EVENT."

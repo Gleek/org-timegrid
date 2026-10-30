@@ -87,7 +87,7 @@ unit.  Mutation functions may be nil."
   "Granularity of the calendar, in minutes.
 Edits snap to this, it is the smallest range an entry may have, and it is
 the height of the keyboard cursor."
-  ;; The group is declared in `org-timegrid', which requires this file rather
+  ;; The group is declared in `org-timegrid-scene', which requires this file rather
   ;; than the other way round, so it is named here instead of inherited.
   :group 'org-timegrid
   :type 'integer)
@@ -122,18 +122,41 @@ the height of the keyboard cursor."
        (< (org-timegrid-event-start event)
           (org-timegrid-event-end event))))
 
-(defun org-timegrid-backend-list (backend start end)
-  "Return validated BACKEND events intersecting START through END."
+(defun org-timegrid-event-snapshot (event)
+  "Copy EVENT's public value fields, retaining its opaque backend SOURCE.
+Snapshots are read-only to consumers. Updates replace them instead of mutating
+values retained by another view, an earlier state, or the storage adapter."
+  (when event
+    (let ((copy (copy-org-timegrid-event event)))
+      (setf (org-timegrid-event-tags copy) (copy-tree (org-timegrid-event-tags event))
+            (org-timegrid-event-metadata copy)
+            (cl-loop for (key value) on (org-timegrid-event-metadata event) by #'cddr
+                     append (list key (if (functionp value) value (copy-tree value)))))
+      copy)))
+
+(defvar org-timegrid-query-options nil
+  "Read-only options dynamically bound while a backend LIST-FUNCTION runs.
+:force requests fresh source data. :cache-range is an advisory absolute-minute
+(FROM . TO) range for nearby requests. Backends may ignore these hints, but must
+always return every event in the requested START..END range.")
+
+(defun org-timegrid-backend-list (backend start end &optional options)
+  "Return a read-only snapshot of BACKEND events between START and END.
+OPTIONS supplies `org-timegrid-query-options'. Nested queries inherit it
+by default.
+Existing backend listing functions still receive just START and END."
   (unless (and (org-timegrid-backend-p backend)
                (functionp
                 (org-timegrid-backend-list-function backend)))
     (error "Calendar backend has no event listing function"))
-  (cl-remove-if-not
-   (lambda (event)
-     (and (org-timegrid-event-valid-p event)
-          (< (org-timegrid-event-start event) end)
-          (> (org-timegrid-event-end event) start)))
-   (funcall (org-timegrid-backend-list-function backend) start end)))
+  (let ((org-timegrid-query-options (or options org-timegrid-query-options)))
+    (mapcar #'org-timegrid-event-snapshot
+	    (cl-remove-if-not
+	     (lambda (event)
+	       (and (org-timegrid-event-valid-p event)
+		    (< (org-timegrid-event-start event) end)
+		    (> (org-timegrid-event-end event) start)))
+	     (funcall (org-timegrid-backend-list-function backend) start end)))))
 
 (defun org-timegrid-event-to-block (event week-start)
   "Convert EVENT to renderer coordinates relative to WEEK-START."
@@ -211,6 +234,22 @@ the height of the keyboard cursor."
                    (org-timegrid--assign-group-lanes
                     (nreverse group)))))
     output))
+
+(cl-defstruct (org-timegrid--cursor-state
+               (:constructor org-timegrid--cursor-state-create))
+  "A position on either the timed grid or the all-day rail."
+  surface day minute lane)
+
+(cl-defstruct (org-timegrid--operation
+               (:constructor org-timegrid--operation-create))
+  "A proposed calendar mutation and its preview BLOCK."
+  kind block replace-id error edge handle)
+
+(cl-defstruct (org-timegrid--calendar-state
+               (:constructor org-timegrid--calendar-state-create))
+  "Backend data and interactive state for one displayed week."
+  week-start events blocks preview cursor selected-id cursor-visible
+  mark region-active gesture)
 
 (provide 'org-timegrid-model)
 ;;; org-timegrid-model.el ends here

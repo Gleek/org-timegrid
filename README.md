@@ -143,6 +143,9 @@ Run `M-x org-timegrid-week` to open the week containing today.
 Mouse edits snap to 15 minutes and use a 15-minute minimum. Release commits a
 drag. Press `C-g` before releasing to cancel it.
 
+Nearby drag and resize positions are prepared between inputs to speed up
+previews. Set `org-timegrid-preview-prefetch` to `nil` to disable this extra work.
+
 ### Keyboard
 
 Use `C-SPC` and movement to select a region. Without a region, edits apply to
