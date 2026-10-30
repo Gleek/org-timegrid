@@ -38,6 +38,13 @@
 (defvar touch-screen-current-timer)
 (defvar touch-screen-display-keyboard)
 (defvar touch-screen-keyboard-function)
+(defvar android-keyboard-bell-duration)
+
+(defcustom org-timegrid-android-haptic-duration 60
+  "Vibration duration in milliseconds when a calendar long press is ready.
+Use a value between 10 and 1000, or nil to disable feedback."
+  :type '(choice (const :tag "Disabled" nil) integer)
+  :group 'org-timegrid)
 
 (defcustom org-timegrid-android-scroll-scale 0.65
   "Scale physical Android touch pixels into calendar SVG pixels."
@@ -133,12 +140,17 @@ Enable this to use keyboard commands that have no touch gesture."
 
 (defun org-timegrid-android--proposal (origin target)
   "Build a touch edit proposal between calendar ORIGIN and TARGET."
-  (if (and (eq (plist-get origin :surface) 'rail)
+  (let ((proposal
+         (if (and (eq (plist-get origin :surface) 'rail)
            (null (plist-get origin :block-id)))
       (if (eq (plist-get target :surface) 'rail)
           (org-timegrid--all-day-create-proposal origin target)
         (org-timegrid--operation-create :error "Release inside an all-day cell"))
-    (org-timegrid--proposal origin target nil)))
+    (org-timegrid--proposal origin target nil))))
+    (setf (org-timegrid--operation-handle proposal)
+          (and (plist-get origin :edge)
+               (eq (org-timegrid--operation-kind proposal) 'resize)))
+    proposal))
 
 (defun org-timegrid-android--drag-update (event data)
   "Update the calendar preview from raw touchscreen EVENT and DATA."
@@ -152,6 +164,14 @@ Enable this to use keyboard commands that have no touch gesture."
       (org-timegrid--set-preview
        (org-timegrid-android--proposal (aref data 1) (aref data 2)))
     (org-timegrid--clear-preview)))
+
+(defun org-timegrid-android--haptic-feedback ()
+  "Vibrate briefly to signal that a calendar touch action is ready."
+  (when (and (eq window-system 'android) org-timegrid-android-haptic-duration)
+    (let ((android-keyboard-bell-duration org-timegrid-android-haptic-duration)
+          (ring-bell-function nil)
+          (visible-bell nil))
+      (ding t))))
 
 (defun org-timegrid-android-long-press (event)
   "Create, move, or resize a block using a held touch EVENT."
@@ -170,6 +190,11 @@ Enable this to use keyboard commands that have no touch gesture."
             (unwind-protect
                 (let ((result
                        (org-timegrid--with-gesture origin
+                         (when (plist-get origin :edge)
+                           (org-timegrid--set-preview
+                            (org-timegrid-android--proposal origin origin))
+                           (redisplay t))
+                         (org-timegrid-android--haptic-feedback)
                          (funcall (intern "touch-screen-track-drag") start-event
                                   #'org-timegrid-android--drag-update data))))
                   (cond
@@ -177,6 +202,7 @@ Enable this to use keyboard commands that have no touch gesture."
                     (org-timegrid--apply
                      (org-timegrid-android--proposal origin (aref data 2))))
                    ((eq result 'no-drag)
+                    (org-timegrid--clear-preview)
                     (org-timegrid-context-menu (list 'mouse-3 position)))))
               (setq touch-screen-current-tool nil touch-screen-current-timer nil)
               (org-timegrid--clear-preview))))))))
@@ -189,6 +215,8 @@ Enable this to use keyboard commands that have no touch gesture."
               touch-screen-keyboard-function
               (unless org-timegrid-android-display-keyboard (lambda () nil))
               org-timegrid-days 1
+              org-timegrid-edge-pixels 24
+              org-timegrid-edge-slop 10
               org-timegrid-default-zoom org-timegrid-android-zoom
               org-timegrid-header-title-style
               org-timegrid-android-header-title-style
@@ -202,6 +230,14 @@ Enable this to use keyboard commands that have no touch gesture."
 (defun org-timegrid-android--plain-tile-image-map (&rest _)
   "Return no SVG hotspot map so Android receives uniform touch events."
   nil)
+
+(defun org-timegrid-android--grid-palette (palette)
+  "Make grid lines in PALETTE readable on a phone screen."
+  (let ((foreground (plist-get palette :foreground))
+        (background (plist-get palette :background)))
+    (plist-put palette :grid (org-timegrid--blend foreground background 0.30))
+    (plist-put palette :half-grid (org-timegrid--blend foreground background 0.16))
+    (plist-put palette :grid-width 2)))
 
 (defun org-timegrid-android--install-touch-bindings ()
   "Prefer native scrolling over desktop press-and-drag gestures."
@@ -248,6 +284,9 @@ Enable this to use keyboard commands that have no touch gesture."
   (or (featurep 'touch-screen) (load "touch-screen" nil t))
   (advice-add 'org-timegrid--draw-text :override
               #'org-timegrid-android--draw-text)
+  (advice-remove 'org-timegrid--palette #'org-timegrid-android--grid-palette)
+  (advice-add 'org-timegrid--face-palette :filter-return
+              #'org-timegrid-android--grid-palette)
   (add-hook 'org-timegrid-calendar-setup-hook
             #'org-timegrid-android--configure-date-picker)
   (when (fboundp (intern "touch-screen-track-drag"))

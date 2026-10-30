@@ -83,6 +83,7 @@ The capture file is always included in calendar queries.
 See [`ANDROID.org`](ANDROID.org) for setup. Android uses a one-day view,
 native scrolling, and long-press editing. Set
 `org-timegrid-android-display-keyboard` to non-nil to enable the on-screen keyboard.
+Resize handles and a short vibration provide feedback during touch editing.
 
 https://github.com/user-attachments/assets/fc368b76-4b29-40d0-8a0a-536ac526f6e0
 
