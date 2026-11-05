@@ -1,13 +1,75 @@
 # Changelog
 
-## Unreleased
+## Unreleased (target: v0.1.0)
 
-- Added Org clock strips and editing for finished clocks.
-- Clock strips span days and overlap on the same day boundary.
-- Keyboard navigation visits block starts between calendar slots.
-- Refresh keeps the current view; `org-timegrid-now-alignment` controls the initial time position.
-- Short blocks occupy at least one calendar slot.
-- Removed `org-timegrid-corner-radius`; calendar blocks use square corners.
+- Faster calendar interaction
+  - Cached views and prepared drag previews.
+  - Fewer redraws and Org file reads.
+- Simpler configuration
+  - Fewer options; see [Defcustom cleanup](#defcustom-cleanup).
+  - One slot size for keyboard steps and edits.
+  - Time labels default to `12h`; use `24h` for 24-hour labels.
+- Android compatibility
+  - Improved touch editing and resize feedback.
+  - Long-press vibration.
+- Org clock strips
+  - Finished, running, overnight, and overlapping clocks.
+  - Editing for finished clocks.
+
+### Bug fixes
+
+- Scrolling and search
+  - Navigation and refresh preserve the viewport.
+  - Search keeps matched blocks visible.
+- Selection and navigation
+  - Selection survives heading edits; removal keeps the cursor in place.
+  - Navigation visits off-grid starts and tied starts from left to right.
+- Display
+  - Fixed stale images across frames.
+  - Short blocks occupy at least one calendar slot.
+
+### Defcustom cleanup
+
+#### Moved to defvar
+
+These remain available as plain variables. Use `setq` instead of Custom:
+
+`org-timegrid-agenda-heading-format`, `org-timegrid-android-header-title-style`,
+`org-timegrid-android-scroll-scale`,
+`org-timegrid-android-single-day-label-style`,
+`org-timegrid-calendar-event-predicate`,
+`org-timegrid-calendar-highlight-dates`, `org-timegrid-colors`,
+`org-timegrid-copy-date-format`, `org-timegrid-copy-item-template`,
+`org-timegrid-data-refresh-seconds`, `org-timegrid-header-title-style`,
+`org-timegrid-highlight-current-day`, `org-timegrid-isearch-week-limit`,
+`org-timegrid-keyboard-commit-delay`, `org-timegrid-org-after-create-hook`,
+`org-timegrid-org-color-function`, `org-timegrid-org-entry-filter-function`,
+`org-timegrid-org-filter-function`, `org-timegrid-org-repeater-history`,
+`org-timegrid-org-show-repeaters`, `org-timegrid-single-day-label-style`.
+
+#### Removed with alternatives
+
+- `org-timegrid-cursor-step-minutes`: use `org-timegrid-slot-minutes`.
+  The old name remains an obsolete alias.
+- `org-timegrid-pixels-per-minute`: use `org-timegrid-default-zoom` or
+  text-scale commands.
+- `org-timegrid-org-exclude-todo-states`,
+  `org-timegrid-org-exclude-properties`: use
+  `org-timegrid-org-filter-function`.
+- `org-timegrid-edge-pixels`: use internal `org-timegrid--resize-pixels`.
+- `org-timegrid-edge-slop`: use internal `org-timegrid--resize-slop`.
+
+#### Removed without alternatives
+
+Remove these from your configuration:
+
+`org-timegrid-now-alignment`, `org-timegrid-buffer-name`,
+`org-timegrid-copy-day-separator`, `org-timegrid-android-scroll-max-step`,
+`org-timegrid-block-gap`, `org-timegrid-midnight-grip-pixels`,
+`org-timegrid-nesting-indent`, `org-timegrid-title-clearance`,
+`org-timegrid-cursor-opacity`, `org-timegrid-region-opacity`,
+`org-timegrid-all-day-lane-height`, `org-timegrid-compact-shadow-pixels`,
+`org-timegrid-corner-radius`.
 
 ## v0.0.5 — 2026-10-23
 
