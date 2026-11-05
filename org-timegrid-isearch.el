@@ -40,7 +40,7 @@ finite horizon.  Events in the horizon are fetched once per search.")
 
 (defvar-local org-timegrid-isearch--origin nil)
 (defvar-local org-timegrid-isearch--point nil)
-
+(defvar-local org-timegrid-isearch--search-point nil)
 (defvar-local org-timegrid-isearch--anchors nil)
 (defvar-local org-timegrid-isearch--events 'unqueried)
 
@@ -101,9 +101,23 @@ finite horizon.  Events in the horizon are fetched once per search.")
               ((< position (point-max)))
               (block (get-text-property position
                                         'org-timegrid-isearch-block)))
-    (save-match-data
-      (save-excursion
-        (org-timegrid--goto-block block)))))
+    (let ((inhibit-redisplay t))
+      (save-match-data
+        (save-excursion
+          (org-timegrid--goto-block block)
+          (org-timegrid--scroll-cursor-into-view))))))
+
+(defun org-timegrid-isearch--restore-point ()
+  "Restore the title index position before an Isearch command."
+  (when org-timegrid-isearch--search-point
+    (goto-char org-timegrid-isearch--search-point)
+    (setq org-timegrid-isearch--search-point nil)))
+
+(defun org-timegrid-isearch--display-point ()
+  "Keep redisplay at the calendar viewport rather than the title index."
+  (when-let* ((window (get-buffer-window (current-buffer) t)))
+    (setq org-timegrid-isearch--search-point (point))
+    (org-timegrid--set-vscroll window org-timegrid--saved-vscroll)))
 
 (defun org-timegrid-isearch--visit-week (week)
   "Load and display WEEK while preserving active Isearch machinery."
@@ -188,6 +202,10 @@ finite horizon.  Events in the horizon are fetched once per search.")
               (org-timegrid--calendar-state-cursor-visible org-timegrid--state) visible
               (org-timegrid--calendar-state-selected-id org-timegrid--state) selected))))
   (goto-char (min org-timegrid-isearch--point (point-max)))
+  (org-timegrid-isearch--display-point)
+  (setq org-timegrid-isearch--search-point nil)
+  (remove-hook 'pre-command-hook #'org-timegrid-isearch--restore-point t)
+  (remove-hook 'post-command-hook #'org-timegrid-isearch--display-point t)
   (remove-hook 'isearch-update-post-hook #'org-timegrid-isearch--sync t)
   (remove-hook 'isearch-mode-end-hook #'org-timegrid-isearch--finish t))
 
@@ -201,12 +219,15 @@ finite horizon.  Events in the horizon are fetched once per search.")
          (org-timegrid--cursor-visible-p)
          (org-timegrid--calendar-state-selected-id org-timegrid--state))
    org-timegrid-isearch--point (point)
+   org-timegrid-isearch--search-point nil
    org-timegrid-isearch--events 'unqueried
    isearch-search-fun-function #'org-timegrid-isearch--search-function
    isearch-push-state-function #'org-timegrid-isearch--push-state)
   (goto-char (org-timegrid-isearch--start-position backward))
   (add-hook 'isearch-update-post-hook #'org-timegrid-isearch--sync nil t)
   (add-hook 'isearch-mode-end-hook #'org-timegrid-isearch--finish nil t)
+  (add-hook 'pre-command-hook #'org-timegrid-isearch--restore-point nil t)
+  (add-hook 'post-command-hook #'org-timegrid-isearch--display-point t t)
   (isearch-mode (not backward)))
 
 (defun org-timegrid-isearch-forward ()
