@@ -1411,14 +1411,16 @@ last lane, or where there is only one, it moves by a day."
   "Return committed blocks in visible keyboard-navigation order.
 For each date, all-day blocks anchored there follow their displayed lanes
 from top to bottom, followed by that day's timed blocks.  A multi-day block
-occurs once, at its first visible date."
+occurs once, at its first visible date.  Timed blocks sharing a start are
+visited from left to right."
   (let* ((all-day (org-timegrid--all-day-layout))
          (timed (seq-filter
                  (lambda (block) (not (org-timegrid-block-preview block)))
                  (org-timegrid--timed-blocks)))
          result)
     (dotimes (day-index org-timegrid-days)
-      (let (day-all-day day-timed)
+      (let ((positions (make-hash-table :test #'equal))
+            day-all-day day-timed)
         (dolist (block all-day)
           (when (and (= day-index
                         (floor (org-timegrid-block-rail-start block) 1440))
@@ -1428,6 +1430,11 @@ occurs once, at its first visible date."
         (dolist (block timed)
           (when (= day-index (max 0 (org-timegrid-block-day block)))
             (push block day-timed)))
+        (dolist (block (org-timegrid--layout-day timed day-index))
+          (puthash (org-timegrid-block-id block)
+                   (car (org-timegrid--layout-frame
+                         block 0 (org-timegrid--column-width)))
+                   positions))
         (setq result
               (append
                result
@@ -1440,8 +1447,8 @@ occurs once, at its first visible date."
                        (let ((ls (org-timegrid--block-visible-start left))
                              (rs (org-timegrid--block-visible-start right)))
                          (if (= ls rs)
-                             (string< (format "%S" (org-timegrid-block-id left))
-                                      (format "%S" (org-timegrid-block-id right)))
+                             (< (gethash (org-timegrid-block-id left) positions 0)
+                                (gethash (org-timegrid-block-id right) positions 0))
                            (< ls rs)))))))))
     result))
 
