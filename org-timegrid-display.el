@@ -105,8 +105,6 @@
   (declare (indent 1) (debug t))
   `(org-timegrid--update (lambda () ,@body) ,view))
 
-(defvar-local org-timegrid--timed-layout-cache nil)
-
 (defvar-local org-timegrid--view-cache nil)
 
 (defvar-local org-timegrid--view-cache-context nil)
@@ -174,15 +172,6 @@
     (org-timegrid-svg-image (org-timegrid-svg-render
                              (org-timegrid-scene-day blocks start-minute end-minute width now context))
                             :scale 1 :ascent 'center)))
-
-(defun org-timegrid--svg (&optional drawings-p)
-  "Render the static scene; with DRAWINGS-P return bounded SVG drawings."
-  (org-timegrid--ensure-state)
-  (let* ((context (or org-timegrid--render-context (org-timegrid--capture-context)))
-         (scene (org-timegrid-scene-static org-timegrid--state context)))
-    (setq-local org-timegrid--image-height (org-timegrid--context-height context)
-                org-timegrid--geometry (org-timegrid--scene-geometry scene))
-    (org-timegrid-svg-render scene (and drawings-p 'drawings))))
 
 (defun org-timegrid--update-clock-fragment ()
   "Ask the scene and SVG layers for the current-time overlay."
@@ -563,7 +552,7 @@ With SNAPSHOT, copy event records before retaining the key."
                      org-timegrid--view-cache)))
              '(1 -1 7 -7 2 -2 3 -3 4 -4 5 -5 6 -6 -8 -9 -10 -11 -12 -13 -14)))
            (fields (append '(org-timegrid--state org-timegrid--header-geometry
-                                                 org-timegrid--timed-layout-cache org-timegrid--all-day-layout-cache)
+                                                 org-timegrid--all-day-layout-cache)
                            org-timegrid--view-fields)))
       (when offset
         (let ((org-timegrid--cache-anchor (* anchor 1440)))
@@ -892,7 +881,7 @@ ALIGNMENT defaults to `center'."
                                                 #'org-timegrid--data-tick buffer))))
 
 (defun org-timegrid--cancel-timers ()
-  "Cancel timers owned by the SVG prototype buffer."
+  "Cancel timers owned by the calendar buffer."
   (org-timegrid--clear-preview-cache)
   (dolist (timer (list org-timegrid--prewarm-timer org-timegrid--resize-timer
                        org-timegrid--clock-timer
@@ -1128,7 +1117,7 @@ drawn into rather than the frame's idea of the face."
     (copy-sequence (cdr org-timegrid--palette-cache))))
 
 (defun org-timegrid--window-width ()
-  "Return the prototype window's body width in pixels."
+  "Return the calendar window's body width in pixels."
   (if-let* ((window (get-buffer-window (current-buffer) t)))
       (window-body-width window t)
     900))
@@ -1170,7 +1159,7 @@ the grid by the width of whatever else is there."
                               (plist-get geometry :width))))
              (bottom (round (+ (plist-get geometry :y)
                                (plist-get geometry :height))))
-             (edge (min org-timegrid-edge-pixels
+             (edge (min org-timegrid--resize-pixels
                         (max 1 (floor (/ (- right x) 2.0))))))
         (when (plist-get geometry :allow-left)
           (push (list `(rect . ((,x . ,y) . (,(+ x edge) . ,bottom)))
@@ -1213,7 +1202,7 @@ the grid by the width of whatever else is there."
                (edge (max 1 (round
                              (org-timegrid--edge-height
                               geometry))))
-               (slop org-timegrid-edge-slop)
+               (slop org-timegrid--resize-slop)
                (boundary-edge (plist-get geometry :boundary-edge)))
           (cond
            (boundary-edge
@@ -1251,7 +1240,7 @@ Keep the same calendar minute at the vertical center of the window."
            (body (and window (window-body-height window t)))
            (scroll (and window (org-timegrid--window-scroll-pixels window)))
            (old-inset (* org-timegrid--grid-top-inset old-factor))
-           (old-scale (* org-timegrid-pixels-per-minute old-factor))
+           (old-scale (* org-timegrid--base-pixels-per-minute old-factor))
            (anchor-minute
             (and body scroll
                  (+ (* 60 org-timegrid-start-hour)

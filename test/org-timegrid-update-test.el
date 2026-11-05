@@ -1,6 +1,9 @@
 ;;; org-timegrid-update-test.el --- Shared update behavior -*- lexical-binding: t; -*-
 (require 'ert)
 (require 'org-timegrid)
+(require 'org-timegrid-test-support
+         (expand-file-name "org-timegrid-test-support.el"
+                           (file-name-directory load-file-name)))
 
 (defmacro org-timegrid-update-test--calendar (&rest body)
   (declare (indent 0) (debug t))
@@ -30,7 +33,7 @@
 (ert-deftest org-timegrid-update-nested-and-unchanged ()
   "Nested mutations paint and schedule preparation once; repeated state does neither."
   (org-timegrid-update-test--calendar
-    (let ((proposal (org-timegrid--keyboard-proposal block 15 0 nil)))
+    (let ((proposal (org-timegrid--edit-proposal block 15 0 nil)))
       (org-timegrid--update
        (lambda ()
          (org-timegrid--set-cursor 0 615)
@@ -54,8 +57,8 @@
     (should (= grid 2))
     (should (= header 2))
     (let* ((all-day (org-timegrid--make-block 'rail 1 0 1440 "Rail" nil nil 'all-day))
-           (first (org-timegrid--keyboard-proposal all-day 0 0 nil))
-           (second (org-timegrid--keyboard-proposal all-day 0 1 nil)))
+           (first (org-timegrid--edit-proposal all-day 0 0 nil))
+           (second (org-timegrid--edit-proposal all-day 0 1 nil)))
       (org-timegrid--set-preview first)
       (should (= grid 3))
       (org-timegrid--set-preview second)
@@ -75,7 +78,7 @@
           (org-timegrid--with-update view
             (org-timegrid--set-cursor
              0 (+ 15 (org-timegrid--cursor-state-minute (org-timegrid--cursor))))
-            (org-timegrid--set-preview (org-timegrid--keyboard-proposal block 15 0 nil))))
+            (org-timegrid--set-preview (org-timegrid--edit-proposal block 15 0 nil))))
         (should (equal (nreverse views) '((t nil nil) (nil nil nil) (nil 540 top))))
         (should (= followed 1))
         (should (= prepared 3))
@@ -135,26 +138,35 @@
 
 (ert-deftest org-timegrid-update-open-reuses-current-state ()
   "Opening commits initial state once and reuses a compatible existing calendar."
-  (let* ((org-timegrid-buffer-name (generate-new-buffer-name "*Timegrid Update Test*"))
-         (queries 0) (paints 0)
+  (let* ((queries 0) (paints 0)
          (backend (org-timegrid-backend-create
                    :name "Dummy" :list-function (lambda (&rest _) (cl-incf queries) nil))))
     (save-window-excursion
-      (unwind-protect
-          (cl-letf (((symbol-function 'org-timegrid--refresh)
-                     (lambda (&rest _)
-                       (should (org-timegrid--calendar-state-p org-timegrid--state))
-                       (setq org-timegrid--last-width (org-timegrid--window-width))
-                       (cl-incf paints))))
-            (org-timegrid-open backend 100)
-            (org-timegrid-open backend 100)
-            (should (= queries 1))
-            (should (= paints 1))
-            (org-timegrid-open backend 200)
-            (should (= queries 2))
-            (should (= paints 2)))
-        (when-let* ((buffer (get-buffer org-timegrid-buffer-name)))
-          (kill-buffer buffer))))))
+      (org-timegrid-test--with-isolated-calendar
+        (cl-letf (((symbol-function 'org-timegrid--refresh)
+                   (lambda (&rest _)
+                     (should (org-timegrid--calendar-state-p org-timegrid--state))
+                     (setq org-timegrid--last-width (org-timegrid--window-width))
+                     (cl-incf paints))))
+          (org-timegrid-open backend 100)
+          (org-timegrid-open backend 100)
+          (should (= queries 1))
+          (should (= paints 1))
+          (org-timegrid-open backend 200)
+          (should (= queries 2))
+          (should (= paints 2)))))))
+
+(ert-deftest org-timegrid-update-tests-preserve-existing-calendar-on-error ()
+  "Test cleanup restores an existing calendar even when a test fails."
+  (org-timegrid-test--with-isolated-calendar
+    (let ((existing (get-buffer-create "*Org Time Grid*")))
+      (with-current-buffer existing (insert "Existing calendar"))
+      (should-error
+       (org-timegrid-test--with-isolated-calendar
+         (get-buffer-create "*Org Time Grid*")
+         (error "Test failure")))
+      (should (eq existing (get-buffer "*Org Time Grid*")))
+      (should (equal "Existing calendar" (with-current-buffer existing (buffer-string)))))))
 
 (ert-deftest org-timegrid-update-nested-clock-keeps-model-and-viewport ()
   "A timer during an update cannot replace a pending model or viewport change."
@@ -217,7 +229,7 @@
                 org-timegrid--last-zoom-factor (org-timegrid--zoom-factor))
           (when (eq trigger 'edit)
             (setf (org-timegrid--calendar-state-preview org-timegrid--state)
-                  (org-timegrid--keyboard-proposal block 15 0 nil)))
+                  (org-timegrid--edit-proposal block 15 0 nil)))
           (cl-letf (((symbol-function 'run-at-time)
                      (lambda (_delay _repeat function &rest _) (setq deferred function))))
             (pcase trigger

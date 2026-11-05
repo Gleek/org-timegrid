@@ -1,6 +1,9 @@
 ;;; org-timegrid-regression-test.el --- Edit and lifecycle regressions -*- lexical-binding: t; -*-
 
 (require 'ert)
+(require 'org-timegrid-test-support
+         (expand-file-name "org-timegrid-test-support.el"
+                           (file-name-directory load-file-name)))
 (require 'org-timegrid-org)
 (require 'org-timegrid-agenda)
 
@@ -12,8 +15,7 @@
     (dolist (case '((grid 15 607 600) (grid 15 608 615)
                     (grid 30 620 630) (rail 15 0 0)))
       (with-temp-buffer
-        (pcase-let* ((`(,surface ,org-timegrid-cursor-step-minutes ,minute ,expected) case)
-                     (org-timegrid-slot-minutes 15)
+        (pcase-let* ((`(,surface ,org-timegrid-slot-minutes ,minute ,expected) case)
                      (org-timegrid-start-hour 0)
                      (org-timegrid-end-hour 24)
                      (event (org-timegrid-event-create :id 'event :title "Event"
@@ -47,7 +49,6 @@
 
 (ert-deftest org-timegrid-regression-motion-visits-boundaries-and-block-starts ()
   (let* ((org-timegrid-slot-minutes 15)
-         (org-timegrid-cursor-step-minutes 15)
          (org-timegrid--state
           (org-timegrid--calendar-state-create
            :cursor-visible t
@@ -91,7 +92,6 @@
 
 (ert-deftest org-timegrid-regression-motion-selects-running-clock-once ()
   (let* ((org-timegrid-slot-minutes 15)
-         (org-timegrid-cursor-step-minutes 15)
          (block (org-timegrid--make-block 'clock 3 874 891 "Running clock"))
          (org-timegrid--state
           (org-timegrid--calendar-state-create :cursor-visible t :blocks (list block))))
@@ -123,7 +123,7 @@
 (ert-deftest org-timegrid-regression-motion-between-rail-and-shared-starts ()
   (let* ((org-timegrid-start-hour 0)
          (org-timegrid-end-hour 24)
-         (org-timegrid-cursor-step-minutes 15)
+         (org-timegrid-slot-minutes 15)
          (org-timegrid--state
           (org-timegrid--calendar-state-create
            :cursor-visible t
@@ -183,8 +183,6 @@
            (org-timegrid-org-auto-save nil)
            (org-timegrid-org-filter-function #'org-timegrid-org-default-filter)
            (org-timegrid-org-exclude-tags nil)
-           (org-timegrid-org-exclude-todo-states nil)
-           (org-timegrid-org-exclude-properties nil)
            (org-timegrid-org-show-repeaters t)
            (org-timegrid-org-show-done t))
        ,@body)))
@@ -325,7 +323,7 @@
       (should (equal (buffer-substring-no-properties (point) (line-end-position))
                      (concat "* " title))))
     (should (equal (org-timegrid--format-copy-item title 1065422040 1065422070)
-                   (concat "10:00–10:30  " title)))))
+                   (concat "10:00 AM–10:30 AM  " title)))))
 
 (ert-deftest org-timegrid-regression-failed-cut-preserves-kill-ring ()
   (let ((kill-ring '("Keep me"))
@@ -424,31 +422,27 @@
              (should (eq kind 'timed)))))
 
 (ert-deftest org-timegrid-regression-opening-after-backend-error-is-retryable ()
-  (let ((org-timegrid-buffer-name (generate-new-buffer-name " *timegrid-open-test*"))
-        (org-timegrid--backend nil))
-    (unwind-protect
-        (progn
-          (should-error
-           (org-timegrid-open
-            (org-timegrid-backend-create :list-function (lambda (&rest _) (error "Backend unavailable")))))
-          (should-not (get-buffer org-timegrid-buffer-name)))
-      (when-let* ((buffer (get-buffer org-timegrid-buffer-name))) (kill-buffer buffer)))))
+  (let ((org-timegrid--backend nil))
+    (org-timegrid-test--with-isolated-calendar
+      (should-error
+       (org-timegrid-open
+        (org-timegrid-backend-create :list-function (lambda (&rest _) (error "Backend unavailable")))))
+      (should-not (get-buffer "*Org Time Grid*")))))
 
 (ert-deftest org-timegrid-regression-android-leaving-calendar-clears-target ()
   (require 'org-timegrid-android)
   (let ((data (vector 1 'origin 'previous-target))
         cleared)
-    (cl-letf (((symbol-function 'posn-window) (lambda (_) (selected-window)))
-              ((symbol-function 'org-timegrid--mouse-target) #'ignore)
+    (cl-letf (((symbol-function 'org-timegrid--mouse-target) #'ignore)
               ((symbol-function 'org-timegrid--clear-preview) (lambda () (setq cleared t))))
-             (org-timegrid-android--drag-update '(touchscreen-update ((1 . position))) data)
+             (org-timegrid-android--drag-update (list 'touchscreen-update (list (cons 1 (list (selected-window))))) data)
              (should-not (aref data 2))
              (should cleared))))
 
 (ert-deftest org-timegrid-regression-clock-uses-supplied-minute ()
   (let ((svg (svg-create 900 1400)))
     (org-timegrid--draw-current-time svg 900 1400 100 '(:red "#ff0000") "monospace" 0 1 83 0)
-    (should (string-match-p ">[[:space:]]*01:23[[:space:]]*<" (with-temp-buffer (svg-print svg) (buffer-string))))))
+    (should (string-match-p ">[[:space:]]*1:23[[:space:]]*<" (with-temp-buffer (svg-print svg) (buffer-string))))))
 
 (ert-deftest org-timegrid-regression-time-readers-reject-invalid-input ()
   (dolist (answer '("2026-02-30 10:00" "2026-10-01 24:00" "2026-10-01 10:99" "junk"))
@@ -486,7 +480,7 @@
            (org-timegrid--tile-width 900)
            (org-timegrid--tile-height 60)
            (org-timegrid--tile-count 24)
-           (static-svg (org-timegrid--svg))
+           (static-svg (org-timegrid-test--render-static))
            (static (with-temp-buffer (svg-print static-svg) (buffer-string))))
       (insert static (car (org-timegrid--scene-patch (org-timegrid--build-scene))))
       (should (= 1 (how-many "UniqueTitle" (point-min) (point-max)))))))
@@ -498,14 +492,13 @@
         (touch-screen-current-timer 'timer)
         cleared)
     (cl-letf (((symbol-function 'org-timegrid--reconcile) #'ignore)
-              ((symbol-function 'posn-window) (lambda (_) (selected-window)))
               ((symbol-function 'org-timegrid--mouse-target)
                (lambda (_) '(:surface grid :day 0 :minute 600)))
               ((symbol-function 'org-timegrid--all-day-layout) #'ignore)
               ((symbol-function 'touch-screen-track-drag)
                (lambda (&rest _) (signal 'quit nil)))
               ((symbol-function 'org-timegrid--clear-preview) (lambda () (setq cleared t))))
-             (condition-case nil (org-timegrid-android-long-press '(touchscreen-hold position))
+             (condition-case nil (org-timegrid-android-long-press (list 'touchscreen-hold (list (selected-window))))
                (quit nil))
              (should cleared)
              (should-not touch-screen-current-tool)

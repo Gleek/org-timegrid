@@ -53,14 +53,6 @@ The target date defaults to today."
   :type '(choice (const :tag "Align to week start" week)
                  (const :tag "Center target date" center)))
 
-(defcustom org-timegrid-now-alignment 'top
-  "Vertical position of the current time when opening or jumping to today.
-Used on first display and by `org-timegrid-goto-today'.
-Position is limited by the calendar's scroll range."
-  :group 'org-timegrid
-  :type '(choice (const :tag "Top" top)
-                 (const :tag "Center" center)))
-
 (defun org-timegrid--range-start (&optional absolute-date)
   "Return the first visible day for a range containing ABSOLUTE-DATE.
 Position the range according to `org-timegrid-range-alignment'.
@@ -85,43 +77,18 @@ end is shown this long."
   :group 'org-timegrid
   :type 'integer)
 
-(defcustom org-timegrid-cursor-step-minutes 15
-  "Minutes between regular keyboard cursor stops.
-Block starts add stops between these boundaries.
-The default matches `org-timegrid-slot-minutes'."
-  :group 'org-timegrid
-  :type 'integer)
+(defvar org-timegrid-data-refresh-seconds 300
+  "Seconds between visible backend data refreshes.")
 
-(defcustom org-timegrid-data-refresh-seconds 300
-  "Seconds between visible backend data refreshes."
-  :group 'org-timegrid
-  :type 'number)
+(defvar org-timegrid-keyboard-commit-delay 0.65
+  "Idle seconds before a keyboard block movement is written to its backend.")
 
-(defcustom org-timegrid-keyboard-commit-delay 0.65
-  "Idle seconds before a keyboard block movement is written to its backend."
-  :group 'org-timegrid
-  :type 'number)
+(defvar org-timegrid-copy-date-format "%a %d %b %Y"
+  "Date format used for day headings in copied calendar text.")
 
-(defcustom org-timegrid-buffer-name "*Org Time Grid*"
-  "Name of the calendar buffer."
-  :group 'org-timegrid
-  :type 'string)
-
-(defcustom org-timegrid-copy-date-format "%a %d %b %Y"
-  "Date format used for day headings in copied calendar text."
-  :group 'org-timegrid
-  :type 'string)
-
-(defcustom org-timegrid-copy-item-template "%{start}–%{end}  %{title}"
+(defvar org-timegrid-copy-item-template "%{start}–%{end}  %{title}"
   "Template for one item in copied calendar text.
-The tokens `%{title}', `%{start}', and `%{end}' are replaced."
-  :group 'org-timegrid
-  :type 'string)
-
-(defcustom org-timegrid-copy-day-separator "\n\n"
-  "Text placed between different days in copied calendar text."
-  :group 'org-timegrid
-  :type 'string)
+The tokens `%{title}', `%{start}', and `%{end}' are replaced.")
 
 (defvar org-timegrid--header-map
   (let ((map (make-sparse-keymap)))
@@ -337,7 +304,7 @@ or `add-occurrence' for another time on the source entry."
                       (min origin-minute target-minute)
                       (+ (max origin-minute target-minute)
                          org-timegrid-slot-minutes)
-                      "New block" 'blue)))
+                      "New block")))
           (setf (org-timegrid-block-preview block) t)
           (org-timegrid--operation-create :kind 'create :block block))))
      ((not (eq origin-surface target-surface))
@@ -419,7 +386,7 @@ rendering them as midnight-to-midnight timed blocks would be misleading."
     blocks))
 
 (defun org-timegrid--ensure-state ()
-  "Ensure the current prototype buffer has a usable calendar state.
+  "Ensure the current calendar buffer has a usable calendar state.
 Keep existing blocks when possible, but reconstruct missing date metadata."
   (unless (and (org-timegrid--calendar-state-p org-timegrid--state)
                (numberp (org-timegrid--calendar-state-week-start
@@ -434,7 +401,7 @@ The operation model calls the start and end endpoints `top' and `bottom';
 the rail presents those same endpoints as its left and right edges."
   (let* ((left (plist-get geometry :x))
          (right (+ left (plist-get geometry :width)))
-         (edge (min org-timegrid-edge-pixels
+         (edge (min org-timegrid--resize-pixels
                     (max 1 (/ (plist-get geometry :width) 2.0)))))
     (cond ((and (plist-get geometry :allow-left)
                 (<= left x (+ left edge)))
@@ -490,7 +457,7 @@ reset the horizontal origin.  Add the tile offset to glyph-relative Y."
              (geometry
               (cl-find-if (lambda (item)
                             (let ((slop
-                                   org-timegrid-edge-slop))
+                                   org-timegrid--resize-slop))
                               (and (not (plist-get item :preview))
                                    (<= (plist-get item :x) x
                                        (+ (plist-get item :x)
@@ -898,7 +865,7 @@ the block and backend range use an exclusive midnight endpoint."
              (last (max origin-day target-day))
              (block (org-timegrid--make-block
                      'preview first 0 (* (1+ (- last first)) 1440)
-                     "New all-day block" 'blue nil 'all-day)))
+                     "New all-day block" nil nil 'all-day)))
         (setf (org-timegrid-block-preview block) t)
         (org-timegrid--operation-create :kind 'create :block block)))))
 
@@ -1260,7 +1227,7 @@ their start time, and blocks sharing a start each get a stop."
                           (cons (org-timegrid-block-start block)
                                 (org-timegrid-block-id block)))
                         blocks)))
-    (cl-loop for minute from start below end by org-timegrid-cursor-step-minutes
+    (cl-loop for minute from start below end by org-timegrid-slot-minutes
              unless (assoc minute stops) do (push (cons minute nil) stops))
     (cl-stable-sort stops #'< :key #'car)))
 
@@ -1344,13 +1311,13 @@ their start time, and blocks sharing a start each get a stop."
           (org-timegrid--cursor-moved))))))
 
 (defun org-timegrid-cursor-forward-slot (&optional count)
-  "Move the cursor COUNT fifteen-minute slots later."
+  "Move the cursor COUNT calendar slots later."
   (interactive "p")
   (org-timegrid--move-cursor
    (* (or count 1) org-timegrid-slot-minutes) 0))
 
 (defun org-timegrid-cursor-backward-slot (&optional count)
-  "Move the cursor COUNT fifteen-minute slots earlier."
+  "Move the cursor COUNT calendar slots earlier."
   (interactive "p")
   (org-timegrid-cursor-forward-slot (- (or count 1))))
 
@@ -1575,7 +1542,7 @@ search starts from the cursor."
 ;;; Keyboard editing
 ;;
 ;; Every command below builds the same proposal a drag would and commits it
-;; through `org-timegrid--apply', so snapping, the fifteen-minute minimum,
+;; through `org-timegrid--apply', so snapping, the minimum slot duration,
 ;; week clamping, stale-marker detection, read-only refusal, and repeating
 ;; series handling are inherited rather than reimplemented.
 
@@ -1675,7 +1642,7 @@ lane after an edit changes its layout."
       (org-timegrid--prepare-block-edit block)
       (let* ((proposal (if (and (org-timegrid-block-all-day-p block) (/= minutes 0))
                            (org-timegrid--all-day-to-timed-proposal block)
-                         (org-timegrid--keyboard-proposal block minutes days edge)))
+                         (org-timegrid--edit-proposal block minutes days edge)))
              (moved (org-timegrid--operation-block proposal)))
         (setq org-timegrid--keyboard-edit proposal)
         (setf (org-timegrid--calendar-state-preview org-timegrid--state) proposal
@@ -1726,13 +1693,13 @@ consecutive days instead of stacking every copy on the same one."
   (org-timegrid-copy-to-next-day (- (or count 1))))
 
 (defun org-timegrid-move-later (&optional count)
-  "Move the selected block COUNT fifteen-minute slots later."
+  "Move the selected block COUNT calendar slots later."
   (interactive "p")
   (org-timegrid--edit-selected
    (* (or count 1) org-timegrid-slot-minutes) 0 nil))
 
 (defun org-timegrid-move-earlier (&optional count)
-  "Move the selected block COUNT fifteen-minute slots earlier."
+  "Move the selected block COUNT calendar slots earlier."
   (interactive "p")
   (org-timegrid-move-later (- (or count 1))))
 
@@ -1831,7 +1798,7 @@ time-grid cells prompt for the timed duration as usual."
                         (if all-day 0 (org-timegrid--cursor-state-minute cursor))))
                (block (org-timegrid--make-block
                        'new day start (+ start minutes)
-                       title 'blue nil (if all-day 'all-day 'timed))))
+                       title nil nil (if all-day 'all-day 'timed))))
           (org-timegrid--backend-create title block nil (cdr entry))
           (org-timegrid--deactivate-region))))))
 
@@ -1888,7 +1855,8 @@ time-grid cells prompt for the timed duration as usual."
            (org-timegrid--format-minute end))
           ((and (= (% end 1440) 0)
                 (= (floor end 1440) (1+ (floor start 1440))))
-           "24:00")
+           (if (eq org-timegrid-time-format '24h) "24:00"
+             (org-timegrid--format-minute end)))
           (t (format "%s %s" (org-timegrid--format-copy-date end)
                      (org-timegrid--format-minute end))))))
     (let ((values `(("%{title}" . ,title)
@@ -1964,7 +1932,7 @@ time-grid cells prompt for the timed duration as usual."
           (setq days (append days (list (list day item)))))))
     (mapconcat (lambda (group)
                  (org-timegrid--format-copy-day (car group) (cdr group)))
-               days org-timegrid-copy-day-separator)))
+               days "\n\n")))
 
 (defun org-timegrid--clipboard-string (selection cut)
   "Return a readable clipboard string for SELECTION, marked as CUT."
@@ -2000,9 +1968,9 @@ time-grid cells prompt for the timed duration as usual."
        (org-timegrid--cursor-state-day cursor)
        (cons (max (* 60 org-timegrid-start-hour)
                   (min (- (* 60 org-timegrid-end-hour) org-timegrid-slot-minutes)
-                       (* org-timegrid-cursor-step-minutes
+                       (* org-timegrid-slot-minutes
                           (round (org-timegrid--cursor-state-minute cursor)
-                                 org-timegrid-cursor-step-minutes))))
+                                 org-timegrid-slot-minutes))))
              nil)))))
 
 (defun org-timegrid--transaction (function)
@@ -2092,7 +2060,7 @@ With ADD-OCCURRENCE, add timestamps to their original entries."
                     (minute (% start 1440))
                     (block (org-timegrid--make-block
                             'yank day minute (+ minute duration)
-                            (plist-get item :title) 'blue nil
+                            (plist-get item :title) nil nil
                             (plist-get item :time-kind))))
                (org-timegrid--backend-create
                 (plist-get item :title) block (plist-get item :event)
@@ -2248,7 +2216,7 @@ the duration is asked for separately, prefilled with the current one."
   "Show the week containing today.
 A visible cursor moves to the current slot; a hidden one stays hidden,
 since jumping dates should not conjure a cursor nobody asked for.
-Position the current time according to `org-timegrid-now-alignment'.
+Position the current time at the top of the viewport.
 With FORCE-RELOAD, reload the backend even if today is already displayed."
   (interactive)
   (org-timegrid--with-update nil
@@ -2266,7 +2234,7 @@ With FORCE-RELOAD, reload the backend even if today is already displayed."
           (setf (org-timegrid--calendar-state-cursor org-timegrid--state)
                 cursor)))
       (if reload
-          (org-timegrid--with-update (cons (org-timegrid--now-minute) org-timegrid-now-alignment))
+          (org-timegrid--with-update (cons (org-timegrid--now-minute) 'top))
         (when-let* ((window (get-buffer-window (current-buffer) t)))
           (org-timegrid--align-now window))))))
 
@@ -2559,18 +2527,18 @@ keyboard changes pass through the same damage-based renderer.
     (+ (* 60 (decoded-time-hour now)) (decoded-time-minute now))))
 
 (defun org-timegrid--align-now (window)
-  "Position the current time in WINDOW using `org-timegrid-now-alignment'."
+  "Position the current time at the top of WINDOW."
   (org-timegrid--align-minute window (org-timegrid--now-minute)
-                              org-timegrid-now-alignment))
+                              'top))
 
 ;;;###autoload
 (defun org-timegrid-open (backend &optional absolute-date)
   "Open BACKEND on the week containing ABSOLUTE-DATE.
-Use `org-timegrid-now-alignment' on first display; later visits retain the view."
+Show the current time at the top on first display; later visits retain the view."
   (unless (org-timegrid-backend-p backend)
     (user-error "A calendar backend is required"))
-  (let* ((existing (get-buffer org-timegrid-buffer-name))
-         (buffer (or existing (get-buffer-create org-timegrid-buffer-name)))
+  (let* ((existing (get-buffer "*Org Time Grid*"))
+         (buffer (or existing (get-buffer-create "*Org Time Grid*")))
          (requested (and absolute-date (org-timegrid--range-start absolute-date)))
          candidate reload)
     (condition-case error-data
@@ -2593,7 +2561,7 @@ Use `org-timegrid-now-alignment' on first display; later visits retain the view.
     (pop-to-buffer buffer)
     (with-current-buffer buffer
       (org-timegrid--with-update
-          (cond ((not existing) (cons (org-timegrid--now-minute) org-timegrid-now-alignment))
+          (cond ((not existing) (cons (org-timegrid--now-minute) 'top))
                 ((or reload (/= (org-timegrid--window-width) (or org-timegrid--last-width -1))) 'preserve))
         (when reload
           (setq org-timegrid--backend backend org-timegrid--state candidate

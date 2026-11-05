@@ -69,10 +69,9 @@ Nil makes the block below read as part of the strip's own section, which
 is what you want when the block below is the same day's untimed items."
   :type 'boolean)
 
-(defcustom org-timegrid-agenda-heading-format "TODAY · %s"
+(defvar org-timegrid-agenda-heading-format "TODAY · %s"
   "Format string for today's strip heading, given a formatted date.
-For other days, the heading displays just the formatted date."
-  :type 'string)
+For other days, the heading displays just the formatted date.")
 
 (defvar org-timegrid-agenda--theme-timer nil
   "Idle timer coalescing a burst of theme changes.")

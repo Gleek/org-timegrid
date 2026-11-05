@@ -73,7 +73,7 @@ rather than an SVG gradient: five rectangles are indistinguishable at this
 size and need no gradient definition."
   (let* ((bands 5)
          (band (/ (org-timegrid--scale-pixels
-                   (float org-timegrid-compact-shadow-pixels))
+                   (float org-timegrid--compact-shadow-pixels))
                   bands))
          (color (org-timegrid--blend "#000000"
                                      (plist-get palette :background) 0.5)))
@@ -87,15 +87,6 @@ size and need no gradient definition."
                      ;; Densest at the cut, fading inward, so content
                      ;; dissolves into the edge instead of stopping at it.
                      :fill-opacity (max 0.04 (- 0.5 (* index 0.11)))))))
-
-(defun org-timegrid--draw-timed-background
-    (svg width height column-width palette font-family start-minute end-minute
-         scale days &optional week-start)
-  "Paint shared background nodes into SVG, returning bounded SVG drawings."
-  (mapcar (lambda (node)
-            (cons (cdr node) (org-timegrid--paint-node svg node palette font-family)))
-          (org-timegrid--background-nodes
-           width height column-width palette start-minute end-minute scale days week-start)))
 
 (defun org-timegrid--draw-clock-marker (svg geometry palette &optional selected outline-only)
   "Draw a boundary clock from GEOMETRY, using PALETTE's selection color.
@@ -317,8 +308,8 @@ Return the generated element. No cache, file or model mutation belongs here."
       ((or 'region 'cursor)
        (let ((color (plist-get palette (if (eq kind 'region) :region :cursor))))
          (svg-rectangle svg x y width height :fill color :stroke color :stroke-width 1
-                        :fill-opacity (if (eq kind 'region) org-timegrid-region-opacity
-                                        org-timegrid-cursor-opacity))))
+                        :fill-opacity (if (eq kind 'region) 0.6
+                                        org-timegrid--cursor-opacity))))
       (_ (error "Unknown timegrid drawing kind: %S" kind)))))
 
 (defun org-timegrid-svg-render (scene &optional output)
@@ -539,7 +530,7 @@ PALETTE and FONT-FAMILY determine the label's appearance."
           (svg-rectangle svg x y (- column-width 2)
                          cursor-height
                          :fill (plist-get palette :cursor)
-                         :fill-opacity org-timegrid-cursor-opacity
+                         :fill-opacity org-timegrid--cursor-opacity
                          :stroke (plist-get palette :cursor)
                          :stroke-width 1)))
       (dotimes (day org-timegrid-days)

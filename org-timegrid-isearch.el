@@ -33,15 +33,14 @@
 (require 'isearch)
 (require 'org-timegrid)
 
-(defcustom org-timegrid-isearch-week-limit 52
+(defvar org-timegrid-isearch-week-limit 52
   "Number of previous and next weeks included in a title search.
 A calendar has no natural first or last page, so cross-week search needs a
-finite horizon.  Events in the horizon are fetched once per search."
-  :type 'natnum
-  :group 'org-timegrid)
+finite horizon.  Events in the horizon are fetched once per search.")
 
 (defvar-local org-timegrid-isearch--origin nil)
 (defvar-local org-timegrid-isearch--point nil)
+
 (defvar-local org-timegrid-isearch--anchors nil)
 (defvar-local org-timegrid-isearch--events 'unqueried)
 

@@ -30,8 +30,8 @@
 ;; implementation of the org-timegrid backend protocol.  Timestamps that carry
 ;; a clock time are included, whether plain or after SCHEDULED or DEADLINE;
 ;; repeaters are expanded into concrete occurrences here, so the renderer never
-;; sees repeater syntax.  Edits leave their buffers modified but unsaved, as
-;; Org Agenda commands do.
+;; sees repeater syntax.  Edits leave their buffers unsaved by default;
+;; `org-timegrid-org-auto-save' enables immediate saving.
 
 ;;; Code:
 
@@ -56,7 +56,7 @@
   :prefix "org-timegrid-org-")
 
 (defcustom org-timegrid-org-files 'agenda
-  "Files queried for timed Org ranges.
+  "Files queried for Org timestamps and clock records.
 The symbol `agenda' means use the variable `org-agenda-files'.  A
 function value is called without arguments.  A list is used literally.
 The capture file is always queried in addition to these files."
@@ -68,8 +68,8 @@ The capture file is always queried in addition to these files."
   (expand-file-name "calendar.org" user-emacs-directory)
   "File reserved for calendar-created Org entries.
 The date query always includes this file, even when it is not in the variable
-`org-agenda-files'.  New entries are inserted into its live buffer and
-left unsaved."
+`org-agenda-files'.  New entries are inserted into its live buffer.
+They remain unsaved unless `org-timegrid-org-auto-save' is non-nil."
   :type 'file)
 
 (defcustom org-timegrid-org-capture-template
@@ -85,22 +85,20 @@ TEMPLATE recognizes `%{title}', `%{time-range}', `%{start}', `%{end}',
 for the final point."
   :type '(plist :key-type symbol :value-type sexp))
 
-(defcustom org-timegrid-org-show-repeaters t
+(defvar org-timegrid-org-show-repeaters t
   "Whether repeating Org timestamps appear on the calendar.
 When nil, the calendar omits both the anchor and generated occurrences of
-timestamps with an Org repeater."
-  :type 'boolean)
+timestamps with an Org repeater.")
 
 (defcustom org-timegrid-org-show-clocks t
   "Whether Org CLOCK records appear as calendar blocks."
   :type 'boolean)
 
-(defcustom org-timegrid-org-repeater-history t
+(defvar org-timegrid-org-repeater-history t
   "Interpret a heading's timestamps as successive schedule versions.
 Override with TIMEGRID_REPEATER_HISTORY (t or nil), as an inherited heading
 property or a file #+PROPERTY.  Plain timestamps end previous repeaters.
-This convention applies only to Timegrid, not Org Agenda."
-  :type 'boolean)
+This convention applies only to Timegrid, not Org Agenda.")
 
 (defun org-timegrid-org--repeater-history-p ()
   "Return the repeater history setting at the current heading."
@@ -162,26 +160,13 @@ DELETING selects the deletion prompt."
 A heading is excluded when it has any tag in this list."
   :type '(repeat string))
 
-(defcustom org-timegrid-org-exclude-todo-states nil
-  "TODO keywords whose headings should not appear on the calendar."
-  :type '(repeat string))
-
-(defcustom org-timegrid-org-exclude-properties nil
-  "Org property values whose headings should not appear on the calendar.
-Each entry is (PROPERTY . VALUE).  PROPERTY and VALUE are strings.  A nil
-VALUE matches any non-nil value of PROPERTY."
-  :type '(alist :key-type (string :tag "Property")
-                :value-type (choice (const :tag "Any value" nil)
-                                    (string :tag "Value"))))
-
-(defcustom org-timegrid-org-filter-function
+(defvar org-timegrid-org-filter-function
   #'org-timegrid-org-default-filter
   "Function deciding whether an eligible Org timestamp appears.
 The function receives the headline and timestamp `org-element' objects and
 returns non-nil to keep the timestamp.  Eligible timestamps are active dates
 and, when `org-timegrid-org-show-clocks' is non-nil, CLOCK record values.
-The default function observes all Org filtering options in this group."
-  :type 'function)
+The default function observes all Org filtering options in this group.")
 
 (defun org-timegrid-org-default-filter (headline timestamp)
   "Return non-nil when HEADLINE's TIMESTAMP passes the standard filters."
@@ -191,19 +176,7 @@ The default function observes all Org filtering options in this group."
          (or org-timegrid-org-show-repeaters
              (not (org-element-property :repeater-type timestamp)))
          (not (seq-intersection org-timegrid-org-exclude-tags
-                                (org-element-property :tags headline)))
-         (not (member todo org-timegrid-org-exclude-todo-states))
-         (not
-          (seq-some
-           (lambda (property)
-             (let ((actual
-                    (save-excursion
-                      (goto-char (org-element-property :begin headline))
-                      (org-entry-get nil (car property)))))
-               (and actual
-                    (or (null (cdr property))
-                        (equal actual (cdr property))))))
-           org-timegrid-org-exclude-properties)))))
+                                (org-element-property :tags headline))))))
 
 (defcustom org-timegrid-org-auto-save nil
   "Whether calendar edits immediately save their affected Org files.
@@ -223,12 +196,11 @@ inventing one per tag would be noise."
                 :value-type (choice (symbol :tag "Colour name")
                                     (color :tag "Colour"))))
 
-(defcustom org-timegrid-org-color-function
+(defvar org-timegrid-org-color-function
   #'org-timegrid-org-tag-color
   "Function returning the colour for an Org heading, or nil for the default.
 It receives the `org-element' headline, so it can colour by TODO state,
-priority, property, or file as easily as by tag."
-  :type 'function)
+priority, property, or file as easily as by tag.")
 
 (defun org-timegrid-org-tag-color (headline)
   "Return the colour mapped to HEADLINE's first mapped tag, or nil."
@@ -363,14 +335,13 @@ When CLOCK is non-nil, insert a finished clock instead of a planned range."
                 "\n"))
       (buffer-string))))
 
-(defcustom org-timegrid-org-after-create-hook nil
+(defvar org-timegrid-org-after-create-hook nil
   "Hook run on a heading the calendar has just created.
 Point is on the new heading in its own buffer, inside the change group
 that inserted it, so a property set here is part of the entry's single
 undo step.  This is where a configuration matches whatever its capture
 templates do — stamping a CAPTURED property, filing an ID, adding a
-default tag."
-  :type 'hook)
+default tag.")
 
 (defun org-timegrid-org--format-instant (absolute-minute)
   "Format ABSOLUTE-MINUTE as an active Org timestamp."
@@ -636,7 +607,7 @@ Only timestamps in the heading's own section count."
                (integerp (org-element-property :hour-end latest)))
       (- (org-timegrid-org--timestamp-minutes latest t) start))))
 
-(defcustom org-timegrid-org-entry-filter-function
+(defvar org-timegrid-org-entry-filter-function
   #'org-timegrid-org-default-entry-filter
   "Function deciding which headings are offered when creating a block.
 Called with the headline's `org-element' object in its source buffer,
@@ -644,8 +615,7 @@ with point at the heading.  Return non-nil to include it.  The function
 can inspect tags, properties, or `buffer-file-name'.  Set to `always' to
 offer every heading in `org-timegrid-org-files' and the capture file.
 The default includes unfinished TODO headings and plain headings with
-an active timestamp in their own section."
-  :type 'function)
+an active timestamp in their own section.")
 
 (defun org-timegrid-org-default-entry-filter (headline)
   "Return non-nil when HEADLINE is unfinished and has a TODO or active date."
@@ -1582,8 +1552,7 @@ invalidate it without installing change hooks in the user's Org files."
                     (copy-tree
                      (list org-timegrid-org-show-clocks org-timegrid-org-show-repeaters
                            org-timegrid-org-repeater-history org-timegrid-org-show-done
-                           org-timegrid-org-exclude-tags org-timegrid-org-exclude-todo-states
-                           org-timegrid-org-exclude-properties org-timegrid-org-tag-color-alist
+                           org-timegrid-org-exclude-tags org-timegrid-org-tag-color-alist
                            org-todo-keywords-1 org-done-keywords org-use-property-inheritance))))
          (minute (floor (float-time) 60))
          (cache org-timegrid-org--events-cache))

@@ -21,7 +21,6 @@
 
 (defvar org-timegrid--geometry)
 (defvar org-timegrid--scene)
-(defvar org-timegrid--timed-layout-cache)
 
 (declare-function org-timegrid--default-font-size "org-timegrid-display" (&optional window))
 (declare-function org-timegrid--window-width "org-timegrid-display" ())
@@ -50,6 +49,10 @@ MINUTE is last because it expires only the current-time overlay."
 
 (defconst org-timegrid--label-width 54)
 
+(defconst org-timegrid--base-pixels-per-minute 0.9)
+(defconst org-timegrid--cursor-opacity 0.22)
+(defconst org-timegrid--compact-shadow-pixels 10)
+
 (defconst org-timegrid--grid-top-inset 6
   "Pixels between the sticky date rail and the midnight grid line.")
 
@@ -70,13 +73,13 @@ MINUTE is last because it expires only the current-time overlay."
   "Hour at the bottom edge of the week canvas."
   :type 'integer)
 
-(org-timegrid--defstyle org-timegrid-time-format '24-hour
+(org-timegrid--defstyle org-timegrid-time-format '12h
   "Clock format for calendar labels and displayed time ranges.
-With `12-hour', hour labels use smaller AM/PM suffixes.
+With `12h', hour labels use smaller AM/PM suffixes.
 Org timestamps retain their standard 24-hour format.
 Run `org-timegrid-refresh' after changing this option in an open calendar."
-  :type '(choice (const :tag "24-hour (15:00)" 24-hour)
-                 (const :tag "12-hour (3 PM)" 12-hour)))
+  :type '(choice (const :tag "12-hour (3 PM)" 12h)
+                 (const :tag "24-hour (15:00)" 24h)))
 
 (org-timegrid--defstyle org-timegrid-days 7
   "Number of consecutive days displayed in the calendar.
@@ -85,12 +88,7 @@ The value must be a positive integer."
   :type '(integer :tag "Days"))
 
 (org-timegrid--defstyle org-timegrid-highlight-current-day nil
-  "Non-nil means tint today's column in the timed grid."
-  :type 'boolean)
-
-(org-timegrid--defstyle org-timegrid-pixels-per-minute 0.9
-  "Vertical SVG scale in pixels per minute."
-  :type 'number)
+  "Non-nil means tint today's column in the timed grid.")
 
 (org-timegrid--defstyle org-timegrid-default-zoom 0.7
   "Base zoom multiplier for scalable calendar content.
@@ -98,30 +96,11 @@ The value must be a positive number.  Buffer-local text-scale commands apply
 on top of it and reset to this configured base."
   :type 'number)
 
-(org-timegrid--defstyle org-timegrid-block-gap 1
-  "Vertical gap in pixels between consecutive blocks."
-  :type 'integer)
+(org-timegrid--defstyle org-timegrid--resize-pixels 8
+  "Height of the top and bottom resize zones in pixels.")
 
-(org-timegrid--defstyle org-timegrid-edge-pixels 8
-  "Height of the top and bottom resize zones in pixels."
-  :type 'integer)
-
-(org-timegrid--defstyle org-timegrid-edge-slop 3
-  "Extra pixels outside a block that count as a resize edge."
-  :type 'integer)
-
-(org-timegrid--defstyle org-timegrid-midnight-grip-pixels 6
-  "Height of a resize grip shown across an exact midnight boundary."
-  :type 'integer)
-
-(org-timegrid--defstyle org-timegrid-nesting-indent 8
-  "Horizontal indent in pixels for each contained calendar block."
-  :type 'integer)
-
-(org-timegrid--defstyle org-timegrid-title-clearance 18
-  "Required vertical pixels before one block may nest inside another.
-This keeps at least one line of the containing block's title visible."
-  :type 'integer)
+(org-timegrid--defstyle org-timegrid--resize-slop 3
+  "Extra pixels outside a block that count as a resize edge.")
 
 (org-timegrid--defstyle org-timegrid-colors
     '((blue     . "#4da3ff")
@@ -145,49 +124,25 @@ which is why the values here are saturated rather than pastel.
 
 An event's colour need not be a name: any string Emacs understands, such
 as \"#b4d74a\" or \"DarkSeaGreen\", is used as given.  Names exist so a
-backend can speak in terms a user recognises."
-  :type '(alist :key-type symbol :value-type color))
+backend can speak in terms a user recognises.")
 
 (org-timegrid--defstyle org-timegrid-default-color 'blue
   "Colour for an event whose backend gives it none.
 A name in `org-timegrid-colors', or any colour string."
   :type '(choice symbol color))
 
-(org-timegrid--defstyle org-timegrid-cursor-opacity 0.22
-  "Fill opacity of the keyboard cursor.
-The cursor is drawn over the blocks, so its fill stays translucent and
-lets a block underneath remain readable."
-  :type 'number)
-
-(org-timegrid--defstyle org-timegrid-region-opacity 0.6
-  "Fill opacity of the theme-derived calendar region colour."
-  :type 'number)
-
 (org-timegrid--defstyle org-timegrid-all-day-max-lanes 5
   "Maximum number of all-day event lanes shown in the sticky date rail.
-Overflow is summarized per day.  The prototype reserves another row for
-future keyboard creation and navigation."
-  :type 'integer)
-
-(org-timegrid--defstyle org-timegrid-all-day-lane-height 22
-  "Height in pixels of one event row in the sticky date rail."
+Overflow is summarized per day."
   :type 'integer)
 
 (org-timegrid--defstyle org-timegrid-header-title-style
     '(:font-size 24 :character-width 14.6 :height 44 :baseline 35)
-  "Geometry of the month and year title in SVG pixels."
-  :type 'plist)
+  "Geometry of the month and year title in SVG pixels.")
 
 (org-timegrid--defstyle org-timegrid-single-day-label-style
     '(:scale 1.0 :x-offset -4 :gap 5)
-  "Scale, optical offset, and gap of the one-day weekday and date label."
-  :type 'plist)
-
-(org-timegrid--defstyle org-timegrid-compact-shadow-pixels 10
-  "Height of the shadow at the edges of a compact viewport.
-An edge is shaded only when the day holds something past it, so a shadow
-means \"more this way\" rather than merely marking where the window stops."
-  :type 'integer)
+  "Scale, optical offset, and gap of the one-day weekday and date label.")
 
 (defconst org-timegrid--lane-gap 3)
 
@@ -293,7 +248,7 @@ Typography and geometry share this factor so their alignment is preserved."
 
 (defun org-timegrid--pixels-per-minute ()
   "Return the zoom-adjusted vertical calendar scale."
-  (* org-timegrid-pixels-per-minute (org-timegrid--zoom-factor)))
+  (* org-timegrid--base-pixels-per-minute (org-timegrid--zoom-factor)))
 
 (defun org-timegrid--font-size (size)
   "Return SVG font SIZE adjusted by the unified calendar zoom."
@@ -331,7 +286,7 @@ The title stays fixed and the date row follows only the frame's base font."
 
 (defun org-timegrid--all-day-lane-height ()
   "Return the zoom-adjusted height of one all-day lane."
-  (org-timegrid--scale-pixels org-timegrid-all-day-lane-height))
+  (org-timegrid--scale-pixels 22))
 
 (defun org-timegrid--timed-blocks ()
   "Return the current state's timed blocks."
@@ -455,8 +410,7 @@ not itself part of the region."
                       (>= (* (- (org-timegrid-block-start block)
                                 (org-timegrid-block-start candidate))
                              (org-timegrid--pixels-per-minute))
-                          (org-timegrid--scale-pixels
-                           org-timegrid-title-clearance))))
+                          (org-timegrid--scale-pixels 18))))
                annotated))
              (parent
               (cl-reduce (lambda (left right)
@@ -539,9 +493,8 @@ DAY-X and COLUMN-WIDTH describe the full column."
             (setq x (+ x column-width (- (/ (+ rail bar) 2.0))) width rail)))
         (dolist (step (org-timegrid-block-layout-path block))
           (when (> depth 0)
-            (setq x (+ x org-timegrid-nesting-indent)
-                  width (max 4 (- width
-                                  org-timegrid-nesting-indent))))
+            (setq x (+ x 8)
+                  width (max 4 (- width 8))))
           (let* ((lane (car step))
                  (lanes (max 1 (cdr step)))
                  (available (- width
@@ -586,7 +539,7 @@ STYLE `hour' omits minutes in 12-hour grid labels; `compact' omits zero
 minutes and suffix spacing; `clock' omits AM/PM for the current-time pill."
   (let* ((hour (/ (mod minute 1440) 60))
          (minutes (mod minute 60)))
-    (if (eq org-timegrid-time-format '24-hour)
+    (if (eq org-timegrid-time-format '24h)
         (format "%02d:%02d" hour minutes)
       (concat (number-to-string (1+ (mod (1- hour) 12)))
               (unless (or (eq style 'hour) (and (eq style 'compact) (zerop minutes)))
@@ -598,7 +551,7 @@ minutes and suffix spacing; `clock' omits AM/PM for the current-time pill."
 (defun org-timegrid--format-range (start end)
   "Format START and END minutes, omitting repeated AM/PM and zero minutes."
   (let* ((day-offset (floor end 1440))
-         (twelve-hour (eq org-timegrid-time-format '12-hour))
+         (twelve-hour (not (eq org-timegrid-time-format '24h)))
          (start-label (org-timegrid--format-minute start 'compact))
          (end-label (org-timegrid--format-minute end 'compact)))
     (when twelve-hour
@@ -676,7 +629,7 @@ works without the palette having to know it in advance."
                   (org-timegrid-block-allow-bottom segment)
                   (= segment-end absolute-end))
             (push segment segments)))))
-    ;; A range ending exactly at midnight needs a small bottom-edge target at
+    ;; A range ending exactly at midnight needs a bottom-edge target at
     ;; the top of the next day so it can be extended forward.
     (when (and (= (% absolute-end 1440) 0)
                (< 0 absolute-end (* org-timegrid-days 1440)))
@@ -808,8 +761,7 @@ Return nodes in paint order."
          (horizontal (org-timegrid--layout-frame block day-x column-width))
          (x (car horizontal))
          (boundary-edge (org-timegrid-block-boundary-edge block))
-         (grip (org-timegrid--scale-pixels
-                org-timegrid-midnight-grip-pixels))
+         (grip (org-timegrid--scale-pixels 6))
          (raw-y (cond ((eq boundary-edge 'top)
                        (- canvas-height grip))
                       ((eq boundary-edge 'bottom)
@@ -819,13 +771,13 @@ Return nodes in paint order."
                                scale)))))
          (raw-height
           (if boundary-edge
-              (+ grip (org-timegrid--scale-pixels org-timegrid-block-gap))
+              (+ grip (org-timegrid--scale-pixels 1))
             ;; Keep short entries readable without changing their real times.
             (* (max org-timegrid-slot-minutes
                     (- (org-timegrid-block-end block)
                        (org-timegrid-block-start block)))
                scale)))
-         (gap (org-timegrid--scale-pixels org-timegrid-block-gap))
+         (gap (org-timegrid--scale-pixels 1))
          ;; Whole-pixel edges keep the gap clear without a block outline.
          (y (ceiling (+ raw-y (/ gap 2.0))))
          (block-height
@@ -848,20 +800,13 @@ Return nodes in paint order."
     geometry))
 
 (defun org-timegrid--timed-layout ()
-  "Return timed display layout, reusing it across selection changes."
-  (let ((key (list (org-timegrid--calendar-state-blocks org-timegrid--state)
-                   (org-timegrid--calendar-state-preview org-timegrid--state)
-                   org-timegrid-days
-                   org-timegrid-title-clearance org-timegrid-pixels-per-minute)))
-    (unless (equal key (car org-timegrid--timed-layout-cache))
-      (let* ((blocks (org-timegrid--effective-blocks))
-             (layout (cl-loop for day below org-timegrid-days
-                              append (org-timegrid--layout-day blocks day))))
-        ;; Badges cross day boundaries, so paint them above every day's plans.
-        (setq org-timegrid--timed-layout-cache
-              (cons key (append (seq-remove #'org-timegrid--clock-block-p layout)
-                                (seq-filter #'org-timegrid--clock-block-p layout))))))
-    (cdr org-timegrid--timed-layout-cache)))
+  "Return timed display layout, painting clock badges above plans."
+  (let* ((blocks (org-timegrid--effective-blocks))
+         (layout (cl-loop for day below org-timegrid-days
+                          append (org-timegrid--layout-day blocks day))))
+    ;; Badges cross day boundaries, so paint them above every day's plans.
+    (append (seq-remove #'org-timegrid--clock-block-p layout)
+            (seq-filter #'org-timegrid--clock-block-p layout))))
 
 (defun org-timegrid-scene-static (state context)
   "Build committed drawing nodes from STATE and CONTEXT, without display effects."
@@ -871,7 +816,6 @@ Return nodes in paint order."
                                  :events (org-timegrid--calendar-state-events state)
                                  :blocks (org-timegrid--calendar-state-blocks state)))
            (org-timegrid--static-render t)
-           (org-timegrid--timed-layout-cache nil)
            (width (org-timegrid--render-context-width context))
            (start-minute (* 60 org-timegrid-start-hour))
            (end-minute (* 60 org-timegrid-end-hour))
@@ -905,7 +849,6 @@ Neither scene construction nor speculative layout changes the displayed state."
     (let* ((org-timegrid--state (copy-org-timegrid--calendar-state state))
            (org-timegrid--geometry base-geometry)
            (org-timegrid--scene previous)
-           (org-timegrid--timed-layout-cache nil)
            (height (org-timegrid--context-height context))
            (start-minute (* 60 org-timegrid-start-hour))
            (column-width (org-timegrid--column-width))
@@ -1181,19 +1124,19 @@ ABSOLUTE-DATE is the first displayed day."
 
 (defun org-timegrid--edge-height (geometry)
   "Return the pixel resize-zone height for GEOMETRY."
-  (min org-timegrid-edge-pixels
+  (min org-timegrid--resize-pixels
        (max 1 (/ (- (plist-get geometry :height) 2) 2.0))))
 
 (defun org-timegrid--edge-at (geometry y)
   "Return `top', `bottom', or nil for the resize zone at pixel Y in GEOMETRY.
 A zone reaches `org-timegrid--edge-height' pixels into the block and
-`org-timegrid-edge-slop' pixels outside it, which is exactly the
+the configured platform slop outside it, which is exactly the
 hotspot geometry built by `org-timegrid--image-map'.  Slop must not
-extend inwards: on a fifteen-minute block the two zones would meet and
+extend inwards: on a single-slot block the two zones would meet and
 leave no central move target."
   (or (plist-get geometry :boundary-edge)
       (let* ((edge-height (org-timegrid--edge-height geometry))
-             (slop org-timegrid-edge-slop)
+             (slop org-timegrid--resize-slop)
              (top (plist-get geometry :y))
              (bottom (+ top (plist-get geometry :height)))
              (in-top (and (>= y (- top slop)) (<= y (+ top edge-height))))
@@ -1341,11 +1284,9 @@ MINUTES and DAYS form the interval delta; EDGE selects a resize endpoint."
       (org-timegrid--render-context-palette org-timegrid--render-context)
     (org-timegrid--face-palette)))
 
-(defalias 'org-timegrid--keyboard-proposal #'org-timegrid--edit-proposal)
-
 (defun org-timegrid--default-cursor (week-start)
   "Return the initial keyboard cursor for the week at WEEK-START.
-It sits on the current fifteen-minute slot when today is visible, and on
+It sits on the current calendar slot when today is visible, and on
 the first visible day at the configured start hour otherwise."
   (let* ((today (calendar-absolute-from-gregorian (org-timegrid--today)))
          (offset (- today week-start)))
@@ -1394,7 +1335,7 @@ the first visible day at the configured start hour otherwise."
                    (seq-some (lambda (block)
                                (if (eq edge 'top) (< (org-timegrid-block-start block) start-minute)
                                  (> (org-timegrid-block-end block) end-minute))) blocks))
-          (let ((shadow (org-timegrid--scale-pixels org-timegrid-compact-shadow-pixels)))
+          (let ((shadow (org-timegrid--scale-pixels org-timegrid--compact-shadow-pixels)))
             (push (cons 'edge-shadow
                         (list :key edge :x 0 :y (if (eq edge 'top) 0 (- height shadow))
                               :width width :height shadow :edge-y (if (eq edge 'top) 0 height)
@@ -1475,7 +1416,7 @@ the first visible day at the configured start hour otherwise."
                                 :state header-state :layout layout :rows rows :left-offset left-offset)))))))
 
 (defun org-timegrid--snap-minute (minute)
-  "Return MINUTE rounded down to a fifteen-minute slot inside one day."
+  "Return MINUTE rounded down to a calendar slot inside one day."
   (let ((slots (/ (- (* 60 24) org-timegrid-slot-minutes)
                   org-timegrid-slot-minutes)))
     (* org-timegrid-slot-minutes
@@ -1486,8 +1427,6 @@ the first visible day at the configured start hour otherwise."
   (max (* 60 org-timegrid-start-hour)
        (min (- (* 60 org-timegrid-end-hour) org-timegrid-slot-minutes)
             (org-timegrid--snap-minute minute))))
-
-(defalias 'org-timegrid--svg-color #'org-timegrid--normalize-color)
 
 (provide 'org-timegrid-scene)
 ;;; org-timegrid-scene.el ends here

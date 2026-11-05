@@ -1,6 +1,9 @@
 ;;; org-timegrid-test.el --- Tests for org-timegrid -*- lexical-binding: t; -*-
 
 (require 'ert)
+(require 'org-timegrid-test-support
+         (expand-file-name "org-timegrid-test-support.el"
+                           (file-name-directory load-file-name)))
 (require 'org-timegrid-org)
 (require 'org-timegrid-agenda)
 
@@ -14,9 +17,9 @@
              (1439 "23:59" "11:59 PM" "11 PM")
              (1440 "00:00" "12:00 AM" "12 AM"))
            do
-           (let ((org-timegrid-time-format '24-hour))
+           (let ((org-timegrid-time-format '24h))
              (should (equal (org-timegrid--format-minute minute) clock-24)))
-           (let ((org-timegrid-time-format '12-hour))
+           (let ((org-timegrid-time-format '12h))
              (should (equal (org-timegrid--format-minute minute) clock-12))
              (should (equal (org-timegrid--format-minute minute 'hour) hour-12)))))
 
@@ -31,17 +34,34 @@
              (1380 1440 "11PM – 12AM (+1)" "23:00–00:00 (+1)")
              (1380 1500 "11PM – 1AM (+1)"  "23:00–01:00 (+1)"))
            do
-           (let ((org-timegrid-time-format '12-hour))
+           (let ((org-timegrid-time-format '12h))
              (should (equal (org-timegrid--format-range start end) range-12)))
-           (let ((org-timegrid-time-format '24-hour))
+           (let ((org-timegrid-time-format '24h))
              (should (equal (org-timegrid--format-range start end) range-24)))))
+
+(ert-deftest org-timegrid-test-copy-midnight-observes-time-format ()
+  (cl-loop for (org-timegrid-time-format expected) in
+           '((12h "11:50 PM–12:00 AM  Night")
+             (24h "23:50–24:00  Night"))
+           do (should (equal (org-timegrid--format-copy-item "Night" 1430 1440)
+                             expected))))
+
+(ert-deftest org-timegrid-test-creation-previews-use-default-color ()
+  (let ((org-timegrid-default-color 'red))
+    (dolist (proposal (list (org-timegrid--proposal
+                            '(:day 0 :minute 600) '(:day 0 :minute 660) nil)
+                           (org-timegrid--all-day-create-proposal
+                            '(:day 0) '(:day 1))))
+      (let ((block (org-timegrid--operation-block proposal)))
+        (should (equal (org-timegrid--accent block nil)
+                       (org-timegrid--resolve-color 'red nil)))))))
 
 (ert-deftest org-timegrid-test-current-time-pill-omits-period ()
   (cl-loop for (org-timegrid-time-format minute expected) in
-           '((12-hour 0   "12:00")
-             (12-hour 720 "12:00")
-             (12-hour 905 "3:05")
-             (24-hour 905 "15:05"))
+           '((12h 0   "12:00")
+             (12h 720 "12:00")
+             (12h 905 "3:05")
+             (24h 905 "15:05"))
            do
            (let ((svg (svg-create 200 2000)))
              (org-timegrid--draw-current-time
@@ -50,16 +70,16 @@
 
 (ert-deftest org-timegrid-test-hour-labels ()
   (cl-loop for (org-timegrid-time-format minute expected) in
-           '((24-hour 0    ("00:00"))
-             (24-hour 1380 ("23:00"))
-             (12-hour 0    ("12" "AM"))
-             (12-hour 720  ("12" "PM"))
-             (12-hour 1380 ("11" "PM")))
+           '((24h 0    ("00:00"))
+             (24h 1380 ("23:00"))
+             (12h 0    ("12" "AM"))
+             (12h 720  ("12" "PM"))
+             (12h 1380 ("11" "PM")))
            do
-           (let ((svg (svg-create 200 100)))
-             (org-timegrid--draw-timed-background
-              svg 200 100 146 (org-timegrid--palette) "sans-serif"
-              minute (+ minute 60) 1 1)
+           (let ((svg (org-timegrid-svg-render
+                       (org-timegrid-scene-day
+                        nil minute (+ minute 60) 200 nil
+                        (org-timegrid--capture-context)))))
              (should (equal (mapcar #'dom-texts (dom-by-tag svg 'text))
                             expected)))))
 
@@ -82,7 +102,7 @@
                           (list :surface surface :block-id 'event
                                 :day from-day :minute from-minute :edge edge)
                           (list :surface surface :day to-day :minute to-minute) nil))
-                   (key (org-timegrid--keyboard-proposal source delta 0 edge)))
+                   (key (org-timegrid--edit-proposal source delta 0 edge)))
         (should (equal (org-timegrid--operation-block drag)
                        (org-timegrid--operation-block key)))))))
 
@@ -95,7 +115,7 @@
              :blocks (cl-loop for day below 7 collect
                               (org-timegrid--make-block day day 600 660 "Event")))))
       (cl-letf (((symbol-function 'org-timegrid--window-width) (lambda () 420)))
-        (org-timegrid--svg)
+        (org-timegrid-test--render-static)
         (dolist (geometry org-timegrid--geometry)
           (let ((xy (cons (+ (plist-get geometry :x) 5)
                           (+ (plist-get geometry :y) 5))))
@@ -138,13 +158,11 @@
            (all-day (org-timegrid--make-block 'all-day 0 0 1440 "All-day" nil nil 'all-day))
            (org-timegrid--state
             (org-timegrid--calendar-state-create :blocks (list timed all-day)))
-           (timed-layout (org-timegrid--timed-layout))
            (rail-layout (org-timegrid--all-day-layout)))
       (org-timegrid--set-cursor 0 600)
-      (should (eq timed-layout (org-timegrid--timed-layout)))
       (should (eq rail-layout (org-timegrid--all-day-layout)))
       (setf (org-timegrid--calendar-state-preview org-timegrid--state)
-            (org-timegrid--keyboard-proposal timed 15 0 nil))
+            (org-timegrid--edit-proposal timed 15 0 nil))
       (should (seq-some (lambda (block)
                           (and (org-timegrid-block-preview block)
                                (= 615 (org-timegrid-block-start block))))
@@ -181,13 +199,13 @@
 (ert-deftest org-timegrid-test-keyboard-move-snaps-off-grid-start ()
   (let* ((block (org-timegrid--make-block 1 3 993 1023 "test"))
          (first (org-timegrid--operation-block
-                 (org-timegrid--keyboard-proposal block -15 0 nil)))
+                 (org-timegrid--edit-proposal block -15 0 nil)))
          (second (org-timegrid--operation-block
-                  (org-timegrid--keyboard-proposal first -15 0 nil)))
+                  (org-timegrid--edit-proposal first -15 0 nil)))
          (day (org-timegrid--operation-block
-               (org-timegrid--keyboard-proposal block 0 1 nil)))
+               (org-timegrid--edit-proposal block 0 1 nil)))
          (resize (org-timegrid--operation-block
-                  (org-timegrid--keyboard-proposal block -15 0 'top))))
+                  (org-timegrid--edit-proposal block -15 0 'top))))
     (should (equal (list (org-timegrid-block-start first)
                          (org-timegrid-block-end first))
                    '(975 1005)))
@@ -219,8 +237,6 @@
     (let* ((org-timegrid-org-show-done t)
            (org-timegrid-org-show-repeaters t)
            (org-timegrid-org-exclude-tags nil)
-           (org-timegrid-org-exclude-todo-states nil)
-           (org-timegrid-org-exclude-properties nil)
            (tree (org-element-parse-buffer))
            (headline (org-element-map tree 'headline #'identity nil t))
            (timestamp (org-element-map headline 'timestamp #'identity nil t)))
@@ -230,12 +246,6 @@
       (let ((org-timegrid-org-show-repeaters nil))
         (should-not (org-timegrid-org-default-filter headline timestamp)))
       (let ((org-timegrid-org-exclude-tags '("private")))
-        (should-not (org-timegrid-org-default-filter headline timestamp)))
-      (let ((org-timegrid-org-exclude-todo-states '("DONE")))
-        (should-not (org-timegrid-org-default-filter headline timestamp)))
-      (let ((org-timegrid-org-exclude-properties '(("CALENDAR" . "no"))))
-        (should-not (org-timegrid-org-default-filter headline timestamp)))
-      (let ((org-timegrid-org-exclude-properties '(("CALENDAR"))))
         (should-not (org-timegrid-org-default-filter headline timestamp))))))
 
 (ert-deftest org-timegrid-test-org-custom-filter-keeps-time-gate ()
@@ -255,7 +265,7 @@
                   ("not-a-color" "#3a5fcd" "#3a5fcd")))
     (pcase-let ((`(,color ,fallback ,expected) case))
       (ert-info ((format "color %s" color))
-        (should (equal (org-timegrid--svg-color color fallback) expected))))))
+        (should (equal (org-timegrid--normalize-color color fallback) expected))))))
 
 (ert-deftest org-timegrid-test-android-text-uses-paths ()
   (require 'org-timegrid-android)
@@ -282,7 +292,6 @@
 (ert-deftest org-timegrid-test-android-touch-scroll-uses-pixel-delta ()
   (require 'org-timegrid-android)
   (let ((org-timegrid-android-scroll-scale 0.5)
-        (org-timegrid-android-scroll-max-step 40)
         seen)
     (with-current-buffer (window-buffer (selected-window))
       (setq-local org-timegrid--scroll-boundary '(bottom . 1.0)))
@@ -293,7 +302,7 @@
       (should (equal seen (list 18.5 (selected-window))))
       (org-timegrid-android-scroll
        (list 'touchscreen-scroll (selected-window) 4 200))
-      (should (equal seen (list 40 (selected-window))))
+      (should (equal seen (list 48 (selected-window))))
       (should-not
        (buffer-local-value 'org-timegrid--scroll-boundary
                            (window-buffer (selected-window)))))))
@@ -357,8 +366,7 @@
 
 (ert-deftest org-timegrid-test-text-scale-controls-svg-scale ()
   (with-temp-buffer
-    (let ((org-timegrid-pixels-per-minute 0.9)
-          (org-timegrid-default-zoom 1.0))
+    (let ((org-timegrid-default-zoom 1.0))
       (cl-letf (((symbol-function 'org-timegrid--default-font-height)
                  (lambda (&optional _window) 36))
                 ((symbol-function 'org-timegrid--frame-font-factor)
@@ -396,7 +404,7 @@
                               (org-timegrid--clock-edge-padding)) 7.0) 2)))
           (should (= (plist-get rectangle :height)
                      (* org-timegrid-slot-minutes
-                        org-timegrid-pixels-per-minute 4))))))))
+                        0.9 4))))))))
 
 (ert-deftest org-timegrid-test-label-gutter-has-frame-font-minimum ()
   (with-temp-buffer
@@ -432,7 +440,7 @@
     (org-timegrid-test--with-svg-data
       (let ((data (plist-get (cdr (org-timegrid-day-image nil 557 617 400))
                              :data)))
-        (should (string-match-p ">[[:space:]]*10:00</text>" data))))))
+        (should (string-match-p ">[[:space:]]*10</text>" data))))))
 
 (ert-deftest org-timegrid-test-agenda-strip-follows-agenda-day ()
   (let ((org-starting-day 12345))
@@ -455,7 +463,7 @@
        '(wheel-up nil nil nil (0.0 . 7.5)))
       (should (equal scrolled '(-7.5 calendar-window))))))
 
-(ert-deftest org-timegrid-test-now-alignment-clamps-to-calendar-edges ()
+(ert-deftest org-timegrid-test-align-now-clamps-to-calendar-edges ()
   (with-temp-buffer
     (let ((org-timegrid-start-hour 0)
           (org-timegrid--image-height 1500)
@@ -468,18 +476,15 @@
                  (lambda (_window &optional _pixelwise) 600))
                 ((symbol-function 'org-timegrid--set-vscroll)
                  (lambda (_window pixels) (setq scrolled pixels))))
-        (dolist (case '((top 720 730) (center 720 430)
-                        (top 1410 900) (center 1410 900)
-                        (top 0 10) (center 0 0)))
-          (pcase-let ((`(,org-timegrid-now-alignment ,minute ,expected) case))
+        (dolist (case '((720 730) (1410 900) (0 10)))
+          (pcase-let ((`(,minute ,expected) case))
             (cl-letf (((symbol-function 'org-timegrid--now-minute)
                        (lambda () minute)))
               (org-timegrid--align-now 'calendar-window)
               (should (= scrolled expected)))))
-        ;; Zoom anchors remain centered regardless of the now preference.
-        (let ((org-timegrid-now-alignment 'top))
-          (org-timegrid--align-minute 'calendar-window 720)
-          (should (= scrolled 430)))))))
+        ;; Zoom anchors remain centered.
+        (org-timegrid--align-minute 'calendar-window 720)
+        (should (= scrolled 430))))))
 
 (ert-deftest org-timegrid-test-goto-today-avoids-rebuilding-current-range ()
   (with-temp-buffer
@@ -495,7 +500,7 @@
         (org-timegrid-goto-today)
         (should-not rebuilt)))))
 
-(ert-deftest org-timegrid-test-goto-today-reload-uses-now-alignment ()
+(ert-deftest org-timegrid-test-goto-today-reload-aligns-now-at-top ()
   (with-temp-buffer
     (let* ((today (calendar-absolute-from-gregorian (calendar-current-date)))
            (range (org-timegrid--range-start today))
@@ -509,10 +514,9 @@
                 ((symbol-function 'org-timegrid--refresh)
                  (lambda (&optional preserve minute alignment)
                    (setq refreshed (list preserve minute alignment)))))
-        (dolist (org-timegrid-now-alignment '(top center))
-          (org-timegrid-goto-today t)
-          (should (= reloaded range))
-          (should (equal refreshed (list nil 1020 org-timegrid-now-alignment))))))))
+        (org-timegrid-goto-today t)
+        (should (= reloaded range))
+        (should (equal refreshed '(nil 1020 top)))))))
 
 (ert-deftest org-timegrid-test-refresh-preserves-displayed-range-and-scroll ()
   (with-temp-buffer
@@ -522,12 +526,13 @@
            reloaded refreshed
            (org-timegrid--backend
             (org-timegrid-backend-create
-             :list-function (lambda (start _end) (setq reloaded (/ start 1440)) nil))))
+             :list-function (lambda (start _end) (setq reloaded start) nil))))
       (cl-letf (((symbol-function 'org-timegrid--refresh)
                  (lambda (&optional preserve minute alignment)
                    (setq refreshed (list preserve minute alignment)))))
         (org-timegrid-refresh)
-        (should (= reloaded range))
+        (should (= reloaded (* range 1440)))
+        (should (= (org-timegrid--calendar-state-week-start org-timegrid--state) range))
         (should (equal refreshed '(t nil nil)))))))
 
 (ert-deftest org-timegrid-test-scroll-boundary-distinguishes-rebound-from-reversal ()
@@ -771,7 +776,7 @@
                    :events (list timed-event all-day-event)
                    :blocks blocks))
       (org-timegrid-test--with-svg-data
-        (should (eq (car (org-timegrid--svg)) 'svg))
+        (should (eq (car (org-timegrid-test--render-static)) 'svg))
         (should (stringp (org-timegrid--header))))
       (should (= (length (org-timegrid--timed-blocks)) 1))
       (should (= (length (org-timegrid--all-day-blocks)) 1)))))
@@ -1018,7 +1023,7 @@
          kill-ring)
     (cl-letf (((symbol-function 'org-timegrid--reconcile) #'ignore))
       (org-timegrid-copy-selected))
-    (should (string-match-p "\n[0-9:]+–[0-9:]+  Free" (car kill-ring)))
+    (should (string-match-p "\n10:00 AM–11:00 AM  Free" (car kill-ring)))
     (should-not (get-text-property 0 'org-timegrid-payload (car kill-ring)))))
 
 (ert-deftest org-timegrid-test-copy-text-groups-items-by-day ()
@@ -1035,15 +1040,15 @@
     (should
      (equal (org-timegrid--selection-text selection)
             (concat "Mon 14 Sep 2026\n"
-                    "08:00–08:45  First\n"
-                    "08:45–09:00  Free\n"
-                    "09:00–10:00  Second\n"
-                    "10:00–11:00  Free")))
+                    "8:00 AM–8:45 AM  First\n"
+                    "8:45 AM–9:00 AM  Free\n"
+                    "9:00 AM–10:00 AM  Second\n"
+                    "10:00 AM–11:00 AM  Free")))
     (should
      (equal (org-timegrid--selection-text
              (list :start start :end (+ start 1440) :events nil))
-            (concat "Mon 14 Sep 2026\n08:00–24:00  Free\n\n"
-                    "Tue 15 Sep 2026\n00:00–08:00  Free")))))
+            (concat "Mon 14 Sep 2026\n8:00 AM–12:00 AM  Free\n\n"
+                    "Tue 15 Sep 2026\n12:00 AM–8:00 AM  Free")))))
 
 (ert-deftest org-timegrid-test-cut-two-headings-keeps-paste-targets ()
   (with-temp-buffer
@@ -1209,7 +1214,6 @@
              ;; slot, exercising the same layout rule at every cursor position.
              (org-timegrid--image-height 1458.72)
              (org-timegrid--tile-count 23)
-             (org-timegrid-cursor-opacity 0.314159)
              (org-timegrid--geometry nil)
              (org-timegrid--state
               (org-timegrid--calendar-state-create
@@ -1225,7 +1229,7 @@
                   (((symbol-function 'svg-rectangle)
                     (lambda (svg x y width height &rest properties)
                       (when (equal (plist-get properties :fill-opacity)
-                                   org-timegrid-cursor-opacity)
+                                   0.22)
                         (cl-incf count))
                       (apply original-svg-rectangle
                              svg x y width height properties))))

@@ -47,19 +47,17 @@
   "Face used for dates containing timegrid events."
   :group 'org-timegrid-calendar)
 
-(defcustom org-timegrid-calendar-highlight-dates t
+(defvar org-timegrid-calendar-highlight-dates t
   "Whether `org-read-date' marks dates containing timegrid events.
 This affects only date prompts opened through
 `org-timegrid-calendar-read-date', including org-timegrid's `j' command.
-It does not change unrelated Calendar buffers or Org date prompts."
-  :type 'boolean)
+It does not change unrelated Calendar buffers or Org date prompts.")
 
-(defcustom org-timegrid-calendar-event-predicate nil
+(defvar org-timegrid-calendar-event-predicate nil
   "Optional function deciding which events mark the date picker.
 The function receives one `org-timegrid-event' and should return non-nil
 when that event should mark its dates.  Nil includes every event returned
-by the backend."
-  :type '(choice (const :tag "All events" nil) function))
+by the backend.")
 
 (defvar-local org-timegrid-calendar--overlays nil)
 (defvar org-timegrid-calendar-setup-hook nil

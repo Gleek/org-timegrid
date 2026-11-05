@@ -1,6 +1,9 @@
 ;;; org-timegrid-clock-test.el --- Clock display tests -*- lexical-binding: t; -*-
 
 (require 'ert)
+(require 'org-timegrid-test-support
+         (expand-file-name "org-timegrid-test-support.el"
+                           (file-name-directory load-file-name)))
 (require 'org-timegrid-org)
 
 (defvar touch-screen-current-tool)
@@ -21,9 +24,7 @@
            (org-timegrid-org--undo-direction nil)
            (org-timegrid-org-filter-function #'org-timegrid-org-default-filter)
            (org-timegrid-org-show-done t)
-           (org-timegrid-org-exclude-tags nil)
-           (org-timegrid-org-exclude-properties nil)
-           (org-timegrid-org-exclude-todo-states nil))
+           (org-timegrid-org-exclude-tags nil))
        ,@body)))
 
 (ert-deftest org-timegrid-clock-records-are-separate-from-plans-and-inactive-dates ()
@@ -262,7 +263,6 @@
              :blocks (list (org-timegrid-clock--display-block 'event 120 180 clock))))
            tracked)
       (cl-letf (((symbol-function 'org-timegrid--reconcile) #'ignore)
-              ((symbol-function 'posn-window) (lambda (_) (selected-window)))
                 ((symbol-function 'org-timegrid--mouse-target)
                  (lambda (_) '(:surface grid :block-id event :day 0 :minute 120)))
                 ((symbol-function 'org-timegrid--all-day-layout) #'ignore)
@@ -272,7 +272,7 @@
                    (setq tracked t)
                    (should (eq clock (and (plist-get (org-timegrid--calendar-state-gesture org-timegrid--state) :clock) t)))
                    nil)))
-        (org-timegrid-android-long-press '(touchscreen-hold position))
+        (org-timegrid-android-long-press (list 'touchscreen-hold (list (selected-window))))
         (should tracked)))))
 
 (ert-deftest org-timegrid-clock-overlays-preserve-the-day-boundary-and-plan-width ()
@@ -307,7 +307,7 @@
             (org-timegrid--calendar-state-create
              :week-start 100
              :blocks (list (org-timegrid-clock--display-block 'clock 1380 1500 t))))
-           (svg (org-timegrid--svg))
+           (svg (org-timegrid-test--render-static))
            (circles (dom-by-tag svg 'circle)))
       (should (= 2 (length org-timegrid--geometry)))
       (should (equal '(0 1) (sort (mapcar (lambda (g) (plist-get g :day))
@@ -329,7 +329,7 @@
             (org-timegrid--calendar-state-create
              :week-start 100 :blocks blocks :cursor-visible t :selected-id 'clock
              :cursor (org-timegrid--cursor-state-create :surface 'grid :day 0 :minute 120))))
-      (org-timegrid--svg)
+      (org-timegrid-test--render-static)
       (dolist (geometry org-timegrid--geometry)
         (let ((xy (cons (+ (plist-get geometry :x) (/ (plist-get geometry :width) 2))
                         (+ (plist-get geometry :y) (/ (plist-get geometry :height) 2)))))
@@ -361,7 +361,7 @@
            (block (org-timegrid-clock--display-block 'clock 120 180 t))
            (org-timegrid--state
             (org-timegrid--calendar-state-create :week-start 100 :blocks (list block))))
-      (org-timegrid--svg)
+      (org-timegrid-test--render-static)
       (let* ((column (org-timegrid--column-width))
              (geometry (car org-timegrid--geometry))
              ;; This half of the badge crosses into the following day's column.
@@ -381,7 +381,7 @@
            (block (org-timegrid-clock--display-block 'clock 120 180 t 2))
            (org-timegrid--state
             (org-timegrid--calendar-state-create :week-start 100 :blocks (list block))))
-      (org-timegrid--svg)
+      (org-timegrid-test--render-static)
       (let ((geometry (car org-timegrid--geometry)))
         (should (<= (+ (plist-get geometry :x) (plist-get geometry :width))
                     (org-timegrid--canvas-width)))))))

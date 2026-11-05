@@ -83,6 +83,9 @@ unit.  Mutation functions may be nil."
   read-entry-function read-timestamp-function transaction-function
   entry-empty-function entry-key-function)
 
+(define-obsolete-variable-alias 'org-timegrid-cursor-step-minutes
+  'org-timegrid-slot-minutes "2026-10-30")
+
 (defcustom org-timegrid-slot-minutes 15
   "Granularity of the calendar, in minutes.
 Edits snap to this, it is the smallest range an entry may have, and it is

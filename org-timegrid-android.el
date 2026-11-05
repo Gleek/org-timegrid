@@ -46,16 +46,8 @@ Use a value between 10 and 1000, or nil to disable feedback."
   :type '(choice (const :tag "Disabled" nil) integer)
   :group 'org-timegrid)
 
-(defcustom org-timegrid-android-scroll-scale 0.65
-  "Scale physical Android touch pixels into calendar SVG pixels."
-  :type 'number
-  :group 'org-timegrid)
-
-(defcustom org-timegrid-android-scroll-max-step 48
-  "Largest pixel step accepted from one Android touch update.
-This filters occasional discontinuities when Android changes touch samples."
-  :type 'number
-  :group 'org-timegrid)
+(defvar org-timegrid-android-scroll-scale 0.65
+  "Scale physical Android touch pixels into calendar SVG pixels.")
 
 (defcustom org-timegrid-android-zoom 1.5
   "Calendar zoom used on Android."
@@ -68,17 +60,13 @@ Enable this to use keyboard commands that have no touch gesture."
   :type 'boolean
   :group 'org-timegrid)
 
-(defcustom org-timegrid-android-header-title-style
+(defvar org-timegrid-android-header-title-style
   '(:font-size 78 :character-width 47 :height 122 :baseline 86)
-  "Month and year title geometry used on Android."
-  :type 'plist
-  :group 'org-timegrid)
+  "Month and year title geometry used on Android.")
 
-(defcustom org-timegrid-android-single-day-label-style
+(defvar org-timegrid-android-single-day-label-style
   '(:scale 0.85 :x-offset 2 :gap 8)
-  "Weekday and date label geometry used on Android."
-  :type 'plist
-  :group 'org-timegrid)
+  "Weekday and date label geometry used on Android.")
 
 (defun org-timegrid-android--draw-text (svg text &rest args)
   "Draw TEXT into SVG using the bundled Noto Sans outlines."
@@ -129,8 +117,8 @@ Enable this to use keyboard commands that have no touch gesture."
         (dy (nth 3 event)))
     (when (and (window-live-p window) (numberp dy))
       (let* ((scaled (* dy org-timegrid-android-scroll-scale))
-             (step (max (- org-timegrid-android-scroll-max-step)
-                        (min org-timegrid-android-scroll-max-step scaled))))
+             ;; Filter discontinuities between native touch samples.
+             (step (max -48 (min 48 scaled))))
         ;; Wheel devices can emit a short opposite-direction rebound at an
         ;; edge.  A finger reversing at 23:00 is intentional, so never carry
         ;; that wheel-only suppression state into an Android touch update.
@@ -215,8 +203,8 @@ Enable this to use keyboard commands that have no touch gesture."
               touch-screen-keyboard-function
               (unless org-timegrid-android-display-keyboard (lambda () nil))
               org-timegrid-days 1
-              org-timegrid-edge-pixels 24
-              org-timegrid-edge-slop 10
+              org-timegrid--resize-pixels 24
+              org-timegrid--resize-slop 10
               org-timegrid-default-zoom org-timegrid-android-zoom
               org-timegrid-header-title-style
               org-timegrid-android-header-title-style
@@ -271,7 +259,7 @@ Enable this to use keyboard commands that have no touch gesture."
     (define-key org-timegrid--header-map (vector area 'touchscreen-hold)
                 #'org-timegrid-android-long-press))
   (add-hook 'org-timegrid-mode-hook #'org-timegrid-android--configure-buffer)
-  (when-let* ((buffer (get-buffer org-timegrid-buffer-name)))
+  (when-let* ((buffer (get-buffer "*Org Time Grid*")))
     (with-current-buffer buffer
       (org-timegrid-android--configure-buffer))))
 
