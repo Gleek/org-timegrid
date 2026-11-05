@@ -2,8 +2,8 @@
 
 [![MELPA](https://melpa.org/packages/org-timegrid-badge.svg)](https://melpa.org/#/org-timegrid)
 
-`org-timegrid` is an SVG calendar for Org mode. It reads timed active
-timestamps from your Org files and writes edits back to their source headings.
+`org-timegrid` is an SVG calendar for Org mode. It reads active timestamps
+and clock records from your Org files and writes edits back to their source headings.
 
 Create, move, resize, copy, rename, and remove calendar blocks with the mouse
 or keyboard. The same renderer can add a compact, read-only day view to an
@@ -120,7 +120,7 @@ Repeaters are shown by default. Under a heading containing repeaters, a new time
 <2026-10-06 Tue 18:00-18:30 +1d>
 ```
 
-Here, 5pm ends October 5; 6pm starts October 6. Move, resize and delete offer **just this**, **this and future**, or **all** within the selected series. Deletes keep inactive `CANCELLED:` boundaries; edits remain unsaved.
+Here, 5pm ends October 5; 6pm starts October 6. Move, resize and delete offer **just this**, **this and future**, or **all** within the selected series. Deletes keep inactive `CANCELLED:` boundaries; edits remain unsaved by default.
 Disable history globally with `(setq org-timegrid-org-repeater-history nil)`, per file with `#+PROPERTY: TIMEGRID_REPEATER_HISTORY nil`, or per heading with `:TIMEGRID_REPEATER_HISTORY: nil` (nearest heading → file → global). Set `org-timegrid-org-show-repeaters` to `nil` to hide repeaters entirely.
 Limitations: Org Agenda ignores these cutoffs; independent series need separate headings; scoped moves stay on their date; hourly repeaters support **all** only.
 
@@ -141,8 +141,9 @@ Run `M-x org-timegrid-week` to open the week containing today.
 | Double-click a block | Visit its Org heading |
 | Wheel | Scroll the day |
 
-Mouse edits snap to 15 minutes and use a 15-minute minimum. Release commits a
-drag. Press `C-g` before releasing to cancel it.
+Mouse edits snap to `org-timegrid-slot-minutes`, which also sets the minimum
+duration (15 minutes by default). Release commits a drag. Press `C-g` before
+releasing to cancel it.
 
 Nearby drag and resize positions are prepared between inputs to speed up
 previews. Set `org-timegrid-preview-prefetch` to `nil` to disable this extra work.
@@ -164,7 +165,7 @@ the selected block. Copies use the Emacs kill ring.
 | `C-SPC`, `C-x C-x` | Set mark, or exchange point and mark |
 | `RET` | Visit or create a block |
 | `C-g` | Clear the region or hide the cursor |
-| `M-down` / `M-up` | Move the selected block by 15 minutes |
+| `M-down` / `M-up` | Move the selected block by one slot |
 | `M-right` / `M-left` | Move the block by one day |
 | `S-down` / `S-up` | Move the end time |
 | `C-S-up` / `C-S-down` | Move the start time |
@@ -250,51 +251,42 @@ priority, property, or file.
 
 ## Configuration
 
-| Variable | Default | Meaning |
-| --- | ---: | --- |
-| `org-timegrid-days` | `7` | Consecutive days shown in the main view |
-| `org-timegrid-range-alignment` | `week` | Align to `week` or `center` |
-| `org-timegrid-now-alignment` | `top` | Position now at `top` or `center` |
-| `org-timegrid-start-hour` / `org-timegrid-end-hour` | `0` / `24` | Hours drawn |
-| `org-timegrid-time-format` | `24-hour` | Clock format: `12-hour` or `24-hour` |
-| `org-timegrid-pixels-per-minute` | `0.9` | Week-view scale |
-| `org-timegrid-default-zoom` | `0.7` | Initial zoom |
-| `org-timegrid-slot-minutes` | `15` | Cursor and edit granularity |
-| `org-timegrid-cursor-step-minutes` | `15` | Normal keyboard step |
-| `org-timegrid-keyboard-commit-delay` | `0.25` | Idle delay before a moved block is saved |
-| `org-timegrid-default-duration-minutes` | `30` | Length used when no end is present |
-| `org-timegrid-block-gap` | `1` | Gap between blocks, in pixels |
-| `org-timegrid-copy-date-format` | `%a %d %b %Y` | Date heading in copied text |
-| `org-timegrid-copy-item-template` | `%{start}–%{end}  %{title}` | Copied block/free-time line |
-| `org-timegrid-copy-day-separator` | blank line | Separator between copied days |
-| `org-timegrid-nesting-indent` | `8` | Indent for contained events |
-| `org-timegrid-title-clearance` | `18` | Space a parent keeps for its title |
-| `org-timegrid-data-refresh-seconds` | `300` | Backend reload interval |
+Use `M-x customize-group RET org-timegrid` for the main options.
 
-| Agenda variable | Default | Meaning |
-| --- | ---: | --- |
-| `org-timegrid-agenda-minutes-before` / `-after` | `180` / `180` | Visible window around now |
-| `org-timegrid-agenda-insert-after` | `"To Refile"` | Block above the strip |
-| `org-timegrid-agenda-separator` | `t` | Separator after the strip |
-| `org-timegrid-compact-pixels-per-minute` | `0.95` | Strip scale |
-| `org-timegrid-compact-font-size` | `11` | Strip text size |
+| Calendar option | Default | Meaning |
+| --- | --- | --- |
+| `org-timegrid-days` | `7` | Consecutive days shown |
+| `org-timegrid-range-alignment` | `week` | Align to week start or center the target date |
+| `org-timegrid-start-hour` / `org-timegrid-end-hour` | `0` / `24` | Hours shown |
+| `org-timegrid-time-format` | `12h` | `12h` or `24h` labels |
+| `org-timegrid-default-zoom` | `0.7` | Initial size; adjust with text-scale commands |
+| `org-timegrid-slot-minutes` | `15` | Keyboard step and edit granularity |
+| `org-timegrid-default-duration-minutes` | `30` | Duration when no end is given |
+| `org-timegrid-default-color` | `blue` | Colour for unmapped events |
+| `org-timegrid-all-day-max-lanes` | `5` | Maximum visible all-day rows |
 
-| Org variable | Default | Meaning |
-| --- | ---: | --- |
-| `org-timegrid-org-files` | `agenda` | Files to query; a list is literal |
-| `org-timegrid-org-capture-file` | `calendar.org` in `user-emacs-directory` | Target for new entries; always queried |
-| `org-timegrid-org-capture-template` | top-level title and time range | Structure and location inside the capture file |
-| `org-timegrid-org-auto-save` | `nil` | Save the affected Org file after every calendar edit |
-| `org-timegrid-org-show-done` | `t` | Show done entries |
-| `org-timegrid-org-repeater-history` | `t` | Keep repeater schedule history |
-| `org-timegrid-org-show-repeaters` | `t` | Show repeaters |
+| Org option | Default | Meaning |
+| --- | --- | --- |
+| `org-timegrid-org-files` | `agenda` | Use Org agenda files, an explicit file list, or a function |
+| `org-timegrid-org-capture-file` | `calendar.org` in `user-emacs-directory` | Destination for new entries; always queried |
+| `org-timegrid-org-capture-template` | title and time range | Structure and location of new entries |
+| `org-timegrid-org-auto-save` | `nil` | Save after calendar edits |
+| `org-timegrid-org-show-done` | `t` | Show completed entries |
 | `org-timegrid-org-show-clocks` | `t` | Show finished and running clocks |
-| `org-timegrid-org-exclude-tags` | `nil` | Hide headings carrying any listed tag |
-| `org-timegrid-org-exclude-todo-states` | `nil` | Hide headings whose TODO keyword is listed |
-| `org-timegrid-org-exclude-properties` | `nil` | Hide headings matching `(PROPERTY . VALUE)`; nil matches any value |
-| `org-timegrid-org-filter-function` | `org-timegrid-org-default-filter` | Custom event filter |
-| `org-timegrid-org-entry-filter-function` | `org-timegrid-org-default-entry-filter` | Filter headings offered when creating a block; use `always` for all headings |
+| `org-timegrid-org-exclude-tags` | `nil` | Tags to hide |
 | `org-timegrid-org-tag-color-alist` | `nil` | Tag-to-colour mapping |
+
+| Agenda option | Default | Meaning |
+| --- | --- | --- |
+| `org-timegrid-agenda-minutes-before` / `org-timegrid-agenda-minutes-after` | `180` / `180` | Window around now |
+| `org-timegrid-agenda-insert-after` | `"To Refile"` | Agenda block above the strip; nil places it at the top |
+| `org-timegrid-agenda-separator` | `t` | Separator after the strip |
+
+| Android option | Default | Meaning |
+| --- | --- | --- |
+| `org-timegrid-android-zoom` | `1.5` | Initial size on Android |
+| `org-timegrid-android-display-keyboard` | `nil` | Show the on-screen keyboard |
+| `org-timegrid-android-haptic-duration` | `60` | Long-press vibration in milliseconds; nil disables it |
 
 Creating a block offers existing headings. Choose one to add a timestamp,
 or enter a new title to create a heading in `org-timegrid-org-capture-file`.
@@ -316,6 +308,11 @@ To keep calendar entries in a dedicated file organized by their start date:
 ```
 
 ## Hooks and custom backends
+
+For Lisp configuration, `org-timegrid-org-filter-function` controls which
+events appear, `org-timegrid-org-entry-filter-function` controls the headings
+offered when creating a block, and `org-timegrid-org-color-function` controls
+heading colours. Use `C-h v` to read their calling conventions.
 
 `org-timegrid-org-after-create-hook` runs with point on a newly created Org
 heading. Hook edits join the same undo step.
