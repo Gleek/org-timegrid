@@ -590,15 +590,16 @@ With SNAPSHOT, copy event records before retaining the key."
           (cl-progv fields (mapcar #'symbol-value fields)
             (setq org-timegrid--state (org-timegrid--load-state (+ anchor offset)))
             (org-timegrid--cache-static-tiles)
-            (let ((header (org-timegrid--cached-header))
-                  (window (get-buffer-window (current-buffer) t)))
+            (let* ((header (org-timegrid--cached-header))
+                   (window (get-buffer-window (current-buffer) t))
+                   (top (if window (org-timegrid--window-scroll-pixels window) 0))
+                   (bottom (if window (+ top (window-body-height window t))
+                             org-timegrid--image-height)))
               (setq org-timegrid--prewarm-view (org-timegrid--cached-view)
                     org-timegrid--prewarm-images
                     (cons (get-text-property 0 'display header)
                           (mapcar (lambda (tile) (aref org-timegrid--static-images tile))
-                                  (org-timegrid--tiles-intersecting
-                                   0 (if window (window-body-height window t)
-                                       org-timegrid--image-height))))))))
+                                  (org-timegrid--tiles-intersecting top bottom)))))))
         (org-timegrid--schedule-prewarm))))))
 
 (defun org-timegrid--schedule-prewarm ()
@@ -796,12 +797,7 @@ ALIGNMENT defaults to `center'."
     (org-timegrid--sync-fringe-background)
     (let* ((window (get-buffer-window (current-buffer) t))
            (vscroll (and preserve-scroll window
-                         (let ((current (org-timegrid--window-scroll-pixels
-                                         window)))
-                           (if (and (zerop current)
-                                    (> org-timegrid--saved-vscroll 0))
-                               org-timegrid--saved-vscroll
-                             current))))
+                         (org-timegrid--window-scroll-pixels window)))
            (previewp (org-timegrid--calendar-state-preview org-timegrid--state)))
       (when (overlayp org-timegrid--pointer-overlay)
         (delete-overlay org-timegrid--pointer-overlay)
@@ -1328,7 +1324,6 @@ Keep the same calendar minute at the vertical center of the window."
 (defun org-timegrid--scroll-cursor-into-view ()
   "Scroll the minimum amount needed to make the whole cursor slot visible."
   (when-let* ((cursor (org-timegrid--cursor))
-              ((eq (org-timegrid--cursor-state-surface cursor) 'grid))
               (window (get-buffer-window (current-buffer) t)))
     (let* ((scale (org-timegrid--pixels-per-minute))
            (start-minute (* 60 org-timegrid-start-hour))
@@ -1339,6 +1334,9 @@ Keep the same calendar minute at the vertical center of the window."
            (vscroll (org-timegrid--window-scroll-pixels window))
            (maximum (max 0 (- (or org-timegrid--image-height 0) body))))
       (cond
+       ((or (eq (org-timegrid--cursor-state-surface cursor) 'rail)
+            (<= (org-timegrid--cursor-state-minute cursor) start-minute))
+        (when (> vscroll 0) (org-timegrid--set-vscroll window 0)))
        ((< top vscroll)
         (org-timegrid--set-vscroll window (max 0 (min maximum top))))
        ((> bottom (+ vscroll body))

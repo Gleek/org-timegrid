@@ -3,6 +3,28 @@
 (require 'ert)
 (require 'org-timegrid-org)
 
+(ert-deftest org-timegrid-cache-refresh-preserves-current-scroll-at-top ()
+  "Refresh must not replace a real zero offset with an older saved position."
+  (with-temp-buffer
+    (let ((org-timegrid--backend
+           (org-timegrid-backend-create :list-function (lambda (&rest _) nil)))
+          (org-timegrid--state (org-timegrid--calendar-state-create :week-start 739919))
+          (org-timegrid--saved-vscroll 600)
+          current restored)
+      (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window)))
+                ((symbol-function 'org-timegrid--window-scroll-pixels) (lambda (_) current))
+                ((symbol-function 'org-timegrid--set-vscroll)
+                 (lambda (_window pixels) (setq restored pixels)))
+                ((symbol-function 'create-image)
+                 (lambda (data &rest _) (list 'image :type 'svg :data data)))
+                ((symbol-function 'image-flush) #'ignore)
+                ((symbol-function 'redisplay) #'ignore)
+                ((symbol-function 'org-timegrid--schedule-prewarm) #'ignore))
+        (dolist (offset '(150 0))
+          (setq current offset restored nil)
+          (org-timegrid-refresh)
+          (should (equal restored offset)))))))
+
 (ert-deftest org-timegrid-cache-flush-invalidates-the-displaying-frame-first ()
   "A shared cache must not be freed through a hidden frame first."
   (with-temp-buffer
@@ -332,9 +354,10 @@
                     ((symbol-function 'org-timegrid--tiles-intersecting)
                      (lambda (&rest args) (push args ranges) (apply intersect args))))
             (org-timegrid--prewarm-next))
-          ;; Date navigation opens at the top even when this view is scrolled.
-          (should (= 0 (caar ranges)))
-          (should (= (window-body-height (selected-window) t) (cadar ranges)))
+          ;; Date navigation keeps the current viewport.
+          (should (= 600 (caar ranges)))
+          (should (= (+ 600 (window-body-height (selected-window) t)) (cadar ranges)))
+          (should (cdr org-timegrid--prewarm-images))
           (should (eq state org-timegrid--state))
           (should (eq images org-timegrid--static-images))
           (should (eq geometry org-timegrid--geometry))

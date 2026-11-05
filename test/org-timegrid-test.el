@@ -518,6 +518,28 @@
         (should (= reloaded range))
         (should (equal refreshed '(nil 1020 top)))))))
 
+(ert-deftest org-timegrid-test-date-navigation-preserves-scroll ()
+  (with-temp-buffer
+    (let* ((org-timegrid-days 7)
+           (range 700000)
+           (org-timegrid--state
+            (org-timegrid--calendar-state-create :week-start range))
+           (org-timegrid--backend
+            (org-timegrid-backend-create :list-function (lambda (&rest _) nil)))
+           refreshed)
+      (cl-letf (((symbol-function 'org-timegrid--refresh)
+                 (lambda (&optional preserve &rest _) (setq refreshed preserve)))
+                ((symbol-function 'org-timegrid--schedule-prewarm) #'ignore))
+        (dolist (navigation '((org-timegrid-backward-day . -1)
+                              (org-timegrid-forward-day . 1)
+                              (org-timegrid-previous-week . -7)
+                              (org-timegrid-next-week . 7)))
+          (setq refreshed nil)
+          (funcall (car navigation))
+          (cl-incf range (cdr navigation))
+          (should (= range (org-timegrid--calendar-state-week-start org-timegrid--state)))
+          (should refreshed))))))
+
 (ert-deftest org-timegrid-test-refresh-preserves-displayed-range-and-scroll ()
   (with-temp-buffer
     (let* ((range 700000)

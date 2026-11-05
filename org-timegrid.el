@@ -2300,8 +2300,8 @@ not hold for a buffer made of tall image glyphs."
         minor-mode-overriding-map-alist))
 
 (defun org-timegrid-shift-week (days)
-  "Move the SVG week by DAYS."
-  (org-timegrid--with-update 'reset
+  "Move the SVG week by DAYS, preserving vertical scroll position."
+  (org-timegrid--with-update 'preserve
     (org-timegrid--reload-state
      (+ (org-timegrid--calendar-state-week-start org-timegrid--state) days))))
 
