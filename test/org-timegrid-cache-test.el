@@ -3,6 +3,58 @@
 (require 'ert)
 (require 'org-timegrid-org)
 
+(ert-deftest org-timegrid-cache-flush-invalidates-the-displaying-frame-first ()
+  "A shared cache must not be freed through a hidden frame first."
+  (with-temp-buffer
+    (let ((image '(image :type svg :data "tile")) calls)
+      (cl-letf (((symbol-function 'get-buffer-window-list)
+                 (lambda (_buffer _minibuffer frames)
+                   (should (eq frames 'visible))
+                   '(calendar-window other-window same-frame-window)))
+                ((symbol-function 'window-frame)
+                 (lambda (window) (if (eq window 'other-window) 'other-frame 'calendar-frame)))
+                ((symbol-function 'redraw-frame)
+                 (lambda (frame) (push (list 'redraw frame) calls)))
+                ((symbol-function 'image-flush)
+                 (lambda (spec frame) (push (list spec frame) calls))))
+        (org-timegrid--flush-images (list image))
+        (should (equal (nreverse calls)
+                       (list (list image 'calendar-frame) (list image t)
+                             '(redraw other-frame))))
+        (setq calls nil)
+        (should-error
+         (org-timegrid--with-image-flush
+           (org-timegrid--flush-image image)
+           (error "Cleanup interrupted")))
+        (should (= 1 (cl-count '(redraw other-frame) calls :test #'equal)))
+        (should-not org-timegrid--image-flush-context)
+        (setq calls nil)
+        (org-timegrid--flush-images nil)
+        (should-not calls)))))
+
+(ert-deftest org-timegrid-cache-clear-redraws-secondary-frames-once ()
+  "Clearing previews and cached views repaints another frame only once."
+  (with-temp-buffer
+    (let ((image '(image :type svg :data "tile")) calls)
+      (setq org-timegrid--static-images (vector image)
+            org-timegrid--preview-cache (make-hash-table :test #'equal)
+            org-timegrid--view-cache
+            (list (org-timegrid--cached-view-create
+                   :fields (list (cons 'org-timegrid--static-images (vector image image))))))
+      (puthash 'preview image org-timegrid--preview-cache)
+      (cl-letf (((symbol-function 'get-buffer-window-list)
+                 (lambda (&rest _) '(first-window second-window)))
+                ((symbol-function 'window-frame) #'identity)
+                ((symbol-function 'redraw-frame)
+                 (lambda (frame) (push (list 'redraw frame) calls)))
+                ((symbol-function 'image-flush)
+                 (lambda (_spec frame) (push (list 'flush frame) calls))))
+        (org-timegrid--clear-view-cache)
+        (should (= 1 (cl-count '(redraw second-window) calls :test #'equal)))
+        (should (equal (car calls) '(redraw second-window)))
+        (should-not org-timegrid--view-cache)
+        (should-not org-timegrid--preview-cache)))))
+
 (ert-deftest org-timegrid-cache-redraws-do-not-retain-undo-history ()
   "Replacing the displayed image must not retain old SVGs in text undo."
   ;; Unlike temporary buffers whose names start with a space, a normal

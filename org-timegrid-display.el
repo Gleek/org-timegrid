@@ -100,6 +100,22 @@
 
 (defvar org-timegrid--theme-timer nil)
 
+(defvar org-timegrid--image-flush-context nil
+  "Active flush batch: a changed flag followed by visible calendar frames.")
+
+(defmacro org-timegrid--with-image-flush (&rest body)
+  "Run BODY, redrawing secondary frames once after any image flushes."
+  (declare (indent 0) (debug t))
+  `(if org-timegrid--image-flush-context
+       (progn ,@body)
+     (let ((org-timegrid--image-flush-context
+            (cons nil (delete-dups
+                       (mapcar #'window-frame
+                               (get-buffer-window-list (current-buffer) nil 'visible))))))
+       (unwind-protect (progn ,@body)
+         (when (car org-timegrid--image-flush-context)
+           (mapc #'redraw-frame (cddr org-timegrid--image-flush-context)))))))
+
 (defmacro org-timegrid--with-update (view &rest body)
   "Apply BODY's state changes with VIEW through `org-timegrid--update'."
   (declare (indent 1) (debug t))
@@ -278,7 +294,8 @@ Use HOTSPOTS as the image map when provided."
   (when (timerp org-timegrid--preview-timer)
     (cancel-timer org-timegrid--preview-timer))
   (when org-timegrid--preview-cache
-    (maphash (lambda (_ image) (image-flush image t)) org-timegrid--preview-cache))
+    (org-timegrid--with-image-flush
+      (maphash (lambda (_ image) (org-timegrid--flush-image image)) org-timegrid--preview-cache)))
   (setq org-timegrid--preview-cache nil org-timegrid--preview-images nil
         org-timegrid--preview-order nil
         org-timegrid--preview-context nil org-timegrid--preview-candidates nil
@@ -326,7 +343,7 @@ Use HOTSPOTS as the image map when provided."
           (remhash old org-timegrid--preview-images)
           (unless (seq-some (lambda (marker) (equal old (get-text-property marker 'display)))
                             org-timegrid--tile-markers)
-            (image-flush old t))))
+            (org-timegrid--flush-image old))))
       image)))
 
 (defun org-timegrid--prepare-preview-next ()
@@ -405,14 +422,26 @@ Remove REPLACEMENT's aliases so eviction cannot flush the next display."
     (setq org-timegrid--transient-images
           (cons image (cl-delete image org-timegrid--transient-images :test #'equal)))
     (when (> (length org-timegrid--transient-images) 32)
-      (mapc (lambda (old) (image-flush old t)) (nthcdr 32 org-timegrid--transient-images))
+      (org-timegrid--flush-images (nthcdr 32 org-timegrid--transient-images))
       (setcdr (nthcdr 31 org-timegrid--transient-images) nil))))
+
+(defun org-timegrid--flush-image (image)
+  "Release IMAGE and invalidate every visible calendar frame."
+  ;; `image-flush' only marks the frame that actually frees the image.
+  ;; With shared caches, flushing all frames can mark a hidden frame first
+  ;; and leave the calendar's glyphs referring to recycled image IDs.
+  (org-timegrid--with-image-flush
+    (setcar org-timegrid--image-flush-context t)
+    (when-let* ((frame (cadr org-timegrid--image-flush-context)))
+      (image-flush image frame))
+    (image-flush image t)))
 
 (defun org-timegrid--flush-images (images &optional header)
   "Release decoded IMAGES and HEADER from Emacs's native image cache."
-  (mapc (lambda (image) (when image (image-flush image t))) images)
-  (when-let* ((image (and (stringp header) (get-text-property 0 'display header))))
-    (image-flush image t)))
+  (org-timegrid--with-image-flush
+    (mapc (lambda (image) (when image (org-timegrid--flush-image image))) images)
+    (when-let* ((image (and (stringp header) (get-text-property 0 'display header))))
+      (org-timegrid--flush-image image))))
 
 (defun org-timegrid--flush-view (view)
   "Release decoded images belonging to cached VIEW."
@@ -422,21 +451,22 @@ Remove REPLACEMENT's aliases so eviction cannot flush the next display."
 
 (defun org-timegrid--clear-view-cache ()
   "Discard rendered views and their decoded images."
-  (org-timegrid--clear-preview-cache)
-  (dolist (tile org-timegrid--excluded-tiles)
-    (org-timegrid--retire-image (aref org-timegrid--static-images tile)))
-  (setq org-timegrid--excluded-tiles nil)
-  (mapc #'org-timegrid--flush-view org-timegrid--view-cache)
-  ;; Displayed images can outlive their cache entry, including rail previews.
-  (setq org-timegrid--pending-image-flush
-        (cons (and (stringp header-line-format) (get-text-property 0 'display header-line-format))
-              (mapcar (lambda (marker) (get-text-property marker 'display))
-                      org-timegrid--tile-markers)))
-  (org-timegrid--flush-images
-   (append org-timegrid--static-images org-timegrid--transient-images
-           org-timegrid--pending-image-flush))
-  (setq org-timegrid--view-cache nil org-timegrid--transient-images nil
-        org-timegrid--prewarm-images nil org-timegrid--prewarm-view nil))
+  (org-timegrid--with-image-flush
+    (org-timegrid--clear-preview-cache)
+    (dolist (tile org-timegrid--excluded-tiles)
+      (org-timegrid--retire-image (aref org-timegrid--static-images tile)))
+    (setq org-timegrid--excluded-tiles nil)
+    (mapc #'org-timegrid--flush-view org-timegrid--view-cache)
+    ;; Displayed images can outlive their cache entry, including rail previews.
+    (setq org-timegrid--pending-image-flush
+          (cons (and (stringp header-line-format) (get-text-property 0 'display header-line-format))
+                (mapcar (lambda (marker) (get-text-property marker 'display))
+                        org-timegrid--tile-markers)))
+    (org-timegrid--flush-images
+     (append org-timegrid--static-images org-timegrid--transient-images
+             org-timegrid--pending-image-flush))
+    (setq org-timegrid--view-cache nil org-timegrid--transient-images nil
+          org-timegrid--prewarm-images nil org-timegrid--prewarm-view nil)))
 
 (defun org-timegrid--view-key (&optional snapshot)
   "Return the current data key, invalidating incompatible display caches.
@@ -505,9 +535,10 @@ With SNAPSHOT, copy event records before retaining the key."
     (let ((tiles org-timegrid--clock-tiles) (fragment org-timegrid--clock-fragment))
       (org-timegrid--update-clock-fragment)
       (unless (equal fragment org-timegrid--clock-fragment)
-        (dolist (tile (delete-dups (append tiles org-timegrid--clock-tiles)))
-          (image-flush (aref org-timegrid--static-images tile) t)
-          (aset org-timegrid--static-images tile (org-timegrid--make-tile-image tile)))))
+        (org-timegrid--with-image-flush
+          (dolist (tile (delete-dups (append tiles org-timegrid--clock-tiles)))
+            (org-timegrid--flush-image (aref org-timegrid--static-images tile))
+            (aset org-timegrid--static-images tile (org-timegrid--make-tile-image tile))))))
     (setf (org-timegrid--cached-view-fields view)
           (mapcar (lambda (name) (cons name (symbol-value name))) org-timegrid--view-fields)))
   (when excluded-id
@@ -575,13 +606,14 @@ With SNAPSHOT, copy event records before retaining the key."
   (when (timerp org-timegrid--prewarm-timer) (cancel-timer org-timegrid--prewarm-timer))
   (let ((buffer (current-buffer))
         (anchor (org-timegrid--calendar-state-week-start org-timegrid--state)))
-    (setq org-timegrid--view-cache
-          (cl-delete-if
-           (lambda (view)
-             (let ((day (nth 1 (org-timegrid--cached-view-key view))))
-               (when (or (< day (- anchor 14)) (> day (+ anchor 7)))
-                 (org-timegrid--flush-view view) t)))
-           org-timegrid--view-cache))
+    (org-timegrid--with-image-flush
+      (setq org-timegrid--view-cache
+            (cl-delete-if
+             (lambda (view)
+               (let ((day (nth 1 (org-timegrid--cached-view-key view))))
+                 (when (or (< day (- anchor 14)) (> day (+ anchor 7)))
+                   (org-timegrid--flush-view view) t)))
+             org-timegrid--view-cache)))
     (when (and org-timegrid--prewarm-images
                (not (memq org-timegrid--prewarm-view org-timegrid--view-cache)))
       (setq org-timegrid--prewarm-images nil org-timegrid--prewarm-view nil))
