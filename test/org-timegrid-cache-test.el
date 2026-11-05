@@ -81,22 +81,22 @@
   "Replacing the displayed image must not retain old SVGs in text undo."
   ;; Unlike temporary buffers whose names start with a space, a normal
   ;; calendar buffer starts with text undo enabled.
-  (let ((buffer (generate-new-buffer "*Timegrid image retention test*")))
-    (unwind-protect
-        (with-current-buffer buffer
-          (org-timegrid-mode)
-          (setq org-timegrid--state (org-timegrid--calendar-state-create :week-start 100)
-                org-timegrid--static-images (vector '(image :type svg :data "initial"))
-                org-timegrid--tile-count 1 org-timegrid--tile-columns 1)
-          (org-timegrid--insert-tiles)
-          (cl-letf (((symbol-function 'image-flush) #'ignore))
+  (cl-letf (((symbol-function 'image-flush) #'ignore))
+    (let ((buffer (generate-new-buffer "*Timegrid image retention test*")))
+      (unwind-protect
+          (with-current-buffer buffer
+            (org-timegrid-mode)
+            (setq org-timegrid--state (org-timegrid--calendar-state-create :week-start 100)
+                  org-timegrid--static-images (vector '(image :type svg :data "initial"))
+                  org-timegrid--tile-count 1 org-timegrid--tile-columns 1)
+            (org-timegrid--insert-tiles)
             (dotimes (i 100)
               (org-timegrid--set-tile-image
-               0 (list 'image :type 'svg :data (format "image %d" i)))))
-          (should (eq buffer-undo-list t))
-          (should (equal "image 99" (plist-get (cdr (get-text-property 1 'display)) :data)))
-          (should (<= (length org-timegrid--transient-images) 32)))
-      (kill-buffer buffer))))
+               0 (list 'image :type 'svg :data (format "image %d" i))))
+            (should (eq buffer-undo-list t))
+            (should (equal "image 99" (plist-get (cdr (get-text-property 1 'display)) :data)))
+            (should (<= (length org-timegrid--transient-images) 32)))
+        (kill-buffer buffer)))))
 
 (ert-deftest org-timegrid-cache-android-hour-labels ()
   "Keep outlined hour labels above the background and in gutter cells."
