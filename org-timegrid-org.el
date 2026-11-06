@@ -228,6 +228,17 @@ priority, property, or file as easily as by tag.")
                        (find-buffer-visiting expanded))
               collect expanded))))
 
+(defun org-timegrid-org-save ()
+  "Save modified buffers supplying the grid, including the capture file.
+Only save files already visited in Emacs, without asking for confirmation."
+  (interactive)
+  (dolist (file (org-timegrid-org--files))
+    (when-let* ((buffer (find-buffer-visiting file)))
+      (with-current-buffer buffer
+        (when (buffer-modified-p)
+          (save-buffer)))))
+  (message "Saved timegrid source buffers"))
+
 (defun org-timegrid-org--format-date (absolute-day)
   "Format ABSOLUTE-DAY for an Org timestamp."
   (let* ((date (calendar-gregorian-from-absolute absolute-day))

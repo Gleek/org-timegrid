@@ -18,6 +18,7 @@
 
 ### Bug fixes
 
+- `org-timegrid-org-save` saves only the grid's source buffers, including the capture file.
 - Scrolling and search
   - Navigation and refresh preserve the viewport.
   - Search keeps matched blocks visible.
