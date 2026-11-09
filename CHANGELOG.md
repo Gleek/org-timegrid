@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased (target: v0.1.0)
+## v0.1.0 — 2026-11-09
 
 - Faster calendar interaction
   - Cached views and prepared drag previews.

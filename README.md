@@ -112,7 +112,19 @@ edited; stop running clocks first. Other inactive timestamps are hidden.
 
 ### Repeaters
 
-Repeaters are shown by default. Under a heading containing repeaters, a new timestamp ends the previous series before its date:
+Repeating events appear by default. `org-timegrid` handles them a little
+differently from Org, so you can change a recurring schedule as you would
+in a typical calendar: adjust one occurrence or future occurrences while
+keeping earlier times intact.
+
+When you move, resize, or delete a repeating block, choose:
+
+- **just this**: change only the selected occurrence.
+- **this and future**: change this occurrence and the ones that follow it.
+- **all**: change every occurrence in the selected series, including earlier ones.
+
+Under a heading with repeaters, each new timestamp starts a new schedule
+from its date. The previous schedule stops the day before:
 
 ```org
 * Daily walk
@@ -120,9 +132,31 @@ Repeaters are shown by default. Under a heading containing repeaters, a new time
 <2026-10-06 Tue 18:00-18:30 +1d>
 ```
 
-Here, 5pm ends October 5; 6pm starts October 6. Move, resize and delete offer **just this**, **this and future**, or **all** within the selected series. Deletes keep inactive `CANCELLED:` boundaries; edits remain unsaved by default.
-Disable history globally with `(setq org-timegrid-org-repeater-history nil)`, per file with `#+PROPERTY: TIMEGRID_REPEATER_HISTORY nil`, or per heading with `:TIMEGRID_REPEATER_HISTORY: nil` (nearest heading → file → global). Set `org-timegrid-org-show-repeaters` to `nil` to hide repeaters entirely.
-Limitations: Org Agenda ignores these cutoffs; independent series need separate headings; scoped moves stay on their date; hourly repeaters support **all** only.
+The walk is at 5pm through October 5, then at 6pm from October 6 onward.
+Changing the later series leaves the earlier 5pm walks intact, even when
+you choose **all**. **this and future** also stops at the next schedule
+change, if one exists.
+
+This schedule history is specific to `org-timegrid`. Org Agenda treats the
+repeaters independently and does not honor these cutoffs. Use separate
+headings for unrelated repeating events.
+
+To treat timestamps as independent schedules instead, disable history:
+
+- Globally: `(setq org-timegrid-org-repeater-history nil)`.
+- For a file: `#+PROPERTY: TIMEGRID_REPEATER_HISTORY nil`.
+- For a heading and its children: set `:TIMEGRID_REPEATER_HISTORY: nil` in
+  its property drawer.
+
+The nearest heading setting takes precedence, then the file setting, then
+the global setting. Set `org-timegrid-org-show-repeaters` to `nil` to hide
+repeating events entirely.
+
+Moves scoped to **just this** or **this and future** must stay on the same
+date. Hourly repeaters support **all** only. Deleting occurrences leaves
+inactive `CANCELLED:` timestamps in the Org file to record where the schedule
+stops or skips a date. As with other calendar edits, changes remain unsaved
+by default.
 
 ## Week view
 
