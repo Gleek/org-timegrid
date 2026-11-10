@@ -9,7 +9,11 @@ Create, move, resize, copy, rename, and remove calendar blocks with the mouse
 or keyboard. The same renderer can add a compact, read-only day view to an
 existing Org Agenda.
 
-https://github.com/user-attachments/assets/2e1df1c3-d0f0-419d-b5f2-66d876753872
+
+
+https://github.com/user-attachments/assets/58205a76-1895-4a91-83ed-4adc69ca6920
+
+
 
 ## Screenshots
 
