@@ -365,6 +365,25 @@ heading. Hook edits join the same undo step.
 For other sources, pass a backend to `org-timegrid-open`.
 See `org-timegrid-backend-create` for the backend API.
 
+## Related packages
+
+I use these alongside `org-timegrid`:
+
+- [org-wild-notifier](https://github.com/emacsorphanage/org-wild-notifier)
+  for desktop reminders before Org events.
+- [org-time-analytics](https://github.com/Gleek/org-time-analytics)
+  for reports on time allocated through active timestamp ranges, grouped by
+  tag, TODO state, category, or property.
+- [Orgzly Revived](https://github.com/orgzly-revived/orgzly-android-revived)
+  for Org reminders and notifications on Android.
+- [org-upcoming-modeline](https://github.com/unhammer/org-upcoming-modeline)
+  with the following settings:
+
+  ```elisp
+  (setq org-upcoming-modeline-only-show-soon t
+        org-upcoming-modeline-show-running t)
+  ```
+
 ## Development
 
 Run the tests:
