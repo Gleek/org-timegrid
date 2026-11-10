@@ -154,7 +154,7 @@ OUTLINE-ONLY preserves the static bar's translucent fill during selection."
              (max-lines (max 1 (floor (/ (max 1 (- block-height 3))
                                          line-height))))
              (title-lines (org-timegrid--wrap-title
-                           (org-timegrid-block-title block) characters max-lines))
+                           (plist-get geometry :title) characters max-lines))
              (clip-id (format "occs-block-%s-%x" day
                               (sxhash (org-timegrid-block-id block))))
              (clip (svg-clip-path svg :id clip-id)))
@@ -370,7 +370,7 @@ OUTPUT `fragment' returns inner XML, `fragments' returns bounded XML strings,
            (characters (max 1 (floor (/ available
                                         (org-timegrid--scale-pixels 6.2)))))
            (title (truncate-string-to-width
-                   (org-timegrid-block-title block) characters nil nil "…")))
+                   (org-timegrid-block-display-title block) characters nil nil "…")))
       (org-timegrid--draw-text svg title :x text-x
                                :y (+ y (org-timegrid--scale-pixels 13))
                                :font-size (org-timegrid--font-size 10)

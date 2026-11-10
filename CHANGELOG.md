@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Display calendar titles using Org's visible text for links, emphasis, entities, and subscripts while preserving markup for editing and copying.
+
 ## v0.1.0 — 2026-11-09
 
 - Faster calendar interaction

@@ -566,7 +566,7 @@ minutes and suffix spacing; `clock' omits AM/PM for the current-time pill."
           (if (org-timegrid--clock-block-p block) "Clock " "")
           (org-timegrid--format-minute (org-timegrid-block-start block))
           (org-timegrid--format-minute (org-timegrid-block-end block))
-          (or (org-timegrid-block-title block) "")))
+          (or (org-timegrid-block-display-title block) "")))
 
 (defun org-timegrid--resolve-color (color palette)
   "Return COLOR as a colour string, resolving a name through PALETTE.
@@ -792,7 +792,7 @@ Return nodes in paint order."
                 :start (org-timegrid-block-start block) :end (org-timegrid-block-end block)
                 :x x :y y :width block-width :height block-height
                 :radius radius :clock clock :preview (org-timegrid-block-preview block)
-                :title (org-timegrid-block-title block) :color (org-timegrid-block-color block)
+                :title (org-timegrid-block-display-title block) :color (org-timegrid-block-color block)
                 :done (org-timegrid-block-done block)
                 :allow-top (org-timegrid-block-allow-top block)
                 :allow-bottom (org-timegrid-block-allow-bottom block)

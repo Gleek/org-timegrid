@@ -1331,6 +1331,31 @@ with no end time gets `org-timegrid-default-duration-minutes'."
   "Build a stable-enough identity for FILE POSITION and KIND."
   (list file position kind))
 
+(defun org-timegrid-org--display-title (headline)
+  "Return HEADLINE's visible text using its Org fontification.
+Keep the original markup in the event title for editing and copying."
+  (save-excursion
+    (goto-char (org-element-property :begin headline))
+    (font-lock-ensure (line-beginning-position) (line-end-position))
+    (looking-at org-complex-heading-regexp)
+    (let ((end (or (match-end 4) (line-end-position))) parts)
+      (goto-char (or (match-beginning 4) end))
+      (while (< (point) end)
+        (let* ((display (get-text-property (point) 'display))
+               (composition (find-composition (point) nil nil t)))
+          (cond
+           ((and (get-text-property (point) 'invisible) (invisible-p (point)))
+            (forward-char))
+           ((stringp display)
+            (push display parts)
+            (goto-char (next-single-property-change (point) 'display nil end)))
+           ((and composition (vectorp (nth 2 composition)))
+            (push (concat (nth 2 composition)) parts)
+            (goto-char (min end (nth 1 composition))))
+           (t (push (char-to-string (char-after)) parts)
+              (forward-char)))))
+      (apply #'concat (nreverse parts)))))
+
 (defun org-timegrid-org--event
     (file headline timestamp kind &optional all-day)
   "Create a calendar event for FILE HEADLINE TIMESTAMP of KIND.
@@ -1358,7 +1383,8 @@ ALL-DAY records that the timestamp has dates but no times."
      :color (funcall org-timegrid-org-color-function headline)
      :source (list :file file :marker (copy-marker begin) :kind kind)
      :metadata
-     (list :raw-value (org-element-property :raw-value timestamp)
+     (list :display-title (org-timegrid-org--display-title headline)
+           :raw-value (org-element-property :raw-value timestamp)
            :repeater-type (org-element-property :repeater-type timestamp)
            :repeater-value (org-element-property :repeater-value timestamp)
            :repeater-unit (org-element-property :repeater-unit timestamp)))))
@@ -1564,7 +1590,10 @@ invalidate it without installing change hooks in the user's Org files."
                      (list org-timegrid-org-show-clocks org-timegrid-org-show-repeaters
                            org-timegrid-org-repeater-history org-timegrid-org-show-done
                            org-timegrid-org-exclude-tags org-timegrid-org-tag-color-alist
-                           org-todo-keywords-1 org-done-keywords org-use-property-inheritance))))
+                           org-todo-keywords-1 org-done-keywords org-use-property-inheritance
+                           org-hide-emphasis-markers org-link-descriptive
+                           org-pretty-entities org-pretty-entities-include-sub-superscripts
+                           org-display-custom-times org-time-stamp-custom-formats))))
          (minute (floor (float-time) 60))
          (cache org-timegrid-org--events-cache))
     (unless (and (not (plist-get org-timegrid-query-options :force))

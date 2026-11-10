@@ -55,6 +55,14 @@ filled by the renderers without changing the event's calendar meaning."
   "Return non-nil when BLOCK belongs on an all-day surface."
   (eq (org-timegrid-block-time-kind block) 'all-day))
 
+(defun org-timegrid-block-display-title (block)
+  "Return BLOCK's visible title, preserving its raw title for editing.
+Backends may supply plain display text in event metadata's :display-title."
+  (let ((event (org-timegrid-block-event block)))
+    (or (and event (not (org-timegrid-block-boundary-edge block))
+             (plist-get (org-timegrid-event-metadata event) :display-title))
+        (org-timegrid-block-title block))))
+
 (defun org-timegrid-event-time-kind (event)
   "Return EVENT's explicit presentation kind."
   (if (org-timegrid-event-all-day event) 'all-day 'timed))
