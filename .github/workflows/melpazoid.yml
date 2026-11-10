@@ -36,4 +36,4 @@ jobs:
           WARN_IS_ERROR: 'false'
           EXIST_OK: 'true'
           RUNNER: 'uv run'
-        run: make -C "$RUNNER_TEMP/melpazoid"
+        run: make -C "$RUNNER_TEMP/melpazoid" DOCKER_OUTPUT=--progress=plain
