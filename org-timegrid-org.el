@@ -586,28 +586,26 @@ distinguishes date-only values from midnight-aligned timed values."
                 (goto-char final-point)))
             (message "Added %s" title)))))))
 
+(defun org-timegrid-org--headline-content (headline)
+  "Return HEADLINE's title and own section, excluding child headings."
+  (append (org-element-property :title headline)
+          (seq-filter (lambda (element)
+                        (eq (org-element-type element) 'section))
+                      (org-element-contents headline))))
+
 (defun org-timegrid-org--headline-has-active-timestamp-p (headline)
-  "Return non-nil when HEADLINE's own section has an active timestamp."
-  (when-let* ((section (seq-find
-                       (lambda (element)
-                         (eq (org-element-type element) 'section))
-                       (org-element-contents headline))))
-    (catch 'active
-      (org-element-map section 'timestamp
-        (lambda (timestamp)
-          (when (memq (org-element-property :type timestamp)
-                      '(active active-range))
-            (throw 'active t))))
-      nil)))
+  "Return non-nil when HEADLINE's title or own section has an active timestamp."
+  (org-element-map (org-timegrid-org--headline-content headline) 'timestamp
+    (lambda (timestamp)
+      (memq (org-element-property :type timestamp) '(active active-range)))
+    nil t))
 
 (defun org-timegrid-org--heading-last-duration (headline)
   "Return HEADLINE's latest timed block duration, when explicitly recorded.
-Only timestamps in the heading's own section count."
-  (let ((section (seq-find (lambda (element)
-                             (eq (org-element-type element) 'section))
-                           (org-element-contents headline)))
+Only timestamps in the heading's title and own section count."
+  (let ((content (org-timegrid-org--headline-content headline))
         latest start)
-    (org-element-map section 'timestamp
+    (org-element-map content 'timestamp
       (lambda (timestamp)
         (when (org-timegrid-org--timestamp-timed-p timestamp)
           (let ((time (org-timegrid-org--timestamp-minutes timestamp nil)))
@@ -626,7 +624,7 @@ with point at the heading.  Return non-nil to include it.  The function
 can inspect tags, properties, or `buffer-file-name'.  Set to `always' to
 offer every heading in `org-timegrid-org-files' and the capture file.
 The default includes unfinished TODO headings and plain headings with
-an active timestamp in their own section.")
+an active timestamp in their title or own section.")
 
 (defun org-timegrid-org-default-entry-filter (headline)
   "Return non-nil when HEADLINE is unfinished and has a TODO or active date."
@@ -1015,6 +1013,12 @@ TITLE and TIME-KIND, when non-nil, replace its title and timestamp kind."
     ;; Keep validation metadata coherent for another optimistic update.
     (let* ((updated (org-timegrid-org--timestamp-at-marker marker))
            (metadata (copy-sequence (org-timegrid-event-metadata event))))
+      ;; Retiming a title timestamp changes every block's heading label.
+      (when (and (not (equal (plist-get metadata :raw-value)
+                             (org-element-property :raw-value updated)))
+                 (with-current-buffer (marker-buffer marker)
+                   (save-excursion (goto-char marker) (org-at-heading-p))))
+        (setq metadata (plist-put metadata :reload-after-edit t)))
       (setf (org-timegrid-event-start event) start
             (org-timegrid-event-end event) end
             (org-timegrid-event-all-day event)
@@ -1540,16 +1544,14 @@ Planned timestamps remain unbounded so repeaters can expand into the range."
                        file headline timestamp (car planning)
                        (org-timegrid-org--timestamp-all-day-p timestamp))
                       headline-events))))
-          (when-let* ((section (cl-find-if
-                               (lambda (element) (eq (org-element-type element) 'section))
-                               (org-element-contents headline))))
+          (let ((content (org-timegrid-org--headline-content headline)))
             (when org-timegrid-org-show-clocks
-              (org-element-map section 'clock
+              (org-element-map content 'clock
                 (lambda (clock)
                   (when-let* ((event (org-timegrid-org--clock-event
                                      file headline clock query-start query-end)))
                     (push event events)))))
-            (org-element-map section 'timestamp
+            (org-element-map content 'timestamp
               (lambda (timestamp)
                 (let ((cancelled
                        (and history

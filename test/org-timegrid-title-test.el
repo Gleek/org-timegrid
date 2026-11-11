@@ -3,6 +3,105 @@
 (require 'ert)
 (require 'org-timegrid-org)
 
+(ert-deftest org-timegrid-title-timestamps ()
+  (dolist (stamp '("<2026-11-10 Tue 10:00-11:00>"
+                   "<2026-11-10 Tue>"
+                   "<2026-11-10 Tue 10:00 +1w>"))
+    (with-temp-buffer
+      (org-mode)
+      (insert "* Meeting " stamp "\n** Child\n<2026-11-11 Wed 12:00>\n")
+      (let ((events (org-timegrid-org--buffer-events "test.org")))
+        (should (= (length events) 2))
+        (should (equal (org-timegrid-event-title (car events))
+                       (concat "Meeting " stamp)))
+        (should (equal (plist-get (org-timegrid-event-metadata (car events))
+                                 :raw-value)
+                       stamp))
+        (should (equal (org-timegrid-event-title (cadr events)) "Child"))))))
+
+(ert-deftest org-timegrid-title-retime-and-add-body-block ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Meeting <2026-11-10 Tue 10:00-11:00>\n")
+    (let* ((org-timegrid-org-auto-save nil)
+           (event (car (org-timegrid-org--buffer-events "test.org")))
+           (start (+ 60 (org-timegrid-event-start event)))
+           (end (+ 60 (org-timegrid-event-end event))))
+      (org-timegrid-org--update-anchor-range event start end)
+      (should (equal (buffer-string)
+                     "* Meeting <2026-11-10 Tue 11:00-12:00>\n"))
+      (org-timegrid-org--add-range (plist-get (org-timegrid-event-source event) :marker)
+                                   (+ start 120) (+ end 120))
+      (should (equal (buffer-string)
+                     (concat "* Meeting <2026-11-10 Tue 11:00-12:00>\n"
+                             "<2026-11-10 Tue 13:00-14:00>\n")))
+      (let ((events (org-timegrid-org--buffer-events "test.org")))
+        (should (= (length events) 2))
+        (should (equal (mapcar #'org-timegrid-event-start events)
+                       (list start (+ start 120))))
+        (should (equal (org-timegrid-event-title (car events))
+                       (org-timegrid-event-title (cadr events))))))))
+
+(ert-deftest org-timegrid-title-completion-and-duration ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Parent\n** Meeting <2026-11-10 Tue 10:00-11:00>\n"
+            "** Inactive [2026-11-10 Tue 10:00-11:00]\n")
+    (let* ((headlines (org-element-map (org-element-parse-buffer) 'headline #'identity))
+           (meeting (cadr headlines)))
+      (should-not (org-timegrid-org-default-entry-filter (car headlines)))
+      (should (org-timegrid-org-default-entry-filter meeting))
+      (should (= 60 (org-timegrid-org--heading-last-duration meeting)))
+      (should-not (org-timegrid-org-default-entry-filter (nth 2 headlines))))))
+
+(ert-deftest org-timegrid-title-retime-refreshes-all-block-labels ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Meeting <2026-11-10 Tue 10:00-11:00>\n"
+            "<2026-11-10 Tue 13:00-14:00>\n")
+    (let ((source (current-buffer))
+          (org-timegrid-org-auto-save nil))
+      (with-temp-buffer
+        (let* ((org-timegrid--backend
+                (org-timegrid-backend-create
+                 :list-function (lambda (&rest _)
+                                  (with-current-buffer source
+                                    (org-timegrid-org--buffer-events "test.org")))
+                 :update-function #'org-timegrid-org--update-event-range))
+               (org-timegrid--state
+                (org-timegrid--load-state
+                 (calendar-absolute-from-gregorian '(11 10 2026))))
+               (block (copy-org-timegrid-block
+                       (car (org-timegrid--calendar-state-blocks org-timegrid--state)))))
+          (cl-incf (org-timegrid-block-start block) 60)
+          (cl-incf (org-timegrid-block-end block) 60)
+          (cl-letf (((symbol-function 'org-timegrid--update)
+                     (lambda (change &optional _) (funcall change)))
+                    ((symbol-function 'org-timegrid--goto-block) #'ignore))
+            (org-timegrid--backend-update block))
+          (let ((blocks (org-timegrid--calendar-state-blocks org-timegrid--state)))
+            (should (= (length blocks) 2))
+            (dolist (updated blocks)
+              (should (equal (org-timegrid-block-title updated)
+                             "Meeting <2026-11-10 Tue 11:00-12:00>"))
+              (should (string-match-p "11:00-12:00"
+                                      (org-timegrid-block-display-title updated))))))))))
+
+(ert-deftest org-timegrid-title-reload-only-for-changed-title-timestamps ()
+  (dolist (example '((0 0 nil) (0 60 t) (1 60 nil)))
+    (with-temp-buffer
+      (org-mode)
+      (insert "* Meeting <2026-11-10 Tue 10:00-11:00>\n"
+              "<2026-11-10 Tue 13:00-14:00>\n")
+      (let* ((org-timegrid-org-auto-save nil)
+             (event (nth (car example) (org-timegrid-org--buffer-events "test.org")))
+             (delta (cadr example)))
+        (org-timegrid-org--update-anchor-range
+         event (+ (org-timegrid-event-start event) delta)
+         (+ (org-timegrid-event-end event) delta))
+        (should (eq (plist-get (org-timegrid-event-metadata event) :reload-after-edit)
+                    (nth 2 example)))))))
+
 (ert-deftest org-timegrid-title-keeps-markup-for-editing ()
   (with-temp-buffer
     (org-mode)
