@@ -282,10 +282,10 @@ accepts:
         ("urgent" . "#b4d74a")))
 ```
 
-The named colours are `blue`, `cyan`, `teal`, `indigo`, `purple`, `pink`,
-`red`, `orange`, `yellow`, `lime`, `green`, `brown`, and `graphite`. The first
-mapped tag wins. Set `org-timegrid-org-color-function` to colour by TODO state,
-priority, property, or file.
+The named colours are `blue`, `cyan`, `teal`, `indigo`, `purple`, `pink`, `red`, `orange`, `yellow`,
+`lime`, `green`, `brown`, and `graphite`. The last mapped tag wins, checking file tags, ancestor
+tags, then local tags. Set `org-timegrid-org-color-function` to colour by TODO state, priority,
+property, or file.
 
 ## Configuration
 

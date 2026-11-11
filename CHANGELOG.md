@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Respect Org tag inheritance for calendar colours and tag exclusions.
+- Use the last mapped tag for colours, checking file tags, ancestor tags,
+  then local tags. Previously, the first mapped local tag won.
 - Show active timestamps in heading titles as calendar blocks, with labels
   updated after retiming.
 - Display calendar titles using Org's visible text for links, emphasis,

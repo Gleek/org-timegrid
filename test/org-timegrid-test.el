@@ -248,6 +248,81 @@
       (let ((org-timegrid-org-exclude-tags '("private")))
         (should-not (org-timegrid-org-default-filter headline timestamp))))))
 
+(ert-deftest org-timegrid-tags-inheritance-and-color-order ()
+  (with-temp-buffer
+    (insert "#+FILETAGS: :file:\n* Parent :work:\n** Child :personal:urgent:unmapped:\n<2026-11-11 Wed 10:00-11:00>\n")
+    (org-mode)
+    (let ((org-timegrid-org-tag-color-alist
+           '(("file" . green) ("work" . blue) ("personal" . red) ("urgent" . orange))))
+      (dolist (case '((t nil ("file" "work" "personal" "urgent" "unmapped") orange)
+                      (nil nil ("personal" "urgent" "unmapped") orange)
+                      (("work") nil ("work" "personal" "urgent" "unmapped") orange)
+                      ("work" nil ("work" "personal" "urgent" "unmapped") orange)
+                      (t ("work") ("file" "personal" "urgent" "unmapped") orange)))
+        (let* ((org-use-tag-inheritance (nth 0 case))
+               (org-tags-exclude-from-inheritance (nth 1 case))
+               (event (car (org-timegrid-org--buffer-events "tags.org"))))
+          (should (equal (org-timegrid-event-tags event) (nth 2 case)))
+          (should (eq (org-timegrid-event-color event) (nth 3 case))))))
+    ;; Without mapped local tags, the nearest mapped ancestor wins.
+    (let ((org-use-tag-inheritance t)
+          (org-tags-exclude-from-inheritance nil))
+      (dolist (mapping '((("file" . green) ("work" . blue))
+                         (("file" . green))
+                         nil))
+        (let ((org-timegrid-org-tag-color-alist mapping))
+          (should (eq (org-timegrid-event-color
+                       (car (org-timegrid-org--buffer-events "tags.org")))
+                      (cond ((assoc "work" mapping) 'blue)
+                            ((assoc "file" mapping) 'green)))))))))
+
+(ert-deftest org-timegrid-tags-exclusions-follow-inheritance ()
+  (with-temp-buffer
+    (insert "* Parent :private:\n** Child\n<2026-11-11 Wed 10:00-11:00>\n")
+    (org-mode)
+    (let ((org-timegrid-org-exclude-tags '("private"))
+          (org-use-tag-inheritance t)
+          (org-tags-exclude-from-inheritance nil))
+      (should-not (org-timegrid-org--buffer-events "tags.org"))
+      (let ((org-use-tag-inheritance nil))
+        (should (= 1 (length (org-timegrid-org--buffer-events "tags.org")))))
+      (let ((org-tags-exclude-from-inheritance '("private")))
+        (should (= 1 (length (org-timegrid-org--buffer-events "tags.org")))))
+      (let ((org-timegrid-org-filter-function (lambda (_headline _timestamp) t)))
+        (should (= 1 (length (org-timegrid-org--buffer-events "tags.org"))))))))
+
+(ert-deftest org-timegrid-tags-resolved-once-per-heading ()
+  (dolist (tags '(" :work:" ""))
+    (with-temp-buffer
+      (insert "* Heading" tags "\n<2026-11-11 Wed 10:00-11:00>\n<2026-11-11 Wed 12:00-13:00>\n")
+      (org-mode)
+      (let ((original (symbol-function 'org-get-tags))
+            (calls 0))
+        (cl-letf (((symbol-function 'org-get-tags)
+                   (lambda (&rest args)
+                     (cl-incf calls)
+                     (apply original args))))
+          (should (= 2 (length (org-timegrid-org--buffer-events "tags.org"))))
+          (should (= calls 1)))))))
+
+(ert-deftest org-timegrid-tags-force-refresh-rereads-settings ()
+  (with-temp-buffer
+    (insert "* Parent :work:\n** Child\n<2026-11-11 Wed 10:00-11:00>\n")
+    (org-mode)
+    (let* ((org-use-tag-inheritance t)
+           (org-tags-exclude-from-inheritance nil)
+           (org-timegrid-org-tag-color-alist '(("work" . blue)))
+           (org-timegrid-query-options nil)
+           (start (org-timegrid-org--timestamp-minutes
+                   (org-element-map (org-element-parse-buffer) 'timestamp
+                     #'identity nil t) nil)))
+      (should (eq 'blue (org-timegrid-event-color
+                         (car (org-timegrid-org--cached-events "tags.org" start (+ start 60))))))
+      (let ((org-use-tag-inheritance nil)
+            (org-timegrid-query-options '(:force t)))
+        (should-not (org-timegrid-event-color
+                     (car (org-timegrid-org--cached-events "tags.org" start (+ start 60)))))))))
+
 (ert-deftest org-timegrid-test-org-custom-filter-keeps-time-gate ()
   (with-temp-buffer
     (org-mode)

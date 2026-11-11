@@ -157,7 +157,8 @@ DELETING selects the deletion prompt."
 
 (defcustom org-timegrid-org-exclude-tags nil
   "Org tags whose headings should not appear on the calendar.
-A heading is excluded when it has any tag in this list."
+A heading is excluded when it has any tag in this list, including inherited
+tags according to Org's tag inheritance settings."
   :type '(repeat string))
 
 (defvar org-timegrid-org-filter-function
@@ -168,6 +169,17 @@ returns non-nil to keep the timestamp.  Eligible timestamps are active dates
 and, when `org-timegrid-org-show-clocks' is non-nil, CLOCK record values.
 The default function observes all Org filtering options in this group.")
 
+(defun org-timegrid-org--tags (headline)
+  "Return HEADLINE's Org tags, resolving inheritance once per parsed heading."
+  (let ((cached (org-element-property :org-timegrid-tags headline)))
+    (unless cached
+      ;; The wrapper also caches headings without tags.
+      (setq cached (cons t (save-excursion
+                             (goto-char (org-element-property :begin headline))
+                             (org-get-tags))))
+      (org-element-put-property headline :org-timegrid-tags cached))
+    (cdr cached)))
+
 (defun org-timegrid-org-default-filter (headline timestamp)
   "Return non-nil when HEADLINE's TIMESTAMP passes the standard filters."
   (let ((todo (org-element-property :todo-keyword headline)))
@@ -176,7 +188,7 @@ The default function observes all Org filtering options in this group.")
          (or org-timegrid-org-show-repeaters
              (not (org-element-property :repeater-type timestamp)))
          (not (seq-intersection org-timegrid-org-exclude-tags
-                                (org-element-property :tags headline))))))
+                                (org-timegrid-org--tags headline))))))
 
 (defcustom org-timegrid-org-auto-save nil
   "Whether calendar edits immediately save their affected Org files.
@@ -188,8 +200,9 @@ edit succeeds."
 (defcustom org-timegrid-org-tag-color-alist nil
   "Map Org tag strings to calendar colours.
 A value is a name in `org-timegrid-colors' or any colour string.  Tags
-are checked in the order they appear on the heading, so the first mapped
-tag wins and a heading may carry others freely.  An unmapped heading uses
+are checked in Org order: file tags, ancestor tags, then local tags,
+according to Org's tag inheritance settings.  The last mapped tag wins.
+An unmapped heading uses
 `org-timegrid-default-color'; colour means something on a calendar, so
 inventing one per tag would be noise."
   :type '(alist :key-type (string :tag "Org tag")
@@ -203,10 +216,11 @@ It receives the `org-element' headline, so it can colour by TODO state,
 priority, property, or file as easily as by tag.")
 
 (defun org-timegrid-org-tag-color (headline)
-  "Return the colour mapped to HEADLINE's first mapped tag, or nil."
-  (seq-some (lambda (tag)
-              (cdr (assoc tag org-timegrid-org-tag-color-alist)))
-            (org-element-property :tags headline)))
+  "Return the colour mapped to HEADLINE's last mapped Org tag, or nil."
+  (let (color)
+    (dolist (tag (org-timegrid-org--tags headline) color)
+      (setq color (or (cdr (assoc tag org-timegrid-org-tag-color-alist))
+                      color)))))
 
 (defun org-timegrid-org--files ()
   "Return the existing, deduplicated Org files to query."
@@ -1380,7 +1394,7 @@ ALL-DAY records that the timestamp has dates but no times."
               (org-timegrid-org--timestamp-all-day-minutes timestamp t)
             (org-timegrid-org--timestamp-minutes timestamp t))
      :all-day all-day
-     :tags (org-element-property :tags headline)
+     :tags (org-timegrid-org--tags headline)
      ;; `org-timegrid-org--mark-latest-done' promotes this to `done'
      ;; on whichever of the heading's events is latest.
      :state todo
