@@ -1,6 +1,7 @@
 # org-timegrid
 
 [![MELPA](https://melpa.org/packages/org-timegrid-badge.svg)](https://melpa.org/#/org-timegrid)
+[![Assisted by LLMs](https://img.shields.io/badge/Assisted%20by%20LLMs-000000)](#ai-usage)
 
 `org-timegrid` is an SVG calendar for Org mode. It reads active timestamps
 and clock records from your Org files and writes edits back to their source headings.
@@ -383,6 +384,15 @@ I use these alongside `org-timegrid`:
   (setq org-upcoming-modeline-only-show-soon t
         org-upcoming-modeline-show-running t)
   ```
+
+### Calendar synchronization
+
+- [org-gcal](https://github.com/kidd/org-gcal.el) for syncing Org events
+  with Google Calendar.
+- [org-caldav](https://github.com/dengste/org-caldav) for syncing Org events
+  with CalDAV calendars.
+- [org-outlook](https://github.com/ifitzpat/org-outlook) for syncing Org events
+  with Outlook.
 
 ## Development
 
