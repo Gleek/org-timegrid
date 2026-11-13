@@ -211,7 +211,10 @@ finite horizon.  Events in the horizon are fetched once per search.")
 
 (defun org-timegrid-isearch--start (backward)
   "Search block titles natively, going BACKWARD when non-nil."
+  ;; Lazy highlighting cannot highlight SVG titles, and its `sit-for' redraws
+  ;; the hidden index before our post-command hook restores the viewport.
   (setq-local
+   isearch-lazy-highlight nil
    org-timegrid-isearch--origin
    (list (org-timegrid--calendar-state-week-start org-timegrid--state)
          (and (org-timegrid--cursor)

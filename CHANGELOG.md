@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Prevent calendar flicker while typing in incremental search.
 - Respect Org tag inheritance for calendar colours and tag exclusions.
 - Use the last mapped tag for colours, checking file tags, ancestor tags,
   then local tags. Previously, the first mapped local tag won.
