@@ -274,10 +274,11 @@ after the reload is dropped.  Use STATE when already fetched."
             (org-timegrid--set-cursor
              day (org-timegrid--cursor-state-minute cursor) lane)))))))
 
-(defun org-timegrid--proposal (origin target copy-kind)
+(defun org-timegrid--proposal (origin target copy-kind &optional push-context)
   "Return a drag proposal from ORIGIN to TARGET.
 COPY-KIND is nil for a move, `duplicate-entry' for an independent copy,
-or `add-occurrence' for another time on the source entry."
+or `add-occurrence' for another time on the source entry.
+PUSH-CONTEXT makes this a push instead of an ordinary drag."
   (let* ((id (plist-get origin :block-id))
          (copying (memq copy-kind '(duplicate-entry add-occurrence)))
          (origin-surface (or (plist-get origin :surface) 'grid))
@@ -292,6 +293,12 @@ or `add-occurrence' for another time on the source entry."
           (null target-day) (null target-minute))
       (org-timegrid--operation-create
        :error "Release inside a calendar cell"))
+     (push-context
+      (if (eq target-surface 'grid)
+          (org-timegrid--push-proposal
+           push-context (- (+ (* target-day 1440) target-minute)
+                           (+ (* origin-day 1440) origin-minute)))
+        (org-timegrid--operation-create :error "Release inside the time grid")))
      ((and (null id) (not (eq origin-surface target-surface)))
       (org-timegrid--operation-create
        :error "Create a range on one calendar surface"))
@@ -356,6 +363,87 @@ or `add-occurrence' for another time on the source entry."
              :kind (if copying copy-kind (if edge 'resize 'move)) :edge edge
              :block (org-timegrid--transform-block-range source delta edge)
              :replace-id (and (not copying) id)))))))))
+
+(defun org-timegrid--push-context (block)
+  "Retain BLOCK's original event and visible overlap groups for one gesture."
+  (let* ((event (and block (org-timegrid-block-event block)))
+         (metadata (and event (org-timegrid-event-metadata event))))
+    (unless (functionp (org-timegrid-backend-update-function org-timegrid--backend))
+      (user-error "This backend cannot move calendar entries"))
+    (unless (and event (not (org-timegrid-block-all-day-p block)))
+      (user-error "Select a timed task to push"))
+    (when (or (plist-get metadata :repeater-type) (plist-get metadata :clock))
+      (user-error "Use ordinary movement for repeating tasks and clocks"))
+    (cons event
+          (org-timegrid--push-groups
+           (seq-remove
+            (lambda (other)
+              (or (and (< (org-timegrid-event-start other) (org-timegrid-event-end event))
+                       (> (org-timegrid-event-end other) (org-timegrid-event-start event)))
+                  (org-timegrid-event-all-day other)
+                  (plist-get (org-timegrid-event-metadata other) :repeater-type)))
+            (org-timegrid--calendar-state-events org-timegrid--state))))))
+
+(defun org-timegrid--push-groups (events)
+  "Group EVENTS by connected strict overlaps, in chronological order.
+Each group is (START END EVENTS); merely touching tasks remain separate."
+  (let (groups)
+    (dolist (event (sort events (lambda (a b) (< (org-timegrid-event-start a)
+                                               (org-timegrid-event-start b)))))
+      (let ((start (org-timegrid-event-start event))
+            (end (org-timegrid-event-end event)))
+        (if (and groups (< start (cadar groups)))
+            (setf (cadar groups) (max end (cadar groups))
+                  (nth 2 (car groups)) (cons event (nth 2 (car groups))))
+          (push (list start end (list event)) groups))))
+    (nreverse groups)))
+
+(defun org-timegrid--push-proposal (context delta)
+  "Push CONTEXT's task by DELTA minutes, absorbing gaps in either direction.
+Rebuild from original ranges every time and stop at the visible date limits."
+  (catch 'push-barrier
+    (let* ((root (car context))
+           (week (org-timegrid--calendar-state-week-start org-timegrid--state))
+           (low (* week 1440))
+           (high (+ low (* org-timegrid-days 1440)))
+           (start (org-timegrid-event-start root))
+           (end (org-timegrid-event-end root))
+           (delta (max (- low start) (min delta (- high end))))
+           (forward (>= delta 0))
+           (frontier (+ (if forward end start) delta))
+           (moves (list (cons root delta))))
+      (unless (<= low start end high)
+        (user-error "Push tasks fully inside the visible dates"))
+      (dolist (group (if forward (cdr context) (reverse (cdr context))))
+        (pcase-let* ((`(,from ,to ,members) group)
+                     (shift (if forward (- frontier from) (- frontier to))))
+          (when (if forward (and (>= from end) (> shift 0))
+                  (and (<= to start) (< shift 0)))
+            (when (or (< from low) (> to high)
+                      (seq-some (lambda (event)
+                                  (plist-get (org-timegrid-event-metadata event) :clock))
+                                members))
+              (throw 'push-barrier (org-timegrid--push-proposal context (- delta shift))))
+            (let ((overflow (if forward (max 0 (- (+ to shift) high))
+                              (min 0 (- (+ from shift) low)))))
+              (unless (zerop overflow)
+                (throw 'push-barrier
+                       (org-timegrid--push-proposal context (- delta overflow)))))
+            (dolist (event members) (push (cons event shift) moves))
+            (setq frontier (+ (if forward to from) shift)))))
+      (let ((blocks
+             (mapcar (lambda (move)
+                       (let* ((event (car move))
+                              (block (org-timegrid-event-to-block event week))
+                              (offset (- (cdr move) low)))
+                         (org-timegrid--set-absolute-range
+                          block (+ (org-timegrid-event-start event) offset)
+                          (+ (org-timegrid-event-end event) offset))
+                         (setf (org-timegrid-block-preview block) t)
+                         block))
+                     (nreverse moves))))
+        (org-timegrid--operation-create :kind 'push :block (car blocks) :blocks blocks
+                                        :replace-id (org-timegrid-event-id root))))))
 
 (defun org-timegrid-day-blocks (backend absolute-day)
   "Return BACKEND blocks on ABSOLUTE-DAY, clipped to that day.
@@ -646,26 +734,27 @@ SOURCE-EVENT identifies an entry to reuse, and TARGET selects its destination."
             (org-timegrid--call-update
              updater event (car range) (cdr range) nil
              (org-timegrid-block-time-kind block))
-            (setf (org-timegrid-event-start event) (car range)
-                  (org-timegrid-event-end event) (cdr range)
-                  (org-timegrid-event-all-day event)
-                  (eq (org-timegrid-block-time-kind block) 'all-day))
-            (setf (org-timegrid--calendar-state-events org-timegrid--state)
-                  (mapcar (lambda (old)
-                            (if (equal (org-timegrid-event-id old) (org-timegrid-event-id event))
-                                event old))
-                          (org-timegrid--calendar-state-events org-timegrid--state)))
-            (if (plist-get (org-timegrid-event-metadata event) :reload-after-edit)
-                (progn
-                  (org-timegrid--refresh-data)
-                  (when-let* ((updated (org-timegrid--block (org-timegrid-event-id event))))
-                    (org-timegrid--goto-block updated)))
-              (setf (org-timegrid--calendar-state-blocks org-timegrid--state)
-                    (org-timegrid-events-to-blocks
-                     (org-timegrid--calendar-state-events org-timegrid--state)
-                     (org-timegrid--calendar-state-week-start org-timegrid--state)))))
+            (unless org-timegrid--defer-refresh
+              (setf (org-timegrid-event-start event) (car range)
+                    (org-timegrid-event-end event) (cdr range)
+                    (org-timegrid-event-all-day event)
+                    (eq (org-timegrid-block-time-kind block) 'all-day))
+              (setf (org-timegrid--calendar-state-events org-timegrid--state)
+                    (mapcar (lambda (old)
+                              (if (equal (org-timegrid-event-id old) (org-timegrid-event-id event))
+                                  event old))
+                            (org-timegrid--calendar-state-events org-timegrid--state)))
+              (if (plist-get (org-timegrid-event-metadata event) :reload-after-edit)
+                  (progn
+                    (org-timegrid--refresh-data)
+                    (when-let* ((updated (org-timegrid--block (org-timegrid-event-id event))))
+                      (org-timegrid--goto-block updated)))
+                (setf (org-timegrid--calendar-state-blocks org-timegrid--state)
+                      (org-timegrid-events-to-blocks
+                       (org-timegrid--calendar-state-events org-timegrid--state)
+                       (org-timegrid--calendar-state-week-start org-timegrid--state))))))
         (error
-         (org-timegrid--refresh-data)
+         (unless org-timegrid--defer-refresh (org-timegrid--refresh-data))
          (signal (car error-data) (cdr error-data)))))))
 
 (defun org-timegrid--apply (proposal)
@@ -679,6 +768,15 @@ SOURCE-EVENT identifies an entry to reuse, and TARGET selects its destination."
      (error-message
       (org-timegrid--clear-preview)
       (message "%s" error-message))
+     ((eq kind 'push)
+      (org-timegrid--transaction
+       (lambda ()
+         (dolist (moved (org-timegrid--operation-blocks proposal))
+           (let ((event (org-timegrid-block-event moved)))
+             (unless (equal (org-timegrid--block-absolute-range moved)
+                            (cons (org-timegrid-event-start event) (org-timegrid-event-end event)))
+               (org-timegrid--backend-update moved))))
+         (setf (org-timegrid--calendar-state-preview org-timegrid--state) nil))))
      ((eq kind 'create)
       (let (entry)
         (unwind-protect
@@ -1028,12 +1126,15 @@ Leave the first non-motion event for the gesture loop to process."
     latest))
 
 (defun org-timegrid-press (event)
-  "Track a complete create, move, duplicate, occurrence, or resize EVENT."
+  "Track a create, move, push, duplicate, occurrence, or resize EVENT."
   (interactive "@e")
   (when mark-active (deactivate-mark))
   (let* ((origin-position (event-start event))
          (origin (org-timegrid--target origin-position))
          (modifiers (event-modifiers event))
+         (push-context (and (memq 'meta modifiers)
+                            (org-timegrid--push-context
+                             (org-timegrid--block (plist-get origin :block-id)))))
          ;; Super, which is the Option key under the usual macOS mapping,
          ;; makes an independent entry.  Shift retains the source entry.
          (copy-kind (cond ((memq 'super modifiers) 'duplicate-entry)
@@ -1055,7 +1156,7 @@ Leave the first non-motion event for the gesture loop to process."
        #'org-timegrid--mouse-position-xy
        #'org-timegrid--mouse-target
        (lambda (from to)
-         (org-timegrid--proposal from to copy-kind))
+         (org-timegrid--proposal from to copy-kind push-context))
        (lambda (position)
          (org-timegrid-click (list 'mouse-1 position)))))))
 
@@ -1621,11 +1722,18 @@ lane after an edit changes its layout."
 
 (defun org-timegrid--commit-before-unrelated-command ()
   "Commit a keyboard edit before running a command outside its edit family."
+  (when (and org-timegrid--keyboard-edit (eq this-command 'org-timegrid-dismiss))
+    (when (timerp org-timegrid--keyboard-edit-timer)
+      (cancel-timer org-timegrid--keyboard-edit-timer))
+    (setq org-timegrid--keyboard-edit nil org-timegrid--keyboard-edit-timer nil)
+    (org-timegrid--clear-preview))
   (when (not (memq this-command
                         '(org-timegrid-move-later
                           org-timegrid-move-earlier
                           org-timegrid-move-next-day
                           org-timegrid-move-previous-day
+                          org-timegrid-push-later
+                          org-timegrid-push-earlier
                           org-timegrid-grow-end
                           org-timegrid-shrink-end
                           org-timegrid-grow-start
@@ -1637,23 +1745,34 @@ lane after an edit changes its layout."
     (org-timegrid--commit-keyboard-edit)
     (setq org-timegrid--edit-context nil)))
 
-(defun org-timegrid--edit-selected (minutes days edge)
-  "Shift the selected block by MINUTES and DAYS, resizing EDGE when provided."
+(defun org-timegrid--edit-selected (minutes days edge &optional push)
+  "Shift the selected block by MINUTES and DAYS, resizing EDGE when provided.
+With PUSH, push newly encountered tasks instead of moving just this block."
   (org-timegrid--with-update nil
+    (when (and org-timegrid--keyboard-edit
+               (not (eq (and push t) (eq (org-timegrid--operation-kind org-timegrid--keyboard-edit) 'push))))
+      (org-timegrid--commit-keyboard-edit))
     (let* ((block (or (and org-timegrid--keyboard-edit
                            (org-timegrid--operation-block org-timegrid--keyboard-edit))
                       (org-timegrid--selected-block)))
            (updater (org-timegrid-backend-update-function org-timegrid--backend)))
       (unless (and (org-timegrid-block-event block) (functionp updater))
         (user-error "This backend cannot move or resize calendar entries"))
-      (org-timegrid--prepare-block-edit block)
-      (let* ((proposal (if (and (org-timegrid-block-all-day-p block) (/= minutes 0))
-                           (org-timegrid--all-day-to-timed-proposal block)
-                         (org-timegrid--edit-proposal block minutes days edge)))
+      (unless push (org-timegrid--prepare-block-edit block))
+      (let* ((proposal
+              (cond
+               (push
+                (org-timegrid--push-proposal
+                 (org-timegrid--push-context block)
+                 (+ minutes (- (car (org-timegrid--block-absolute-range block))
+                               (org-timegrid-event-start (org-timegrid-block-event block))))))
+               ((and (org-timegrid-block-all-day-p block) (/= minutes 0))
+                (org-timegrid--all-day-to-timed-proposal block))
+               (t (org-timegrid--edit-proposal block minutes days edge))))
              (moved (org-timegrid--operation-block proposal)))
         (setq org-timegrid--keyboard-edit proposal)
-        (setf (org-timegrid--calendar-state-preview org-timegrid--state) proposal
-              (org-timegrid--calendar-state-cursor-visible org-timegrid--state) t)
+        (org-timegrid--set-preview proposal)
+        (setf (org-timegrid--calendar-state-cursor-visible org-timegrid--state) t)
         (if (org-timegrid-block-all-day-p moved)
             (let ((laid-out (cl-find (org-timegrid-block-id moved)
                                      (org-timegrid--all-day-layout)
@@ -1704,6 +1823,17 @@ consecutive days instead of stacking every copy on the same one."
   (interactive "p")
   (org-timegrid--edit-selected
    (* (or count 1) org-timegrid-slot-minutes) 0 nil))
+
+(defun org-timegrid-push-later (&optional count)
+  "Push the selected task COUNT slots later, moving tasks it reaches."
+  (interactive "p")
+  (org-timegrid--edit-selected
+   (* (or count 1) org-timegrid-slot-minutes) 0 nil t))
+
+(defun org-timegrid-push-earlier (&optional count)
+  "Push the selected task COUNT slots earlier, moving tasks it reaches."
+  (interactive "p")
+  (org-timegrid-push-later (- (or count 1))))
 
 (defun org-timegrid-move-earlier (&optional count)
   "Move the selected block COUNT calendar slots earlier."
@@ -2357,6 +2487,7 @@ not hold for a buffer made of tall image glyphs."
                 #'org-timegrid-press)
     (define-key map [double-down-mouse-1]
                 #'org-timegrid-ignore-double-press)
+    (define-key map [M-down-mouse-1] #'org-timegrid-press)
     (define-key map [s-down-mouse-1]
                 #'org-timegrid-press)
     (define-key map [S-down-mouse-1]
@@ -2377,6 +2508,7 @@ not hold for a buffer made of tall image glyphs."
                   #'org-timegrid-press)
       (define-key map (vector area 'double-down-mouse-1)
                   #'org-timegrid-ignore-double-press)
+      (define-key map (vector area 'M-down-mouse-1) #'org-timegrid-press)
       (define-key map (vector area 's-down-mouse-1)
                   #'org-timegrid-press)
       (define-key map (vector area 'S-down-mouse-1)
@@ -2463,6 +2595,8 @@ not hold for a buffer made of tall image glyphs."
     (keymap-set map "RET" #'org-timegrid-open-at-cursor)
     (keymap-set map "C-g" #'org-timegrid-dismiss)
     ;; Keyboard editing.
+    (keymap-set map "M-S-<down>" #'org-timegrid-push-later)
+    (keymap-set map "M-S-<up>" #'org-timegrid-push-earlier)
     (keymap-set map "M-<down>" #'org-timegrid-move-later)
     (keymap-set map "M-<up>" #'org-timegrid-move-earlier)
     (keymap-set map "M-<right>" #'org-timegrid-move-next-day)

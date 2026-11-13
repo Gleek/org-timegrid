@@ -722,23 +722,17 @@ Return nodes in paint order."
 (defun org-timegrid--effective-blocks ()
   "Return per-day display segments with the current preview applied."
   (let* ((preview (org-timegrid--calendar-state-preview org-timegrid--state))
-         (preview-block (and preview
-                             (org-timegrid--operation-block preview)))
-         (timed-preview (and preview-block
-                             (not (org-timegrid-block-all-day-p
-                                   preview-block))))
-         (replace-id (and preview
-                          timed-preview
-                          (org-timegrid--operation-replace-id preview)))
-         (blocks (org-timegrid--timed-blocks)))
+         (preview-block (and preview (org-timegrid--operation-block preview)))
+         (previews (and preview-block
+                        (if (eq (org-timegrid--operation-kind preview) 'push)
+                            (org-timegrid--operation-blocks preview)
+                          (list preview-block))))
+         (ids (org-timegrid--operation-replaced-ids preview)))
     (mapcan
      #'org-timegrid--display-segments
-     (if (null timed-preview)
-         blocks
-       (append (if replace-id
-                   (cl-remove replace-id blocks :key #'org-timegrid-block-id :test #'equal)
-                 blocks)
-               (list preview-block))))))
+     (append (seq-remove (lambda (block) (member (org-timegrid-block-id block) ids))
+                         (org-timegrid--timed-blocks))
+             (seq-remove #'org-timegrid-block-all-day-p previews)))))
 
 (defun org-timegrid--canvas-width ()
   "Return the shared SVG width used by rendering and hit testing."

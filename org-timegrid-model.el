@@ -254,7 +254,15 @@ Existing backend listing functions still receive just START and END."
 (cl-defstruct (org-timegrid--operation
                (:constructor org-timegrid--operation-create))
   "A proposed calendar mutation and its preview BLOCK."
-  kind block replace-id error edge handle)
+  kind block replace-id error edge handle blocks)
+
+(defun org-timegrid--operation-replaced-ids (operation)
+  "Return the source ids hidden by OPERATION's preview."
+  (when operation
+    (if (eq (org-timegrid--operation-kind operation) 'push)
+        (mapcar #'org-timegrid-block-id (org-timegrid--operation-blocks operation))
+      (when (org-timegrid--operation-replace-id operation)
+        (list (org-timegrid--operation-replace-id operation))))))
 
 (cl-defstruct (org-timegrid--calendar-state
                (:constructor org-timegrid--calendar-state-create))

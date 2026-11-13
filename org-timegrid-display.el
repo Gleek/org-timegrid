@@ -513,8 +513,8 @@ With SNAPSHOT, copy event records before retaining the key."
                 (org-timegrid--cached-view-header-geometry view) org-timegrid--header-geometry))
         header))))
 
-(defun org-timegrid--cache-static-tiles (&optional excluded-id)
-  "Restore a nearby view, hiding EXCLUDED-ID without relaying out its neighbours."
+(defun org-timegrid--cache-static-tiles (&optional excluded-ids)
+  "Restore a nearby view, hiding EXCLUDED-IDS without relaying out its neighbours."
   (dolist (tile org-timegrid--excluded-tiles)
     (org-timegrid--retire-image (aref org-timegrid--static-images tile)))
   (setq org-timegrid--excluded-tiles nil)
@@ -541,18 +541,19 @@ With SNAPSHOT, copy event records before retaining the key."
             (aset org-timegrid--static-images tile (org-timegrid--make-tile-image tile))))))
     (setf (org-timegrid--cached-view-fields view)
           (mapcar (lambda (name) (cons name (symbol-value name))) org-timegrid--view-fields)))
-  (when excluded-id
+  (when excluded-ids
     ;; Keep neighbouring blocks steady during a drag.  Only cells occupied by
     ;; its source need a new background; the cached normal view stays intact.
     (setq org-timegrid--static-images (copy-sequence org-timegrid--static-images)
           org-timegrid--static-fragments (copy-sequence org-timegrid--static-fragments)
-          org-timegrid--base-excluded-id excluded-id
+          org-timegrid--base-excluded-id excluded-ids
           org-timegrid--geometry
-          (cl-remove excluded-id org-timegrid--geometry :key (lambda (g) (plist-get g :id)) :test #'equal)
+          (seq-remove (lambda (g) (member (plist-get g :id) excluded-ids))
+                      org-timegrid--geometry)
           org-timegrid--hotspots (org-timegrid--image-map))
     (let (changed)
       (dolist (fragment org-timegrid--block-fragments)
-        (when (equal excluded-id (plist-get (car fragment) :id))
+        (when (member (plist-get (car fragment) :id) excluded-ids)
           (dolist (tile (org-timegrid--geometry-tiles (car fragment)))
             (aset org-timegrid--static-fragments tile
                   (string-replace (cdr fragment) "" (aref org-timegrid--static-fragments tile)))
@@ -707,7 +708,7 @@ Both live rendering and prefetch consume this same patch."
 (defun org-timegrid--render-dynamic ()
   "Apply the current scene's changed tiles without forcing redisplay."
   (let* ((preview (org-timegrid--calendar-state-preview org-timegrid--state))
-         (excluded (and preview (org-timegrid--operation-replace-id preview))))
+         (excluded (org-timegrid--operation-replaced-ids preview)))
     (when (and (vectorp org-timegrid--tile-markers)
                (not (equal excluded org-timegrid--base-excluded-id)))
       (let* ((window (get-buffer-window (current-buffer) t))
@@ -803,7 +804,7 @@ ALIGNMENT defaults to `center'."
         (delete-overlay org-timegrid--pointer-overlay)
         (setq-local org-timegrid--pointer-overlay nil))
       (org-timegrid--cache-static-tiles
-       (and previewp (org-timegrid--operation-replace-id previewp)))
+       (org-timegrid--operation-replaced-ids previewp))
       (org-timegrid--insert-tiles)
       (org-timegrid--render-dynamic)
       (unless (and previewp header-line-format)

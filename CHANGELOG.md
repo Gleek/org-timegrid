@@ -3,6 +3,11 @@
 ## Unreleased
 
 - Prevent calendar flicker while typing in incremental search.
+- Push tasks with meta-drag or `M-S-up` / `M-S-down` to make space.
+  - Absorb gaps and move newly encountered overlap groups together.
+  - Push across visible days, leaving initial overlaps and repeaters alone.
+  - Stop at the displayed date boundaries.
+  - Preview the whole push and undo it in one step.
 - Respect Org tag inheritance for calendar colours and tag exclusions.
 - Use the last mapped tag for colours, checking file tags, ancestor tags,
   then local tags. Previously, the first mapped local tag won.

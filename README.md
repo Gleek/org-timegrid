@@ -173,6 +173,7 @@ Run `M-x org-timegrid-week` to open the week containing today.
 | --- | --- |
 | Drag empty space | Create an entry for that range |
 | Drag a block | Move it |
+| meta-drag a block | Move it, pushing tasks it reaches |
 | Drag a block's top or bottom edge | Resize it |
 | super-drag a block | Duplicate it as an independent entry |
 | shift-drag a block | Add another time to its source entry |
@@ -183,6 +184,14 @@ Run `M-x org-timegrid-week` to open the week containing today.
 Mouse edits snap to `org-timegrid-slot-minutes`, which also sets the minimum
 duration (15 minutes by default). Release commits a drag. Press `C-g` before
 releasing to cancel it.
+
+Meta-drag makes space by pushing tasks forward or backward across the visible
+days. Pushing stops at the edge of the displayed dates. Gaps absorb movement
+before the next task is pushed. Overlapping tasks you reach move together,
+preserving their relative times. Tasks already overlapping the grabbed task
+stay in place throughout the gesture. Repeating tasks allow overlap; clock
+records stop the push. Date-only entries stay in the all-day rail. One undo
+restores the whole push.
 
 Nearby drag and resize positions are prepared between inputs to speed up
 previews. Set `org-timegrid-preview-prefetch` to `nil` to disable this extra work.
@@ -205,6 +214,7 @@ the selected block. Copies use the Emacs kill ring.
 | `RET` | Visit or create a block |
 | `C-g` | Clear the region or hide the cursor |
 | `M-down` / `M-up` | Move the selected block by one slot |
+| `M-S-down` / `M-S-up` | Push the selected block by one slot |
 | `M-right` / `M-left` | Move the block by one day |
 | `S-down` / `S-up` | Move the end time |
 | `C-S-up` / `C-S-down` | Move the start time |
@@ -230,6 +240,9 @@ the selected block. Copies use the Emacs kill ring.
 | `g` | Reload the calendar |
 | `q` | Quit |
 | `C-s`, `C-r` | Search block titles |
+
+Hold `M-S-up` or `M-S-down` to keep pushing. A short pause commits the push
+as one undo step; press `C-g` before that to cancel it.
 
 Use `org-timegrid-org-command` to bind commands at the selected heading,
 or `org-timegrid-org-agenda-command` for commands requiring a live Agenda entry:
