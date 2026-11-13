@@ -139,7 +139,7 @@
     (org-mode)
     (insert "* A\n<2026-11-12 Thu 10:00-11:00>\n* B\n<2026-11-12 Thu 11:00-12:00>\n")
     (buffer-enable-undo)
-    (let* ((source (current-buffer)) (before (buffer-string))
+    (let* ((source (current-buffer)) (before (buffer-string)) after
            (org-timegrid-org-auto-save nil)
            (org-timegrid-org--undo-transactions nil)
            (org-timegrid-org--redo-transactions nil)
@@ -156,17 +156,23 @@
              :week-start week :events events
              :blocks (org-timegrid-events-to-blocks events week)))
            (context (org-timegrid--push-context (car (org-timegrid--calendar-state-blocks
-                                                     org-timegrid--state)))))
+                                                     org-timegrid--state))))
+           (proposal (org-timegrid--push-proposal context 30)))
       (cl-letf (((symbol-function 'org-timegrid--refresh-data) #'ignore)
                 ((symbol-function 'org-timegrid--reconcile) #'ignore))
-        (org-timegrid--apply (org-timegrid--push-proposal context 30))
-        (should (string-match-p "10:30-11:30" (buffer-string)))
-        (should (string-match-p "11:30-12:30" (buffer-string)))
+        (org-timegrid--apply proposal)
+        (setq after (buffer-string))
+        (should (equal (mapcar (lambda (event)
+                                 (cons (org-timegrid-event-start event)
+                                       (org-timegrid-event-end event)))
+                               (org-timegrid-org--buffer-events "push.org"))
+                       (mapcar #'org-timegrid--block-absolute-range
+                               (org-timegrid--operation-blocks proposal))))
         (should (= 1 (length org-timegrid-org--undo-transactions)))
         (org-timegrid-org--undo nil nil)
         (should (equal before (buffer-string)))
         (org-timegrid-org--undo t t)
-        (should (string-match-p "11:30-12:30" (buffer-string)))
+        (should (equal after (buffer-string)))
         (org-timegrid-org--undo nil nil)
         ;; Refresh snapshots after undo, then fail the second write.
         (setq events (org-timegrid-org--buffer-events "push.org"))
