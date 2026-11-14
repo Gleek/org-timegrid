@@ -771,10 +771,10 @@ Return nodes in paint order."
                     (- (org-timegrid-block-end block)
                        (org-timegrid-block-start block)))
                scale)))
-         (gap (org-timegrid--scale-pixels 1))
-         ;; Round height independently so equal durations have equal heights.
-         (y (ceiling (+ raw-y (/ gap 2.0))))
-         (block-height (max 4 (floor (- raw-height gap))))
+         (gap (org-timegrid--scale-pixels 2.5))
+         ;; Preserve fractional bounds for consistent heights and gaps.
+         (y (+ raw-y (/ gap 2.0)))
+         (block-height (max 4 (- raw-height gap)))
          (block-width (max 4 (- (cdr horizontal) (if clock 0 1))))
          (radius (if clock
                      (min (org-timegrid--scale-pixels org-timegrid--clock-corner-radius)

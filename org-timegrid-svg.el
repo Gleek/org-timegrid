@@ -146,12 +146,14 @@ OUTLINE-ONLY preserves the static bar's translucent fill during selection."
              (font-size (if (< block-height (org-timegrid--scale-pixels 13))
                             small-font
                           (org-timegrid--font-size 10)))
+             (top-padding (if (= font-size small-font) 0
+                            (org-timegrid--scale-pixels 2)))
              (line-height (if (= font-size small-font)
                               (org-timegrid--scale-pixels 10)
                             (org-timegrid--scale-pixels 13)))
              (characters (max 1 (floor (/ (- block-width text-inset (if repeater 13 3))
                                           (* font-size 0.62)))))
-             (max-lines (max 1 (floor (/ (max 1 (- block-height 3))
+             (max-lines (max 1 (floor (/ (max 1 (- block-height top-padding 3))
                                          line-height))))
              (title-lines (org-timegrid--wrap-title
                            (plist-get geometry :title) characters max-lines))
@@ -167,7 +169,7 @@ OUTLINE-ONLY preserves the static bar's translucent fill during selection."
                        :fill accent)
         (when (and repeater
                    (not boundary-edge)
-                   (>= block-width 25) (>= block-height 12))
+                   (>= block-width 25) (>= block-height 10))
           (org-timegrid--draw-repeater svg (- (+ x block-width) 10) (+ y 1) accent))
         (cl-loop for line in (unless boundary-edge title-lines)
                  for index from 0 do
@@ -176,6 +178,7 @@ OUTLINE-ONLY preserves the static bar's translucent fill during selection."
                                                        (+ (if (= font-size small-font)
                                                               (org-timegrid--scale-pixels 8)
                                                             (org-timegrid--scale-pixels 10))
+                                                          top-padding
                                                           (* index line-height))))
                                           :font-size font-size :font-weight "600"
                                           :font-family font-family
@@ -189,7 +192,7 @@ OUTLINE-ONLY preserves the static bar's translucent fill during selection."
                                     (or (org-timegrid-block-source-start block) (org-timegrid-block-start block))
                                     (or (org-timegrid-block-source-end block) (org-timegrid-block-end block)))
                                    :x (+ x text-inset)
-                                   :y (+ y (org-timegrid--scale-pixels 10)
+                                   :y (+ y top-padding (org-timegrid--scale-pixels 10)
                                          (* (length title-lines) line-height))
                                    :font-size (org-timegrid--font-size 9) :font-family font-family
                                    :small-period t
