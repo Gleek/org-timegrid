@@ -7,6 +7,141 @@
 (require 'org-timegrid-org)
 (require 'org-timegrid-agenda)
 
+(ert-deftest org-timegrid-test-quick-add-new-and-existing ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "* TODO Existing\n:PROPERTIES:\n:EFFORT: 0:45\n:END:\n")
+    (let* ((source (current-buffer))
+           (marker (copy-marker (point-min)))
+           (start (+ (* 1440 (calendar-absolute-from-gregorian '(11 13 2026))) 540))
+           (org-timegrid-default-duration-minutes 30)
+           (org-timegrid-org-capture-template
+            '(:target file :template "* %{title}\n%{time-range}\n%?"))
+           (org-timegrid-org-after-create-hook nil)
+           (org-timegrid-org-auto-save nil)
+           (org-timegrid-org--undo-transactions nil)
+           (org-timegrid-org--redo-transactions nil))
+      (cl-letf (((symbol-function 'org-timegrid-org--files) (lambda () '("test.org")))
+                ((symbol-function 'find-file-noselect) (lambda (&rest _) source))
+                ((symbol-function 'org-timegrid-org--refresh-clocks) #'ignore))
+        (org-timegrid-org-quick-add '("New task") start)
+        (should (string-match-p "\\* New task\n<2026-11-13 Fri 09:00-09:30>"
+                                (buffer-string)))
+        (org-timegrid-org-quick-add (cons "Existing" marker) start)
+        (should (string-match-p "<2026-11-13 Fri 09:30-10:00>" (buffer-string)))
+        (should (= (how-many "^\\* TODO Existing" (point-min) (point-max)) 1))))))
+
+(ert-deftest org-timegrid-test-quick-add-duration ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "* One\n<2026-11-13 Fri 09:00>\n* Two\n<2026-11-13 Fri 09:30>\n* Recurring\n<2026-11-06 Fri 10:15-10:45 +1w>\n* TODO Task\n")
+    (re-search-backward "^\\* TODO")
+    (let ((source (current-buffer))
+          (marker (point-marker))
+          (start (+ (* 1440 (calendar-absolute-from-gregorian '(11 13 2026))) 540))
+          (org-timegrid-default-duration-minutes 30)
+          (org-timegrid-org-auto-save nil)
+          (org-timegrid-org--undo-transactions nil)
+          (org-timegrid-org--redo-transactions nil))
+      (cl-letf (((symbol-function 'org-timegrid-org--files) (lambda () '("test.org")))
+                ((symbol-function 'find-file-noselect) (lambda (&rest _) source))
+                ((symbol-function 'org-timegrid-org--refresh-clocks) #'ignore))
+        (org-timegrid-org-quick-add (cons "Task" marker) start)
+        (should (string-match-p "<2026-11-13 Fri 10:45-11:15>" (buffer-string)))
+        (goto-char marker)
+        (org-set-property "EFFORT" "0:15")
+        ;; Explicit session lengths win; neither effort nor child tasks count.
+        (org-end-of-meta-data t)
+        (insert "<2026-11-14 Sat 08:00-08:15>\n** Child\n<2026-11-12 Thu 09:00-10:00>\n")
+        (org-timegrid-org-quick-add (cons "Task" marker) start)
+        (should (string-match-p "<2026-11-13 Fri 10:00-10:15>" (buffer-string)))
+        (org-timegrid-org-quick-add (cons "Task" marker) start)
+        (should (string-match-p "<2026-11-13 Fri 11:15-11:30>" (buffer-string)))
+        (goto-char marker)
+        (org-delete-property "EFFORT")
+        (org-end-of-meta-data t)
+        (insert "<2026-11-15 Sun 08:00>\n")
+        (org-timegrid-org-quick-add (cons "Task" marker) start)
+        (should (string-match-p "<2026-11-13 Fri 11:30-11:45>" (buffer-string)))
+        (should (= (how-many "^\\* TODO Task" (point-min) (point-max)) 1))))))
+
+(ert-deftest org-timegrid-test-quick-add-start-modes ()
+  (with-temp-buffer
+    (let* ((today (* 1440 (calendar-absolute-from-gregorian '(11 13 2026))))
+           (tomorrow (+ today 1440))
+           (major-mode 'org-timegrid-mode)
+           (org-timegrid--state
+            (org-timegrid--calendar-state-create
+             :week-start (/ tomorrow 1440) :cursor-visible t
+             :cursor (org-timegrid--cursor-state-create
+                      :surface 'grid :day 0 :minute 840)))
+           (org-timegrid-slot-minutes 15)
+           (org-timegrid-default-duration-minutes 30)
+           created query)
+      (cl-letf (((symbol-function 'decode-time)
+                 (lambda (&rest _) '(1 0 9 13 11 2026 5 nil nil)))
+                ((symbol-function 'org-timegrid-org-read-entry) (lambda () '("Task")))
+                ((symbol-function 'org-timegrid-org--list-events)
+                 (lambda (start end)
+                   (setq query (list start end))
+                   (list (org-timegrid-event-create
+                          :start (+ tomorrow 840) :end (+ tomorrow 870)))))
+                ((symbol-function 'org-timegrid-org--create-event)
+                 (lambda (&rest args) (setq created args)))
+                ((symbol-function 'org-timegrid-org--refresh-clocks) #'ignore))
+        ;; Explicit times are preserved, including past and off-grid times.
+        (org-timegrid-org-quick-add '("Task") (+ tomorrow 487))
+        (should (= (nth 1 created) (+ tomorrow 487)))
+        (should (equal query (list tomorrow (+ tomorrow 1440))))
+        ;; Interactive use respects the visible cursor and skips occupied time.
+        (call-interactively #'org-timegrid-org-quick-add)
+        (should (= (nth 1 created) (+ tomorrow 870)))
+        ;; Programmatic nil means now even when a cursor is visible.
+        (org-timegrid-org-quick-add '("Task"))
+        (should (= (nth 1 created) (+ today 555)))
+        (setf (org-timegrid--calendar-state-cursor-visible org-timegrid--state) nil)
+        (call-interactively #'org-timegrid-org-quick-add)
+        (should (= (nth 1 created) (+ today 555)))
+        ;; The all-day rail does not select a time for quick-add.
+        (setf (org-timegrid--calendar-state-cursor-visible org-timegrid--state) t
+              (org-timegrid--cursor-state-surface (org-timegrid--cursor)) 'rail)
+        (call-interactively #'org-timegrid-org-quick-add)
+        (should (= (nth 1 created) (+ today 555)))
+        (setq created nil)
+        (should-error (org-timegrid-org-quick-add '("Task") (+ tomorrow 1425))
+                      :type 'user-error)
+        (should-not created)))))
+
+(ert-deftest org-timegrid-test-quick-add-no-room ()
+  (with-temp-buffer
+    (org-mode)
+    (insert "* TODO Task\n")
+    (let ((marker (copy-marker (point-min)))
+          (before (buffer-string))
+          (org-timegrid-slot-minutes 15)
+          (org-timegrid-default-duration-minutes 30))
+      (cl-letf (((symbol-function 'decode-time)
+                 (lambda (&rest _) '(1 45 23 13 11 2026 5 nil nil)))
+                ((symbol-function 'org-timegrid-org--list-events) (lambda (&rest _) nil)))
+        (should-error (org-timegrid-org-quick-add (cons "Task" marker)) :type 'user-error)
+        (should (equal before (buffer-string)))))))
+
+(ert-deftest org-timegrid-test-next-free-slot-duration ()
+  (let ((events (list (org-timegrid-event-create :start 540 :end 570)
+                      (org-timegrid-event-create :start 570 :end 600)
+                      (org-timegrid-event-create :start 615 :end 645))))
+    (should (= (org-timegrid-next-free-slot events 540 1440 30) 645))
+    (should (= (org-timegrid-next-free-slot events 540 1440 15) 600))))
+
+(ert-deftest org-timegrid-test-next-free-slot-boundaries ()
+  (let ((events (list (org-timegrid-event-create :start 590 :end 660)
+                      (org-timegrid-event-create :start 540 :end 600)
+                      (org-timegrid-event-create :start 0 :end 1440
+                                                 :all-day t))))
+    (should (= (org-timegrid-next-free-slot events 570 690 30) 660))
+    (should-not (org-timegrid-next-free-slot events 570 689 30))
+    (should (= (org-timegrid-next-free-slot events 700 730 30) 700))))
+
 (ert-deftest org-timegrid-test-clock-formats ()
   ;; Minutes since midnight, full 24h time, full 12h time, 12h grid label.
   (cl-loop for (minute clock-24 clock-12 hour-12) in

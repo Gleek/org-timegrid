@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Quick-add an existing task or new title with `a`, searching after the
+  active timed-grid cursor or now.
+  - Reuse its last explicit block duration, or 30 minutes.
+
 - Keep equal-duration calendar blocks the same height at every start time.
 - Prevent calendar flicker while typing in incremental search.
 - Push tasks with meta-drag or `M-S-up` / `M-S-down` to make space.

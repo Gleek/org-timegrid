@@ -1,0 +1,27 @@
+#+title: Recipes
+
+* Quick-add the current Org Agenda task
+
+This binds =C-c t= in Org Agenda to add a time block to the task on the
+current line. It finds the first free gap between now and midnight, using
+the task's last explicit block duration or
+=org-timegrid-default-duration-minutes= (30 minutes by default).
+Existing blocks stay in place.
+
+Add this to your configuration; change the key binding as needed:
+
+#+begin_src emacs-lisp
+(defun my/org-timegrid-agenda-quick-add ()
+  "Add a time block to the task on the current Org Agenda line."
+  (interactive)
+  (require 'org-timegrid-org)
+  (let ((marker (or (org-get-at-bol 'org-hd-marker)
+                    (org-get-at-bol 'org-marker)
+                    (org-agenda-error))))
+    (org-timegrid-org-quick-add
+     (cons (org-with-point-at marker (org-get-heading t t t t)) marker))))
+
+(with-eval-after-load 'org-agenda
+  (keymap-set org-agenda-mode-map "C-c t"
+              #'my/org-timegrid-agenda-quick-add))
+#+end_src

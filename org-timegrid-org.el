@@ -615,19 +615,19 @@ distinguishes date-only values from midnight-aligned timed values."
     nil t))
 
 (defun org-timegrid-org--heading-last-duration (headline)
-  "Return HEADLINE's latest timed block duration, when explicitly recorded.
+  "Return HEADLINE's latest explicitly recorded timed block duration.
 Only timestamps in the heading's title and own section count."
   (let ((content (org-timegrid-org--headline-content headline))
         latest start)
     (org-element-map content 'timestamp
       (lambda (timestamp)
-        (when (org-timegrid-org--timestamp-timed-p timestamp)
+        (when (and (org-timegrid-org--timestamp-timed-p timestamp)
+                   (org-timegrid-org--timestamp-range-p timestamp)
+                   (integerp (org-element-property :hour-end timestamp)))
           (let ((time (org-timegrid-org--timestamp-minutes timestamp nil)))
             (when (or (null start) (> time start))
               (setq latest timestamp start time))))))
-    (when (and latest
-               (org-timegrid-org--timestamp-range-p latest)
-               (integerp (org-element-property :hour-end latest)))
+    (when latest
       (- (org-timegrid-org--timestamp-minutes latest t) start))))
 
 (defvar org-timegrid-org-entry-filter-function
@@ -1510,11 +1510,7 @@ Optional QUERY-START and QUERY-END limit clocks to intersecting minutes."
          (running (eq (org-element-property :status clock) 'running))
          (start (org-timegrid-org--timestamp-minutes timestamp nil))
          (end (if running
-                  (let ((now (decode-time)))
-                    (+ (* (calendar-absolute-from-gregorian
-                           (list (decoded-time-month now) (decoded-time-day now)
-                                 (decoded-time-year now))) 1440)
-                       (* (decoded-time-hour now) 60) (decoded-time-minute now)))
+                  (floor (org-timegrid-current-calendar-minute))
                 (org-timegrid-org--timestamp-endpoint timestamp t))))
     ;; Give a newly started clock one minute so it is immediately visible.
     (when (and (or (> end start) (and running (= end start)))
@@ -1726,6 +1722,55 @@ When HEADING is non-nil, move to the containing Org heading first."
                (org-timegrid-org--agenda-location
                 (org-timegrid-org-selected-marker))))
     (org-timegrid-org--run-at command buffer position)))
+
+;;;###autoload
+(defun org-timegrid-org-quick-add (&optional entry start)
+  "Add a task in the first available gap at or after START, before midnight.
+ENTRY is a (TITLE . MARKER) pair; nil prompts for a task or new title.
+A nil marker creates a new capture entry.  Use the task's latest explicit
+block duration, or `org-timegrid-default-duration-minutes' when absent.
+START is an absolute Gregorian minute, or nil for now rounded up to
+`org-timegrid-slot-minutes'.
+Interactively, use the visible calendar cursor when on the timed grid,
+otherwise now.  Existing blocks stay in place."
+  (interactive
+   (list nil (and (derived-mode-p 'org-timegrid-mode)
+                  (org-timegrid--cursor-visible-p)
+                  (eq (org-timegrid--cursor-state-surface
+                       (org-timegrid--cursor)) 'grid)
+                  (org-timegrid--cursor-calendar-minute))))
+  (setq entry (or entry (org-timegrid-org-read-entry)))
+  (when (string-empty-p (string-trim (car entry)))
+    (user-error "Enter a task title"))
+  (let* ((requested-start
+          (pcase start
+            ('nil (org-timegrid-current-calendar-minute))
+            ((pred integerp) start)
+            (_ (user-error "START must be an absolute minute or nil"))))
+         ;; Keep the requested day even when rounding now crosses midnight.
+         (day-start (* 1440 (floor requested-start 1440)))
+         (day-end (+ day-start 1440))
+         ;; Explicit times stay exact; only now rounds up to a grid slot.
+         (search-start (if start requested-start
+                         (* org-timegrid-slot-minutes
+                            (ceiling requested-start org-timegrid-slot-minutes))))
+         (marker (cdr entry))
+         (duration
+          (or (and marker
+                   (org-with-point-at marker
+                     (org-narrow-to-subtree)
+                     (org-timegrid-org--heading-last-duration
+                      (car (org-element-contents (org-element-parse-buffer))))))
+              org-timegrid-default-duration-minutes))
+         (slot (org-timegrid-next-free-slot
+                (org-timegrid-org--list-events day-start day-end)
+                search-start day-end duration)))
+    (unless slot
+      (user-error "No free %d-minute slot left on %s"
+                  duration (org-timegrid-org--format-date (/ day-start 1440))))
+    (org-timegrid-org--create-event
+     (car entry) slot (+ slot duration) nil marker 'timed)
+    (org-timegrid-org--refresh-clocks)))
 
 (defun org-timegrid-org-command (command)
   "Return an interactive wrapper to run Org COMMAND on the selected entry."

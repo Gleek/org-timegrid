@@ -83,9 +83,11 @@ and adds the optional Agenda strip.
 
 The capture file is always included in calendar queries.
 
+See [Recipes](docs/recipes.org) for examples such as quick-add from Org Agenda.
+
 ### Android Emacs
 
-See [`ANDROID.org`](ANDROID.org) for setup. Android uses a one-day view,
+See the [Android guide](docs/ANDROID.org) for setup. Android uses a one-day view,
 native scrolling, and long-press editing. Set
 `org-timegrid-android-display-keyboard` to non-nil to enable the on-screen keyboard.
 Resize handles and a short vibration provide feedback during touch editing.
@@ -204,6 +206,7 @@ the selected block. Copies use the Emacs kill ring.
 | `n` / `p` | Select the next or previous block |
 | `C-SPC`, `C-x C-x` | Set mark, or exchange point and mark |
 | `RET` | Visit or create a block |
+| `a` | Quick-add a task into the first free gap after the cursor or now |
 | `C-g` | Cancel a pending edit, clear the region, or hide the cursor |
 | `M-down` / `M-up` | Move the selected block by one slot |
 | `M-right` / `M-left` | Move the block by one day |

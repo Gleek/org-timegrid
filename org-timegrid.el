@@ -2469,6 +2469,7 @@ not hold for a buffer made of tall image glyphs."
     (org-timegrid--refresh-data)))
 
 ;; Org commands are loaded only when one of their bindings is used.
+(autoload 'org-timegrid-org-quick-add "org-timegrid-org" nil t)
 (autoload 'org-timegrid-org-set-tags "org-timegrid-org" nil t)
 (autoload 'org-timegrid-org-todo "org-timegrid-org" nil t)
 (autoload 'org-timegrid-org-open-at-point "org-timegrid-org" nil t)
@@ -2538,6 +2539,7 @@ not hold for a buffer made of tall image glyphs."
     (keymap-set map "M-b" #'org-timegrid-previous-week)
     (keymap-set map "M-f" #'org-timegrid-next-week)
     (keymap-set map "g" #'org-timegrid-refresh)
+    (keymap-set map "a" #'org-timegrid-org-quick-add)
     (keymap-set map "C-s" #'org-timegrid-isearch-forward)
     (keymap-set map "C-r" #'org-timegrid-isearch-backward)
     ;; In vanilla Emacs the fully modified `C-x C-+' invokes text scaling,

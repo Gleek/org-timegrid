@@ -103,6 +103,16 @@ the height of the keyboard cursor."
   :group 'org-timegrid
   :type 'integer)
 
+(defun org-timegrid-current-calendar-minute ()
+  "Return now in local absolute Gregorian minutes.
+Seconds are retained as a fractional minute so callers can round up or down."
+  (let ((now (decode-time)))
+    (+ (* 1440 (calendar-absolute-from-gregorian
+                (list (decoded-time-month now) (decoded-time-day now)
+                      (decoded-time-year now))))
+       (* 60 (decoded-time-hour now)) (decoded-time-minute now)
+       (/ (decoded-time-second now) 60.0))))
+
 (defun org-timegrid-week-start (&optional absolute-date)
   "Return the first absolute date of the week containing ABSOLUTE-DATE."
   (let* ((absolute (or absolute-date
@@ -144,6 +154,18 @@ values retained by another view, an earlier state, or the storage adapter."
             (cl-loop for (key value) on (org-timegrid-event-metadata event) by #'cddr
                      append (list key (if (functionp value) value (copy-tree value)))))
       copy)))
+
+(defun org-timegrid-next-free-slot (events start end duration)
+  "Find the first gap in EVENTS between START and END fitting DURATION.
+All times are absolute calendar minutes.  Date-only events do not block time."
+  (dolist (event (sort (seq-remove #'org-timegrid-event-all-day events)
+                      (lambda (a b)
+                        (< (org-timegrid-event-start a)
+                           (org-timegrid-event-start b)))))
+    (when (and (< (org-timegrid-event-start event) (+ start duration))
+               (> (org-timegrid-event-end event) start))
+      (setq start (org-timegrid-event-end event))))
+  (and (<= (+ start duration) end) start))
 
 (defvar org-timegrid-query-options nil
   "Read-only options dynamically bound while a backend LIST-FUNCTION runs.
