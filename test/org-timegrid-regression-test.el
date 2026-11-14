@@ -154,10 +154,11 @@
   (let ((org-timegrid-slot-minutes 15)
         (org-timegrid--static-render t))
     (dolist (scale '(0.882 1 2))
-      (cl-labels ((render (duration)
+      (cl-labels ((render (duration &optional start)
+                    (setq start (or start 541))
                     (org-timegrid--block-geometry
                      (org-timegrid--make-block
-                      'short 0 541 (+ 541 duration) "Short task")
+                      'short 0 start (+ start duration) "Short task")
                      3000 0 scale 200)))
         (let ((slot (render 15)))
           (dolist (duration '(0 0.1 1 6 10 15))
@@ -166,6 +167,10 @@
               (should (= (plist-get geometry :y) (plist-get slot :y)))
               (should (= (plist-get geometry :start) 541))
               (should (= (plist-get geometry :end) (+ 541 duration)))))
+          (dolist (duration '(1 15 30 60))
+            (let ((height (plist-get (render duration) :height)))
+              (dolist (start '(540 541 555 1005 1065))
+                (should (= (plist-get (render duration start) :height) height)))))
           (should (> (plist-get (render 30) :height)
                      (plist-get slot :height))))))))
 

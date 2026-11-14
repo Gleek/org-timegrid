@@ -772,10 +772,9 @@ Return nodes in paint order."
                        (org-timegrid-block-start block)))
                scale)))
          (gap (org-timegrid--scale-pixels 1))
-         ;; Whole-pixel edges keep the gap clear without a block outline.
+         ;; Round height independently so equal durations have equal heights.
          (y (ceiling (+ raw-y (/ gap 2.0))))
-         (block-height
-          (max 4 (- (floor (- (+ raw-y raw-height) (/ gap 2.0))) y)))
+         (block-height (max 4 (floor (- raw-height gap))))
          (block-width (max 4 (- (cdr horizontal) (if clock 0 1))))
          (radius (if clock
                      (min (org-timegrid--scale-pixels org-timegrid--clock-corner-radius)

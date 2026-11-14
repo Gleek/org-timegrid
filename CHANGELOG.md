@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Keep equal-duration calendar blocks the same height at every start time.
 - Prevent calendar flicker while typing in incremental search.
 - Push tasks with meta-drag or `M-S-up` / `M-S-down` to make space.
   - Absorb gaps and move newly encountered overlap groups together.
