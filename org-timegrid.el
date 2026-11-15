@@ -1161,15 +1161,14 @@ Leave the first non-motion event for the gesture loop to process."
          (org-timegrid-click (list 'mouse-1 position)))))))
 
 (defun org-timegrid-pointer-feedback (event)
-  "Set a resize or move pointer under SVG mouse EVENT."
+  "Set an arrow or resize pointer under SVG mouse EVENT."
   (interactive "e")
   (let* ((position (event-end event))
          (window (posn-window position)))
     (when (windowp window)
       (with-current-buffer (window-buffer window)
         (let* ((target (org-timegrid--target position))
-               (shape (cond ((plist-get target :edge) 'nhdrag)
-                            ((plist-get target :block-id) 'hand)))
+               (shape (if (plist-get target :edge) 'nhdrag 'arrow))
                (point (posn-point position)))
           (when (integer-or-marker-p point)
             (unless (overlayp org-timegrid--pointer-overlay)

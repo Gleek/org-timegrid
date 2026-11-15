@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Use the arrow pointer over the calendar and blocks, keeping resize cursors.
 - Quick-add an existing task or new title with `a`, searching after the
   active timed-grid cursor or now.
   - Reuse its last explicit block duration, or 30 minutes.

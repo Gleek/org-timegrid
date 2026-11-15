@@ -751,6 +751,7 @@ Both live rendering and prefetch consume this same patch."
         (insert (propertize " "
                             'org-timegrid-tile tile
                             'occs-svg-image t
+                            'pointer 'arrow
                             'help-echo
                             "Drag empty time to create; drag blocks to move or resize"
                             'display (aref org-timegrid--static-images tile)))
@@ -786,6 +787,7 @@ Both live rendering and prefetch consume this same patch."
       (propertize " " 'display (org-timegrid-svg-image (car drawing) :ascent 100 :scale 1
                                                        :map map :original-map map)
                   'keymap org-timegrid--header-map
+                  'pointer 'arrow
                   'help-echo "Click to select an all-day cell or event"))))
 
 (defun org-timegrid--refresh (&optional preserve-scroll minute alignment)
@@ -1202,7 +1204,7 @@ the grid by the width of whatever else is there."
                 edges))
         (push (list `(rect . ((,x . ,y) . (,right . ,bottom)))
                     'calendar-rail-block
-                    `(pointer hand help-echo ,details))
+                    `(pointer arrow help-echo ,details))
               bodies)))
     (append edges bodies)))
 
@@ -1255,7 +1257,7 @@ the grid by the width of whatever else is there."
                     edges))
             (push (list `(rect . ((,x . ,y) . (,right . ,bottom)))
                         'calendar-block
-                        `(pointer hand help-echo ,details))
+                        `(pointer arrow help-echo ,details))
                   bodies))))))
     (append edges bodies)))
 
