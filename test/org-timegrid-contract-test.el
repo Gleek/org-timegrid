@@ -71,7 +71,7 @@
           (should-not (eq old-images org-timegrid--static-images))
           (should (equal "#102030" (alist-get 'org-timegrid-contract-test-tone
                                               (org-timegrid--render-context-settings old-context))))
-          (should (seq-some (lambda (xml) (string-match-p "#abcdef" xml))
+          (should (seq-some (lambda (entry) (string-match-p "#abcdef" (car entry)))
                             org-timegrid--static-fragments))
           (setq old-images org-timegrid--static-images)
           (org-timegrid--with-update nil (setq org-timegrid-contract-test-tone "#abcdef"))

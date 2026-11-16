@@ -3,6 +3,70 @@
 (require 'ert)
 (require 'org-timegrid-org)
 
+(ert-deftest org-timegrid-cache-svg-bounds-preserve-drawings ()
+  "Cull invisible content without mutating reusable SVGs or losing repeats."
+  (let ((svg (svg-create 200 400 :stroke-width 0)))
+    (svg-rectangle svg 0 0 200 400 :fill "#123456")
+    (svg-text svg "Visible" :x 10 :y 20 :font-size 12)
+    (svg-text svg "Offscreen" :x 10 :y 300 :font-size 12)
+    (let* ((before (copy-tree svg))
+           (fragment (org-timegrid--svg-fragment svg t))
+           (bounded (org-timegrid-svg-bounded-fragment fragment '(0 0 100 50))))
+      (should (string-match-p "Visible" bounded))
+      (should-not (string-match-p "Offscreen" bounded))
+      (should (string-match-p "height=\"50\"" bounded))
+      (should (equal svg before))
+      (should (equal (org-timegrid-svg-bounded-fragment (concat fragment fragment)
+                                                      '(0 0 100 50))
+                     (concat bounded bounded)))
+      (should (equal "unannotated XML"
+                     (org-timegrid-svg-bounded-fragment "unannotated XML" '(0 0 1 1)))))))
+
+(ert-deftest org-timegrid-cache-svg-bounds-preserve-clips-and-overhang ()
+  "Keep clipped labels, transformed content and strokes crossing a tile edge."
+  (let* ((svg (svg-create 300 300 :stroke-width 0))
+         (clip (svg-clip-path svg :id "label"))
+         (group (svg-node svg 'g :transform "translate(200 200)")))
+    (svg-rectangle clip 0 200 100 40)
+    (svg-text svg "Clipped" :x 10 :y 20 :font-size 12 :clip-path "url(#label)")
+    (svg-rectangle group 0 0 10 10 :fill "#abcdef")
+    (svg-rectangle svg 0 0 300 300 :fill "url(#paint)")
+    (svg-line svg 10 70 80 70 :stroke "red" :stroke-width 50)
+    (let ((bounded (org-timegrid-svg-bounded-fragment
+                    (org-timegrid--svg-fragment svg t) '(0 0 100 50))))
+      (should-not (string-match-p "Clipped" bounded))
+      (should (string-match-p "translate(200 200)" bounded))
+      (should (string-match-p "height=\"300\"" bounded))
+      (should (string-match-p "stroke-width=\"50\"" bounded)))))
+
+(ert-deftest org-timegrid-cache-bounded-background-survives-preview-exclusion ()
+  "Hiding a preview source cannot corrupt the cached unedited background."
+  (with-temp-buffer
+    (org-timegrid-mode)
+    (let* ((week 739915)
+           (event (org-timegrid-event-create :id 'one :title "Original"
+                                            :start (+ (* week 1440) 600)
+                                            :end (+ (* week 1440) 645)))
+           (org-timegrid--state (org-timegrid--calendar-state-create
+                                :week-start week :events (list event)
+                                :blocks (org-timegrid-events-to-blocks (list event) week))))
+      (cl-letf (((symbol-function 'create-image) (lambda (data &rest _) (list 'image :data data)))
+                ((symbol-function 'image-flush) #'ignore))
+        (org-timegrid--cache-static-tiles)
+        (let* ((backgrounds org-timegrid--static-fragments)
+               (tile (seq-find (lambda (index)
+                                 (string-match-p "Original" (org-timegrid--tile-xml index)))
+                               (org-timegrid--geometry-tiles (car org-timegrid--geometry))))
+               (original (and tile (org-timegrid--tile-xml tile))))
+          (should tile)
+          (should (string-match-p "Original" original))
+          (org-timegrid--cache-static-tiles '(one))
+          (should-not (eq backgrounds org-timegrid--static-fragments))
+          (should-not (string-match-p "Original" (org-timegrid--tile-xml tile)))
+          (org-timegrid--cache-static-tiles)
+          (should (eq backgrounds org-timegrid--static-fragments))
+          (should (equal original (org-timegrid--tile-xml tile))))))))
+
 (ert-deftest org-timegrid-cache-refresh-preserves-current-scroll-at-top ()
   "Refresh must not replace a real zero offset with an older saved position."
   (with-temp-buffer
@@ -108,8 +172,8 @@
                  (lambda (data &rest _) (list 'image :type 'svg :data data))))
         (org-timegrid--build-static-tiles)
         (should-not (string-match-p "<path" org-timegrid--static-inner))
-        (should (string-match-p "<path" (aref org-timegrid--static-fragments 0)))
-        (should-not (string-match-p "<path" (aref org-timegrid--static-fragments 1)))))))
+        (should (string-match-p "<path" (car (aref org-timegrid--static-fragments 0))))
+        (should-not (string-match-p "<path" (car (aref org-timegrid--static-fragments 1))))))))
 
 (ert-deftest org-timegrid-cache-close-flushes-images-without-cache-owners ()
   "Closing after cache eviction releases the visible grid and rail images."
@@ -301,7 +365,7 @@
           (org-timegrid--cache-static-tiles '(one))
           (should (= calls 1))
           (should-not (seq-find (lambda (g) (eq 'one (plist-get g :id))) org-timegrid--geometry))
-          (should-not (string-match-p "One" (apply #'concat (append org-timegrid--static-fragments nil))))
+          (should-not (string-match-p "One" (apply #'concat (mapcar #'car org-timegrid--static-fragments))))
           (should org-timegrid--excluded-tiles)
           (org-timegrid--cache-static-tiles)
           (should (eq images org-timegrid--static-images))
@@ -320,7 +384,7 @@
                 (org-timegrid-events-to-blocks events day)))
         (org-timegrid--cache-static-tiles)
         (should (= calls 3))
-        (should (string-match-p "Two" (apply #'concat (append org-timegrid--static-fragments nil))))
+        (should (string-match-p "Two" (apply #'concat (mapcar #'car org-timegrid--static-fragments))))
         (should (= 2 (length org-timegrid--view-cache)))
         (setq scale 1.2)
         (org-timegrid--cache-static-tiles)
@@ -336,7 +400,7 @@
                (org-timegrid--calendar-state-events org-timegrid--state) day))
         (org-timegrid--cache-static-tiles)
         (should (= calls 6))
-        (should (string-match-p "Three" (apply #'concat (append org-timegrid--static-fragments nil))))
+        (should (string-match-p "Three" (apply #'concat (mapcar #'car org-timegrid--static-fragments))))
         (let ((state org-timegrid--state)
               (images org-timegrid--static-images)
               (geometry org-timegrid--geometry)

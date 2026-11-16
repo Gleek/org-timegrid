@@ -65,7 +65,8 @@
 
 (defvar-local org-timegrid--hotspots nil)
 
-(defvar-local org-timegrid--static-fragments nil)
+(defvar-local org-timegrid--static-fragments nil
+  "Per-tile pairs of source SVG and lazily bounded markup.")
 
 (defvar-local org-timegrid--block-fragments nil)
 
@@ -253,11 +254,16 @@ band under the grid."
 (defun org-timegrid--tile-xml (tile &optional fragment)
   "Return TILE's prepared background with dynamic FRAGMENT above it."
   (pcase-let* ((`(,y . ,height) (org-timegrid--tile-bounds tile))
-               (`(,x . ,width) (org-timegrid--tile-x-bounds tile)))
+               (`(,x . ,width) (org-timegrid--tile-x-bounds tile))
+               (bounds (list x y width height))
+               (cached (and org-timegrid--static-fragments
+                            (aref org-timegrid--static-fragments tile))))
+    (when (and cached (not (cdr cached)))
+      (setq cached (cons (car cached) (org-timegrid-svg-bounded-fragment (car cached) bounds)))
+      (aset org-timegrid--static-fragments tile cached))
     (org-timegrid-svg-tile x y width height org-timegrid--static-inner
-                           (and org-timegrid--static-fragments
-                                (aref org-timegrid--static-fragments tile))
-                           fragment)))
+                           (cdr cached)
+                           (org-timegrid-svg-bounded-fragment fragment bounds))))
 
 (defun org-timegrid--tile-image-map (tile &optional hotspots)
   "Return HOTSPOTS clipped and translated into TILE's coordinates."
@@ -556,7 +562,8 @@ With SNAPSHOT, copy event records before retaining the key."
         (when (member (plist-get (car fragment) :id) excluded-ids)
           (dolist (tile (org-timegrid--geometry-tiles (car fragment)))
             (aset org-timegrid--static-fragments tile
-                  (string-replace (cdr fragment) "" (aref org-timegrid--static-fragments tile)))
+                  (list (string-replace (cdr fragment) ""
+                                        (car (aref org-timegrid--static-fragments tile)))))
             (cl-pushnew tile changed))))
       (dolist (tile changed)
         (aset org-timegrid--static-images tile (org-timegrid--make-tile-image tile)))
@@ -659,7 +666,7 @@ With SNAPSHOT, copy event records before retaining the key."
             (push fragment (aref org-timegrid--static-fragments tile)))))
       (dotimes (tile org-timegrid--tile-count)
         (aset org-timegrid--static-fragments tile
-              (apply #'concat (nreverse (aref org-timegrid--static-fragments tile))))))
+              (list (apply #'concat (nreverse (aref org-timegrid--static-fragments tile)))))))
     (org-timegrid--update-clock-fragment)
     (setq org-timegrid--static-images (make-vector org-timegrid--tile-count nil)
           org-timegrid--hotspots (org-timegrid--image-map))

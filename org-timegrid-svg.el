@@ -254,14 +254,125 @@ geometry.  Return the marker's Y coordinate."
                                  :fill "#ffffff")
         y))))
 
-(defun org-timegrid--svg-inner-xml (svg)
-  "Return SVG's serialized child elements."
+(defun org-timegrid--svg-xml (svg &optional inner)
+  "Serialize SVG, omitting its root element when INNER is non-nil."
   (with-temp-buffer
     (svg-print svg)
-    (let* ((xml (buffer-string))
-           (start (1+ (string-match ">" xml)))
-           (end (string-match "</svg>\\'" xml)))
-      (substring xml start end))))
+    (let ((xml (buffer-string)))
+      (if inner
+          (substring xml (1+ (string-match ">" xml)) (string-match "</svg>\\'" xml))
+        xml))))
+
+(defun org-timegrid--svg-fragment (svg &optional inner)
+  "Serialize SVG, retaining its drawing tree for bounded tile rendering.
+INNER omits the root SVG element.  Callers must not modify the string or tree."
+  (let ((xml (org-timegrid--svg-xml svg inner)))
+    ;; Tag just the first character, so concatenating even identical fragments
+    ;; preserves each drawing's boundary. Substring removal keeps these tags.
+    (unless (string-empty-p xml)
+      (put-text-property 0 1 'org-timegrid-svg-tree (cons (length xml) svg) xml))
+    xml))
+
+(defun org-timegrid--svg-values (node)
+  "Read NODE's (x y width height) attributes with zero defaults."
+  (mapcar (lambda (attribute) (or (dom-attr node attribute) 0))
+          '(x y width height)))
+
+(defun org-timegrid--svg-overlaps-p (a b padding)
+  "Return whether numeric rectangle A intersects B with PADDING."
+  (and (< (- (nth 0 a) padding) (+ (nth 0 b) (nth 2 b)))
+       (< (- (nth 1 a) padding) (+ (nth 1 b) (nth 3 b)))
+       (> (+ (nth 0 a) (nth 2 a) padding) (nth 0 b))
+       (> (+ (nth 1 a) (nth 3 a) padding) (nth 1 b))))
+
+(defun org-timegrid--svg-intersection (a b)
+  "Return the intersection of numeric rectangles A and B."
+  (let ((x (max (nth 0 a) (nth 0 b))) (y (max (nth 1 a) (nth 1 b))))
+    (list x y (max 0 (- (min (+ (nth 0 a) (nth 2 a)) (+ (nth 0 b) (nth 2 b))) x))
+          (max 0 (- (min (+ (nth 1 a) (nth 3 a)) (+ (nth 1 b) (nth 3 b))) y)))))
+
+(defun org-timegrid--svg-cull-rect (node bounds stroke)
+  "Crop NODE to BOUNDS when its rectangle has no rounding or STROKE."
+  (let ((box (org-timegrid--svg-values node)))
+    (cond
+     ((not (cl-every #'numberp box)) node)
+     ((not (org-timegrid--svg-overlaps-p box bounds (max 1 (/ stroke 2.0)))) nil)
+     ((or (dom-attr node 'rx) (dom-attr node 'ry) (not (zerop stroke))) node)
+     (t
+      ;; Cropping a plain fill also removes offscreen height from image keys.
+      (let ((copy (cons 'rect (cons (copy-tree (dom-attributes node)) (dom-children node)))))
+        (cl-mapc (lambda (attribute value) (dom-set-attribute copy attribute value))
+                 '(x y width height) (org-timegrid--svg-intersection box bounds))
+        copy)))))
+
+(defun org-timegrid--svg-cull-text (node bounds clips stroke)
+  "Keep NODE's text visible in BOUNDS, respecting CLIPS and STROKE.
+Reject horizontally using clip bounds and start positions, never glyph widths."
+  (let ((x (dom-attr node 'x)) (y (dom-attr node 'y))
+        (font (dom-attr node 'font-size)) (clip (dom-attr node 'clip-path)))
+    (if (not (and (numberp y) (numberp font))) node
+      (let* ((padding (max 1 (/ stroke 2.0)))
+             ;; Allow ascenders, accents, descenders and stroked glyphs.
+             (top (- y (* font 1.5) padding))
+             (bottom (+ y (* font 0.5) padding))
+             (rectangle (and (stringp clip) (string-match "url(#\\([^)]*\\))" clip)
+                             (cdr (assoc (match-string 1 clip) clips)))))
+        (when rectangle
+          (setq bounds (org-timegrid--svg-intersection bounds rectangle)))
+        (when (and (> (nth 2 bounds) 0) (> (nth 3 bounds) 0)
+                   (< top (+ (nth 1 bounds) (nth 3 bounds))) (> bottom (nth 1 bounds))
+                   ;; A left-aligned label cannot reach a tile left of its start.
+                   (or (not (numberp x)) (member (dom-attr node 'text-anchor) '("end" "middle"))
+                       (< (- x (max padding (* font 0.4))) (+ (nth 0 bounds) (nth 2 bounds)))))
+          node)))))
+
+(defun org-timegrid--svg-cull (node bounds clips)
+  "Return NODE's visible content in BOUNDS without modifying NODE.
+CLIPS maps text clip IDs to rectangles.  Preserve unknown drawing effects."
+  (let ((tag (dom-tag node)) (stroke (or (dom-attr node 'stroke-width) 0))
+        (fill (dom-attr node 'fill)))
+    (cond
+     ((or (and (stringp fill) (string-prefix-p "url(" fill))
+          (not (numberp stroke))
+          (and (memq tag '(svg g defs)) (not (zerop stroke)))
+          (seq-some (lambda (attribute) (dom-attr node attribute))
+                    '(transform style filter mask clipPathUnits marker-start
+                      marker-mid marker-end textLength dx dy rotate))) node)
+     ((memq tag '(svg g defs clipPath))
+      (let ((children (delq nil (mapcar (lambda (child)
+                                        (when (listp child)
+                                          (org-timegrid--svg-cull child bounds clips)))
+                                      (dom-children node)))))
+        (when children (cons tag (cons (dom-attributes node) children)))))
+     ((eq tag 'rect) (org-timegrid--svg-cull-rect node bounds stroke))
+     ((eq tag 'text) (org-timegrid--svg-cull-text node bounds clips stroke))
+     (t node))))
+
+(defun org-timegrid-svg-bounded-fragment (fragment bounds)
+  "Serialize only FRAGMENT's drawing content visible in BOUNDS.
+BOUNDS is (X Y WIDTH HEIGHT).  Untagged XML is preserved for compatibility."
+  (when fragment
+    (let ((start 0) pieces)
+      (while (< start (length fragment))
+        (let* ((drawing (get-text-property start 'org-timegrid-svg-tree fragment))
+               (end (if drawing (+ start (car drawing))
+                      (next-single-property-change start 'org-timegrid-svg-tree fragment
+                                                   (length fragment))))
+               (tree (cdr drawing)))
+          (push (if (not tree) (substring-no-properties fragment start end)
+                  (let* ((clips (cl-loop for clip in (dom-by-tag tree 'clipPath)
+                                         for rectangle = (car (dom-by-tag clip 'rect))
+                                         for box = (and rectangle (org-timegrid--svg-values rectangle))
+                                         when (and box (cl-every #'numberp box)
+                                                   (not (dom-attr clip 'transform))
+                                                   (not (dom-attr rectangle 'transform))
+                                                   (not (dom-attr clip 'clipPathUnits)))
+                                         collect (cons (dom-attr clip 'id) box)))
+                         (visible (org-timegrid--svg-cull tree bounds clips)))
+                    (when visible
+                      (org-timegrid--svg-xml visible (eq (dom-tag visible) 'svg))))) pieces)
+          (setq start end)))
+      (apply #'concat (nreverse pieces)))))
 
 (defun org-timegrid--paint-node (svg node palette font)
   "Paint a bounded scene NODE into SVG using PALETTE and FONT.
@@ -329,10 +440,10 @@ OUTPUT `fragment' returns inner XML, `fragments' returns bounded XML strings,
             (when (memq output '(fragments drawings))
               (push (cons (cdr node)
                           (if (eq output 'drawings) element
-                            (with-temp-buffer (svg-print element) (buffer-string)))) drawings))))
+                            (org-timegrid--svg-fragment element))) drawings))))
         (pcase output
           ((or 'fragments 'drawings) (nreverse drawings))
-          ('fragment (org-timegrid--svg-inner-xml svg))
+          ('fragment (org-timegrid--svg-fragment svg t))
           (_ svg))))))
 
 (defun org-timegrid--draw-all-day-block
