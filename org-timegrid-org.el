@@ -87,8 +87,11 @@ for the final point."
 
 (defvar org-timegrid-org-show-repeaters t
   "Whether repeating Org timestamps appear on the calendar.
-When nil, the calendar omits both the anchor and generated occurrences of
-timestamps with an Org repeater.")
+When nil, omit both the anchor and generated occurrences of timestamps
+with an Org repeater.")
+
+(defvar org-timegrid-org-show-diary t
+  "Whether diary expressions appear as view-only calendar entries.")
 
 (defcustom org-timegrid-org-show-clocks t
   "Whether Org CLOCK records appear as calendar blocks."
@@ -165,8 +168,9 @@ tags according to Org's tag inheritance settings."
   #'org-timegrid-org-default-filter
   "Function deciding whether an eligible Org timestamp appears.
 The function receives the headline and timestamp `org-element' objects and
-returns non-nil to keep the timestamp.  Eligible timestamps are active dates
-and, when `org-timegrid-org-show-clocks' is non-nil, CLOCK record values.
+returns non-nil to keep the timestamp.  Eligible entries are active dates,
+diary entries (including `diary-sexp' elements), and, when
+`org-timegrid-org-show-clocks' is non-nil, CLOCK record values.
 The default function observes all Org filtering options in this group.")
 
 (defun org-timegrid-org--tags (headline)
@@ -329,7 +333,7 @@ When CLOCK is non-nil, insert a finished clock instead of a planned range."
               "^[ \t]*:\\(?:ID\\|CUSTOM_ID\\):.*\\(?:\n\\|\\'\\)" nil t)
         (replace-match ""))
       (let (ranges)
-        (org-element-map (org-element-parse-buffer) '(timestamp clock)
+        (org-element-map (org-element-parse-buffer) '(timestamp clock diary-sexp)
           (lambda (timestamp)
             (push (cons (org-element-property :begin timestamp)
                         (org-element-property :end timestamp))
@@ -549,7 +553,7 @@ CLOCK inserts a finished clock using Org's drawer settings."
 When SOURCE is non-nil, duplicate that event.  When TARGET is non-nil,
 add the range to that existing heading instead.  TIME-KIND explicitly
 distinguishes date-only values from midnight-aligned timed values."
-  (when source (org-timegrid-org--check-clock-edit source))
+  (when source (org-timegrid-org--check-edit source))
   (let* ((clock (or (and source (plist-get (org-timegrid-event-metadata source) :clock))
                    (and (listp target) (eq (plist-get target :kind) 'clock))))
          (all-day (if time-kind
@@ -862,7 +866,7 @@ undoing the previous undo.  Each calendar edit is bracketed by
 
 (defun org-timegrid-org--remove-entry (event)
   "Delete the whole Org heading that owned EVENT."
-  (org-timegrid-org--check-clock-edit event)
+  (org-timegrid-org--check-edit event)
   (org-timegrid-org--with-edit (plist-get (org-timegrid-event-source event) :marker)
     (org-back-to-heading t)
     (delete-region (point)
@@ -971,7 +975,7 @@ END is exclusive internally; Org's written date-range endpoint is inclusive."
 (defun org-timegrid-org--update-event-range
     (event start end &optional title time-kind)
   "Update EVENT to START through END, optional TITLE, and TIME-KIND."
-  (org-timegrid-org--check-clock-edit event)
+  (org-timegrid-org--check-edit event)
   (if (and (plist-get (org-timegrid-event-metadata event) :history)
            (not title))
       (org-timegrid-org--update-history-range event start end time-kind)
@@ -1194,7 +1198,7 @@ SCHEDULED and DEADLINE values take their planning keyword with them."
 
 (defun org-timegrid-org--remove-event (event)
   "Remove EVENT's time, reusing a series' deletion scope during bulk edits."
-  (org-timegrid-org--check-clock-edit event)
+  (org-timegrid-org--check-edit event)
   (let* ((marker (plist-get (org-timegrid-event-source event) :marker))
          (start (org-timegrid-event-start event))
          (previous (and org-timegrid-org--transaction-deletions
@@ -1378,9 +1382,10 @@ Keep the original markup in the event title for editing and copying."
       (apply #'concat (nreverse parts)))))
 
 (defun org-timegrid-org--event
-    (file headline timestamp kind &optional all-day)
+    (file headline timestamp kind &optional all-day bounds)
   "Create a calendar event for FILE HEADLINE TIMESTAMP of KIND.
-ALL-DAY records that the timestamp has dates but no times."
+ALL-DAY records that the timestamp has dates but no times.
+BOUNDS, when non-nil, supplies resolved (START . END) absolute minutes."
   (let* ((todo (org-element-property :todo-keyword headline))
          (begin (org-timegrid-org--timestamp-position
                  headline timestamp)))
@@ -1390,12 +1395,12 @@ ALL-DAY records that the timestamp has dates but no times."
     (org-timegrid-event-create
      :id (org-timegrid-org--event-id file begin kind)
      :title (or (org-element-property :raw-value headline) "Untitled")
-     :start (if all-day
-                (org-timegrid-org--timestamp-all-day-minutes timestamp nil)
-              (org-timegrid-org--timestamp-minutes timestamp nil))
-     :end (if all-day
-              (org-timegrid-org--timestamp-all-day-minutes timestamp t)
-            (org-timegrid-org--timestamp-minutes timestamp t))
+     :start (cond (bounds (car bounds))
+                  (all-day (org-timegrid-org--timestamp-all-day-minutes timestamp nil))
+                  (t (org-timegrid-org--timestamp-minutes timestamp nil)))
+     :end (cond (bounds (cdr bounds))
+                (all-day (org-timegrid-org--timestamp-all-day-minutes timestamp t))
+                (t (org-timegrid-org--timestamp-minutes timestamp t)))
      :all-day all-day
      :tags (org-timegrid-org--tags headline)
      ;; `org-timegrid-org--mark-latest-done' promotes this to `done'
@@ -1405,7 +1410,8 @@ ALL-DAY records that the timestamp has dates but no times."
      :source (list :file file :marker (copy-marker begin) :kind kind)
      :metadata
      (list :display-title (org-timegrid-org--display-title headline)
-           :raw-value (org-element-property :raw-value timestamp)
+           :raw-value (or (org-element-property :raw-value timestamp)
+                          (org-element-property :value timestamp))
            :repeater-type (org-element-property :repeater-type timestamp)
            :repeater-value (org-element-property :repeater-value timestamp)
            :repeater-unit (org-element-property :repeater-unit timestamp)))))
@@ -1501,8 +1507,10 @@ reflects the current state; the rest keep their plain TODO keyword."
           (setf (org-timegrid-event-state event) 'done)))))
   events)
 
-(defun org-timegrid-org--check-clock-edit (event &optional _deleting)
-  "Reject calendar mutations of running clock EVENTs."
+(defun org-timegrid-org--check-edit (event &optional _deleting)
+  "Reject calendar mutations of view-only EVENTs."
+  (when (plist-get (org-timegrid-event-metadata event) :diary)
+    (user-error "Diary entries are view only; edit the expression directly in the source (RET)"))
   (when (plist-get (org-timegrid-event-metadata event) :running)
     (user-error "Stop the running clock before editing it")))
 
@@ -1525,16 +1533,88 @@ Optional QUERY-START and QUERY-END limit clocks to intersecting minutes."
               (org-timegrid-event-metadata event)
               (append (org-timegrid-event-metadata event)
                       (list :clock t :running running
-                            :prepare-edit #'org-timegrid-org--check-clock-edit)))
+                            :prepare-edit #'org-timegrid-org--check-edit)))
         event))))
+
+(defun org-timegrid-org--diary-parts (element)
+  "Return ELEMENT's diary expression and trailing text as a cons cell."
+  (let* ((timestamp (eq (org-element-type element) 'timestamp))
+         (raw (org-element-property (if timestamp :raw-value :value) element))
+         (text (substring raw (if timestamp 3 2) (and timestamp -1)))
+         (end (cdr (read-from-string text))))
+    (cons (substring text 0 end) (string-trim (substring text end)))))
+
+(defun org-timegrid-org--diary-times (text)
+  "Return TEXT's first time range as (START END) minutes, or nil.
+END is nil for a time without an explicit end."
+  (when (string-match org-plain-time-of-day-regexp text)
+    (let ((times (list (match-string 1 text) (match-string 8 text))))
+      (mapcar (lambda (time)
+                (when time
+                  (let ((military (org-get-time-of-day time)))
+                    (+ (* (/ military 100) 60) (% military 100)))))
+              times))))
+
+(defun org-timegrid-org--diary-event (file headline element day text index)
+  "Build one occurrence of diary ELEMENT on DAY from evaluated TEXT.
+INDEX distinguishes multiple results on the same date."
+  (let* ((times (org-timegrid-org--diary-times text))
+         (midnight (* day 1440))
+         (start (+ midnight (or (car times) 0)))
+         (end (cond
+               ((null times) (+ start 1440))
+               ((null (cadr times)) (+ start org-timegrid-default-duration-minutes))
+               (t (let ((end (+ midnight (cadr times))))
+                    (if (> end start) end (+ end 1440))))))
+         (event (org-timegrid-org--event file headline element 'diary (null times)
+                                         (cons start end))))
+    (setf (org-timegrid-event-id event) (list (org-timegrid-event-id event) day index)
+          (org-timegrid-event-metadata event)
+          (append (org-timegrid-event-metadata event)
+                  (list :diary t :prepare-edit #'org-timegrid-org--check-edit)))
+    (when (and (eq (org-element-type element) 'diary-sexp)
+               (not (string-empty-p text)))
+      (setf (org-timegrid-event-title event) text
+            (plist-get (org-timegrid-event-metadata event) :display-title) text))
+    event))
+
+(defun org-timegrid-org--diary-events (file headline element start end)
+  "Resolve HEADLINE's diary ELEMENT in FILE for the bounded START/END query."
+  (when (and org-timegrid-org-show-diary start end
+             (funcall org-timegrid-org-filter-function headline element))
+    (condition-case err
+        (pcase-let ((`(,expression . ,entry) (org-timegrid-org--diary-parts element))
+                    (literal (eq (org-element-type element) 'timestamp))
+                    ;; Avoid Agenda's sleep on each failed date; report once below.
+                    (calendar-debug-sexp t))
+          (save-excursion
+            (goto-char (org-timegrid-org--timestamp-position headline element))
+            ;; Include the preceding day for overnight events.
+            (cl-loop for day from (1- (floor start 1440)) below (ceiling end 1440)
+                     for date = (calendar-gregorian-from-absolute day)
+                     for result = (org-diary-sexp-entry expression entry date)
+                     when result append
+                     (cl-loop for text in (cond (literal (list entry))
+                                               ((stringp result) (list result))
+                                               (t result))
+                              for index from 0 append
+                              (org-timegrid-org--expand-event
+                               (org-timegrid-org--diary-event
+                                file headline element day text index)
+                               start end)))))
+      (error
+       (message "Skipping diary entry in %s: %s" file (error-message-string err))
+       nil))))
 
 (defun org-timegrid-org--buffer-events (&optional file query-start query-end)
   "Extract calendar events from the current Org buffer.
 FILE defaults to the variable `buffer-file-name'.  Optional QUERY-START and
-QUERY-END exclude clocks outside the displayed range before building events.
-Planned timestamps remain unbounded so repeaters can expand into the range."
+QUERY-END bound diary evaluation and exclude clocks outside the range.
+Other planned timestamps remain unbounded so repeaters can expand later."
   (let* ((file (or file buffer-file-name (buffer-name)))
          (tree (org-element-parse-buffer))
+         ;; Share Agenda's memoization within this query, never stale global values.
+         (org--diary-sexp-entry-cache (make-hash-table :test #'equal))
          events seen)
     (org-element-map tree 'headline
       (lambda (headline)
@@ -1564,8 +1644,13 @@ Planned timestamps remain unbounded so repeaters can expand into the range."
                   (when-let* ((event (org-timegrid-org--clock-event
                                      file headline clock query-start query-end)))
                     (push event events)))))
-            (org-element-map content 'timestamp
+            (org-element-map content '(timestamp diary-sexp)
               (lambda (timestamp)
+                (when (or (eq (org-element-type timestamp) 'diary-sexp)
+                          (eq (org-element-property :type timestamp) 'diary))
+                  (setq events (nconc (org-timegrid-org--diary-events
+                                      file headline timestamp query-start query-end)
+                                     events)))
                 (let ((cancelled
                        (and history
                             (memq (org-element-property :type timestamp)
@@ -1603,7 +1688,7 @@ invalidate it without installing change hooks in the user's Org files."
                     org-timegrid-org-filter-function org-timegrid-org-color-function
                     (copy-tree
                      (list org-timegrid-org-show-clocks org-timegrid-org-show-repeaters
-                           org-timegrid-org-repeater-history org-timegrid-org-show-done
+                           org-timegrid-org-show-diary org-timegrid-org-repeater-history org-timegrid-org-show-done
                            org-timegrid-org-exclude-tags org-timegrid-org-tag-color-alist
                            org-todo-keywords-1 org-done-keywords org-use-property-inheritance
                            org-hide-emphasis-markers org-link-descriptive
@@ -1649,7 +1734,8 @@ invalidate it without installing change hooks in the user's Org files."
       (user-error "The Org source marker is no longer live"))
     (pop-to-buffer-same-window (marker-buffer marker))
     (goto-char marker)
-    (org-back-to-heading t)
+    (unless (plist-get (org-timegrid-event-metadata event) :diary)
+      (org-back-to-heading t))
     (org-fold-show-context)))
 
 (defun org-timegrid-org-selected-marker ()

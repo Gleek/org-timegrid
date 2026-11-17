@@ -117,6 +117,7 @@ Date-only entries appear in the all-day rail.
 Org clocks appear along the day's right boundary. Finished clocks can be
 edited; stop running clocks first. Other inactive timestamps are hidden.
 
+
 ### Repeaters
 
 Repeating events appear by default. `org-timegrid` handles them a little
@@ -164,6 +165,22 @@ date. Hourly repeaters support **all** only. Deleting occurrences leaves
 inactive `CANCELLED:` timestamps in the Org file to record where the schedule
 stops or skips a date. As with other calendar edits, changes remain unsaved
 by default.
+
+### Diary expressions
+
+Diary expressions appear on matching dates, with a diary icon:
+
+```org
+* Monthly touchbase
+<%%(diary-float t 1 3) 14:00-15:00>
+```
+
+This meets on the third Monday of each month. Diary entries are view only:
+press `RET` on a block to edit its expression directly in the Org source.
+
+Standalone `%%(...)` entries under headings can generate titles and times.
+Untimed entries appear in the all-day rail.
+
 
 ## Week view
 

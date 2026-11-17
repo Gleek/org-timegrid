@@ -23,6 +23,19 @@
               :stroke color :stroke-width 1.5 :stroke-linejoin "round"
               :d "M4.793 9.088h22.488l-4.456 4.457 0.754 0.754 5.742-5.742-5.743-5.744-0.754 0.754 4.454 4.456h-23.552v9.596h1.066z")))
 
+(defun org-timegrid--draw-diary (svg x y color)
+  "Draw a diary icon on SVG at X, Y in COLOR.
+Based on diary-svgrepo-com (1).svg from SVG Repo."
+  (svg-node svg 'path :fill color
+            :transform (format "translate(%g %g) scale(0.4)" x y)
+            :d "M17,2H5A1,1,0,0,0,4,3V19a1,1,0,0,0,1,1H6v1a1,1,0,0,0,1,1H7a1,1,0,0,0,1-1V20h9a3,3,0,0,0,3-3V5A3,3,0,0,0,17,2ZM14,18H6V4h8Zm4-1a1,1,0,0,1-1,1H16V4h1a1,1,0,0,1,1,1Z"))
+
+(defun org-timegrid--event-icon (event)
+  "Return the icon drawing function for EVENT, or nil."
+  (let ((metadata (and event (org-timegrid-event-metadata event))))
+    (cond ((plist-get metadata :diary) #'org-timegrid--draw-diary)
+          ((plist-get metadata :repeater-type) #'org-timegrid--draw-repeater))))
+
 (defun org-timegrid--draw-text (svg text &rest args)
   "Draw TEXT in SVG using ARGS accepted by `svg-text'.
 The extra :small-period option draws AM/PM at 80 percent of the font size.
@@ -140,8 +153,7 @@ OUTLINE-ONLY preserves the static bar's translucent fill during selection."
              (accent (org-timegrid--accent block palette))
              (text-inset (org-timegrid--block-text-inset))
              (event (org-timegrid-block-event block))
-             (repeater (and event (plist-get (org-timegrid-event-metadata event)
-                                             :repeater-type)))
+             (icon (org-timegrid--event-icon event))
              (small-font (org-timegrid--font-size 8))
              (font-size (if (< block-height (org-timegrid--scale-pixels 13))
                             small-font
@@ -151,7 +163,7 @@ OUTLINE-ONLY preserves the static bar's translucent fill during selection."
              (line-height (if (= font-size small-font)
                               (org-timegrid--scale-pixels 10)
                             (org-timegrid--scale-pixels 13)))
-             (characters (max 1 (floor (/ (- block-width text-inset (if repeater 13 3))
+             (characters (max 1 (floor (/ (- block-width text-inset (if icon 13 3))
                                           (* font-size 0.62)))))
              (max-lines (max 1 (floor (/ (max 1 (- block-height top-padding 3))
                                          line-height))))
@@ -167,10 +179,10 @@ OUTLINE-ONLY preserves the static bar's translucent fill during selection."
                        :stroke "none" :stroke-width 0)
         (svg-rectangle svg (+ x 2) (+ y 2) (- text-inset 6) (max 1 (- block-height 4))
                        :fill accent)
-        (when (and repeater
+        (when (and icon
                    (not boundary-edge)
                    (>= block-width 25) (>= block-height 10))
-          (org-timegrid--draw-repeater svg (- (+ x block-width) 10) (+ y 1) accent))
+          (funcall icon svg (- (+ x block-width) 10) (+ y 1 top-padding) accent))
         (cl-loop for line in (unless boundary-edge title-lines)
                  for index from 0 do
                  (org-timegrid--draw-text svg line :x (+ x text-inset)
@@ -458,8 +470,7 @@ OUTPUT `fragment' returns inner XML, `fragments' returns bounded XML strings,
          (rightp (org-timegrid-block-continues-right block))
          (fill (org-timegrid--color block palette))
          (event (org-timegrid-block-event block))
-         (repeater (and event (plist-get (org-timegrid-event-metadata event)
-                                         :repeater-type)))
+         (icon (org-timegrid--event-icon event))
          (selected (equal (org-timegrid-block-id block) (org-timegrid--selected-id)))
          (mid (+ y (/ height 2.0)))
          ;; A single silhouette keeps the selection stroke on the outside of
@@ -480,7 +491,7 @@ OUTPUT `fragment' returns inner XML, `fragments' returns bounded XML strings,
                  :stroke-width (if selected 2 1))
     (let* ((text-x (+ x (if leftp arrow 0) 9))
            (available (max 1 (- right text-x
-                                (if repeater 14 5))))
+                                (if icon 14 5))))
            (characters (max 1 (floor (/ available
                                         (org-timegrid--scale-pixels 6.2)))))
            (title (truncate-string-to-width
@@ -490,9 +501,9 @@ OUTPUT `fragment' returns inner XML, `fragments' returns bounded XML strings,
                                :font-size (org-timegrid--font-size 10)
                                :font-weight "600" :font-family font-family
                                :fill (plist-get palette :foreground)))
-    (when (and repeater (>= (- right x) 25))
-      (org-timegrid--draw-repeater svg (- right 10) (+ y 3)
-                                   (org-timegrid--accent block palette)))
+    (when (and icon (>= (- right x) 25))
+      (funcall icon svg (- right 10) (+ y 3)
+               (org-timegrid--accent block palette)))
     bounds))
 
 (defun org-timegrid--draw-day-label

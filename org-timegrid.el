@@ -372,6 +372,8 @@ PUSH-CONTEXT makes this a push instead of an ordinary drag."
       (user-error "This backend cannot move calendar entries"))
     (unless (and event (not (org-timegrid-block-all-day-p block)))
       (user-error "Select a timed task to push"))
+    (when (plist-get metadata :diary)
+      (org-timegrid--prepare-block-edit block))
     (when (or (plist-get metadata :repeater-type) (plist-get metadata :clock))
       (user-error "Use ordinary movement for repeating tasks and clocks"))
     (cons event
@@ -381,7 +383,8 @@ PUSH-CONTEXT makes this a push instead of an ordinary drag."
               (or (and (< (org-timegrid-event-start other) (org-timegrid-event-end event))
                        (> (org-timegrid-event-end other) (org-timegrid-event-start event)))
                   (org-timegrid-event-all-day other)
-                  (plist-get (org-timegrid-event-metadata other) :repeater-type)))
+                  (plist-get (org-timegrid-event-metadata other) :repeater-type)
+                  (plist-get (org-timegrid-event-metadata other) :diary)))
             (org-timegrid--calendar-state-events org-timegrid--state))))))
 
 (defun org-timegrid--push-groups (events)
@@ -713,7 +716,7 @@ SOURCE-EVENT identifies an entry to reuse, and TARGET selects its destination."
   "Backend edit scope retained during consecutive block adjustments.")
 
 (defun org-timegrid--prepare-block-edit (block)
-  "Let BLOCK's backend choose an edit scope before displaying a preview."
+  "Let BLOCK's backend validate editing and choose an edit scope."
   (when-let* ((event (org-timegrid-block-event block))
               (prepare (plist-get (org-timegrid-event-metadata event)
                                   :prepare-edit)))
@@ -994,7 +997,7 @@ CLICK-FUNCTION handles a press that never becomes a drag."
          (origin (funcall target-function origin-position))
          (origin-xy (funcall position-function origin-position))
          (end-target origin)
-         dragged finished next basic)
+         dragged finished next basic failure)
     (unwind-protect
         (progn
           ;; Freeze the rail while tracking so a preview cannot move the
@@ -1026,9 +1029,15 @@ CLICK-FUNCTION handles a press that never becomes a drag."
                   (setq finished 'cancelled))))))
           (unless (eq finished 'cancelled)
             (if dragged
-                (org-timegrid--apply (funcall proposal-function origin end-target))
+                (condition-case err
+                    (org-timegrid--apply (funcall proposal-function origin end-target))
+                  (user-error (setq failure (error-message-string err))))
               (funcall click-function origin-position))))
-      (org-timegrid--clear-preview))))
+      (org-timegrid--clear-preview))
+    (when failure
+      ;; Repaint the snapped-back block before displaying the warning.
+      (redisplay t)
+      (message "%s" failure))))
 
 (defun org-timegrid-header-press (event)
   "Track an all-day range creation gesture beginning with mouse EVENT.
