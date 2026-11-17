@@ -729,8 +729,9 @@ an active timestamp in their title or own section.")
                         '(0 1 2) "")))
      rows)))
 
-(defun org-timegrid-org-read-entry ()
-  "Read an eligible Org heading, or a title for a new capture entry."
+(defun org-timegrid-org-read-entry (&optional multiple)
+  "Read an eligible Org heading, or a title for a new capture entry.
+With MULTIPLE, return a list of entries using `completing-read-multiple'."
   (let* ((candidates (org-timegrid-org--heading-candidates))
          (affix (lambda (entries)
                   (org-timegrid-org--affix-entries entries candidates)))
@@ -739,11 +740,13 @@ an active timestamp in their title or own section.")
                       `(metadata (category . org-timegrid-entry)
                                  (affixation-function . ,affix))
                     (complete-with-action action candidates string predicate))))
-         (choice (completing-read "Task: " table nil nil))
-         (match (assoc choice candidates)))
-    (if match
-        (cdr match)
-      (cons choice nil))))
+         (choices (if multiple
+                      (completing-read-multiple "Tasks: " table nil nil)
+                    (list (completing-read "Task: " table nil nil))))
+         (entries (mapcar (lambda (choice)
+                            (or (cdr (assoc choice candidates)) (cons choice nil)))
+                          choices)))
+    (if multiple entries (car entries))))
 
 
 (defun org-timegrid-org--prepare-history ()
@@ -1725,22 +1728,26 @@ When HEADING is non-nil, move to the containing Org heading first."
 
 ;;;###autoload
 (defun org-timegrid-org-quick-add (&optional entry start)
-  "Add a task in the first available gap at or after START, before midnight.
-ENTRY is a (TITLE . MARKER) pair; nil prompts for a task or new title.
+  "Add tasks in free gaps at or after START, before midnight.
+ENTRY is a (TITLE . MARKER) pair or a list of such pairs.  Nil prompts
+for tasks or new titles using `completing-read-multiple'; separate them
+with `crm-separator' (commas by default).  Tasks are added in selection order.
 A nil marker creates a new capture entry.  Use the task's latest explicit
 block duration, or `org-timegrid-default-duration-minutes' when absent.
 START is an absolute Gregorian minute, or nil for now rounded up to
 `org-timegrid-slot-minutes'.
 Interactively, use the visible calendar cursor when on the timed grid,
-otherwise now.  Existing blocks stay in place."
+otherwise now.  Existing blocks stay in place.  All tasks must fit;
+the additions form one undo step."
   (interactive
    (list nil (and (derived-mode-p 'org-timegrid-mode)
                   (org-timegrid--cursor-visible-p)
                   (eq (org-timegrid--cursor-state-surface
                        (org-timegrid--cursor)) 'grid)
                   (org-timegrid--cursor-calendar-minute))))
-  (setq entry (or entry (org-timegrid-org-read-entry)))
-  (when (string-empty-p (string-trim (car entry)))
+  (setq entry (or entry (org-timegrid-org-read-entry t)))
+  (when (stringp (car entry)) (setq entry (list entry)))
+  (unless entry
     (user-error "Enter a task title"))
   (let* ((requested-start
           (pcase start
@@ -1754,22 +1761,28 @@ otherwise now.  Existing blocks stay in place."
          (search-start (if start requested-start
                          (* org-timegrid-slot-minutes
                             (ceiling requested-start org-timegrid-slot-minutes))))
-         (marker (cdr entry))
-         (duration
-          (or (and marker
-                   (org-with-point-at marker
-                     (org-narrow-to-subtree)
-                     (org-timegrid-org--heading-last-duration
-                      (car (org-element-contents (org-element-parse-buffer))))))
-              org-timegrid-default-duration-minutes))
-         (slot (org-timegrid-next-free-slot
-                (org-timegrid-org--list-events day-start day-end)
-                search-start day-end duration)))
-    (unless slot
-      (user-error "No free %d-minute slot left on %s"
-                  duration (org-timegrid-org--format-date (/ day-start 1440))))
-    (org-timegrid-org--create-event
-     (car entry) slot (+ slot duration) nil marker 'timed)
+         (events (org-timegrid-org--list-events day-start day-end)))
+    (org-timegrid-org--transaction
+     (lambda ()
+       (dolist (task entry)
+         (when (string-empty-p (string-trim (car task)))
+           (user-error "Enter a task title"))
+         (let* ((marker (cdr task))
+                (duration
+                 (or (and marker
+                          (org-with-point-at marker
+                            (org-narrow-to-subtree)
+                            (org-timegrid-org--heading-last-duration
+                             (car (org-element-contents (org-element-parse-buffer))))))
+                     org-timegrid-default-duration-minutes))
+                (slot (org-timegrid-next-free-slot
+                       events search-start day-end duration)))
+           (unless slot
+             (user-error "No free %d-minute slot left on %s"
+                         duration (org-timegrid-org--format-date (/ day-start 1440))))
+           (setq search-start (+ slot duration))
+           (org-timegrid-org--create-event
+            (car task) slot search-start nil marker 'timed)))))
     (org-timegrid-org--refresh-clocks)))
 
 (defun org-timegrid-org-command (command)

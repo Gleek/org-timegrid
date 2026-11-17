@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Quick-add multiple tasks with comma-separated completion (`crm-separator`).
+
 ## v0.1.1 — 2026-11-16
 
 - Use the arrow pointer over the calendar and blocks, keeping resize cursors.

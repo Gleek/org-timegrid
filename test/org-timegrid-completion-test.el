@@ -92,6 +92,23 @@
             ((symbol-function 'completing-read) (lambda (&rest _) "New task")))
     (should (equal (org-timegrid-org-read-entry) '("New task")))))
 
+(ert-deftest org-timegrid-completion-multiple-entries ()
+  (with-temp-buffer
+    (let* ((marker (point-marker))
+           (candidates (list (cons "Existing" (cons "Existing" marker)))))
+      (cl-letf (((symbol-function 'org-timegrid-org--heading-candidates)
+                 (lambda () candidates))
+                ((symbol-function 'completing-read-multiple)
+                 (lambda (_prompt table &rest _)
+                   (should (equal (all-completions "" table) '("Existing")))
+                   (should (eq (completion-metadata-get
+                                (completion-metadata "" table nil) 'category)
+                               'org-timegrid-entry))
+                   '("New task" "Existing" "Another task"))))
+        (should (equal (org-timegrid-org-read-entry t)
+                       (list '("New task") (cons "Existing" marker)
+                             '("Another task"))))))))
+
 (ert-deftest org-timegrid-completion-aligned-columns ()
   (let* ((short (propertize "Short" 'org-timegrid-columns
                             '("last: 5m" ":work:" "one.org")))

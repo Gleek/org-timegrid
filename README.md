@@ -206,7 +206,7 @@ the selected block. Copies use the Emacs kill ring.
 | `n` / `p` | Select the next or previous block |
 | `C-SPC`, `C-x C-x` | Set mark, or exchange point and mark |
 | `RET` | Visit or create a block |
-| `a` | Quick-add a task into the first free gap after the cursor or now |
+| `a` | Quick-add tasks, separated by commas, into free gaps after the cursor or now |
 | `C-g` | Cancel a pending edit, clear the region, or hide the cursor |
 | `M-down` / `M-up` | Move the selected block by one slot |
 | `M-right` / `M-left` | Move the block by one day |
