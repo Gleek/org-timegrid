@@ -1331,27 +1331,69 @@ Keep the same calendar minute at the vertical center of the window."
     (set-window-point window (point-min))
     (org-timegrid--set-vscroll window org-timegrid--saved-vscroll)))
 
+(defun org-timegrid--cursor-scroll-target (top slot body scroll)
+  "Return a scroll offset for a cursor at TOP, or nil if already in view.
+SLOT and BODY are the cursor and viewport heights in pixels; SCROLL is the
+current pixel offset.  Apply Emacs's automatic scrolling policy, counting
+one calendar slot as one screen line."
+  (let* ((lines (floor body slot))
+         (ratio (if (floatp maximum-scroll-margin)
+                    (max 0.0 (min 0.5 maximum-scroll-margin))
+                  0.25))
+         (margin (* slot (max 0 (min scroll-margin
+                                     (/ (1- lines) 2)
+                                     (floor (* lines ratio))))))
+         (bottom (+ top slot))
+         (above (< top (+ scroll margin)))
+         (below (> bottom (- (+ scroll body) margin))))
+    (when (or above below)
+      (let* ((edge (if above (- top margin) (- (+ bottom margin) body)))
+             (distance (abs (- edge scroll)))
+             (conservative (max 0 scroll-conservatively))
+             (step (* slot (max 0 scroll-step)))
+             (stepped (+ scroll (if above (- step) step)))
+             (aggressive (if above scroll-down-aggressively
+                           scroll-up-aggressively)))
+        (cond
+         ((or (> conservative 100)
+              (and (> conservative 0) (<= distance (* conservative slot))))
+          edge)
+         ((and (= conservative 0) (> step 0) (<= distance step)
+               (<= (+ stepped margin) top)
+               (<= bottom (- (+ stepped body) margin)))
+          stepped)
+         ((and (= conservative 0) (numberp aggressive))
+          ;; Fractions measure inward from the relevant scroll margin.
+          ;; Keep the entire slot between both margins even at extremes.
+          (max (- (+ bottom margin) body)
+               (min (- top margin)
+                    (+ edge (* (if above -1 1)
+                               (max 0 (floor (* aggressive body))))))))
+         (t (- top (/ (- body slot) 2.0))))))))
+
 (defun org-timegrid--scroll-cursor-into-view ()
-  "Scroll the minimum amount needed to make the whole cursor slot visible."
+  "Keep the cursor visible using Emacs's automatic scrolling variables.
+One calendar slot is treated as one screen line.  Rail cursors do not
+change the timed grid's scroll position."
   (when-let* ((cursor (org-timegrid--cursor))
+              ((eq (org-timegrid--cursor-state-surface cursor) 'grid))
               (window (get-buffer-window (current-buffer) t)))
     (let* ((scale (org-timegrid--pixels-per-minute))
            (start-minute (* 60 org-timegrid-start-hour))
            (top (+ (org-timegrid--grid-top-inset)
                    (* (- (org-timegrid--cursor-state-minute cursor) start-minute) scale)))
-           (bottom (+ top (* org-timegrid-slot-minutes scale)))
+           (slot (* org-timegrid-slot-minutes scale))
            (body (window-body-height window t))
            (vscroll (org-timegrid--window-scroll-pixels window))
            (maximum (max 0 (- (or org-timegrid--image-height 0) body))))
       (cond
-       ((or (eq (org-timegrid--cursor-state-surface cursor) 'rail)
-            (<= (org-timegrid--cursor-state-minute cursor) start-minute))
+       ((<= (org-timegrid--cursor-state-minute cursor) start-minute)
         (when (> vscroll 0) (org-timegrid--set-vscroll window 0)))
-       ((< top vscroll)
-        (org-timegrid--set-vscroll window (max 0 (min maximum top))))
-       ((> bottom (+ vscroll body))
-        (org-timegrid--set-vscroll
-         window (max 0 (min maximum (- bottom body)))))))))
+       (t
+        (when-let* ((target (org-timegrid--cursor-scroll-target
+                            top slot body vscroll)))
+          (org-timegrid--set-vscroll
+           window (max 0 (min maximum target)))))))))
 
 (defun org-timegrid--align-minute (window minute &optional alignment)
   "Position MINUTE vertically in WINDOW using ALIGNMENT.

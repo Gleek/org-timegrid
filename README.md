@@ -201,7 +201,7 @@ the selected block. Copies use the Emacs kill ring.
 | `C-f` / `C-b`, left/right | Move through overlapping blocks and days |
 | `C-v` / `M-v`, `SPC` | Move by one screen |
 | `C-a` / `C-e` | Go to the first or last slot of the day |
-| `C-l` | Center the view on the cursor |
+| `C-l` | Cycle the cursor's view position through middle, top, and bottom |
 | `C-x +` / `C-x C--` / `C-x C-0` | Zoom in, out, or reset |
 | `n` / `p` | Select the next or previous block |
 | `C-SPC`, `C-x C-x` | Set mark, or exchange point and mark |

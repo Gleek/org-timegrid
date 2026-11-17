@@ -394,19 +394,23 @@
         (org-timegrid-org--undo nil nil)
         (should (equal before (buffer-string)))))))
 
-(ert-deftest org-timegrid-regression-day-start-and-rail-reveal-top-padding ()
-  (dolist (surface '(grid rail))
-    (let* ((org-timegrid--state
-            (org-timegrid--calendar-state-create
-             :cursor (org-timegrid--cursor-state-create
-                      :surface surface :day 0 :minute 0)))
-           scrolled)
-      (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window)))
-                ((symbol-function 'org-timegrid--window-scroll-pixels) (lambda (_) 500))
-                ((symbol-function 'org-timegrid--set-vscroll)
-                 (lambda (_window pixels) (setq scrolled pixels))))
-        (org-timegrid--scroll-cursor-into-view)
-        (should (equal scrolled 0))))))
+(ert-deftest org-timegrid-regression-rail-preserves-scroll-until-grid-entry ()
+  (let* ((org-timegrid-start-hour 0)
+         (cursor (org-timegrid--cursor-state-create
+                  :surface 'rail :day 0 :minute 0))
+         (org-timegrid--state
+          (org-timegrid--calendar-state-create :cursor cursor))
+         scrolled)
+    (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) (selected-window)))
+              ((symbol-function 'org-timegrid--window-scroll-pixels) (lambda (_) 500))
+              ((symbol-function 'org-timegrid--set-vscroll)
+               (lambda (_window pixels) (setq scrolled pixels))))
+      (org-timegrid--scroll-cursor-into-view)
+      (should-not scrolled)
+      ;; C-n enters the timed grid at midnight, which must be revealed.
+      (setf (org-timegrid--cursor-state-surface cursor) 'grid)
+      (org-timegrid--scroll-cursor-into-view)
+      (should (equal scrolled 0)))))
 
 (ert-deftest org-timegrid-regression-navigation-follows-horizontal-order ()
   (dolist (right-end '(630 660))

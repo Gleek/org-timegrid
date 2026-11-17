@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep the timed grid's scroll position when selecting the day rail.
+- Follow Emacs scrolling settings during keyboard navigation
 - Quick-add multiple tasks with comma-separated completion (`crm-separator`).
 
 ## v0.1.1 — 2026-11-16

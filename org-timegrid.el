@@ -1236,9 +1236,9 @@ Leave the first non-motion event for the gesture loop to process."
 
 (defun org-timegrid-recenter ()
   "Cycle the cursor's slot through middle, top, and bottom of the window.
-Ordinary motion scrolls only as far as it must, which keeps the cursor at
-an edge after a long run; this is the view half of that on its own, so
-the cursor never moves to satisfy the scroll."
+Unlike ordinary motion, this explicitly aligns the view regardless of
+the automatic scrolling settings.  The cursor never moves to satisfy
+the scroll."
   (interactive)
   (let ((position (if (eq last-command 'org-timegrid-recenter)
                       (pcase org-timegrid--recenter-position
