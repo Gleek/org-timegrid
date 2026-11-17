@@ -567,8 +567,7 @@ PALETTE and FONT-FAMILY determine the label's appearance."
            (month-title (car month-parts))
            (year-title (cadr month-parts))
            (title-x (+ left-offset 8))
-           (svg (svg-create width height :stroke-width 0))
-           )
+           (svg (svg-create width height :stroke-width 0)))
       (svg-rectangle svg 0 0 width height
                      :fill (plist-get palette :time-background))
       (org-timegrid--draw-text svg month-title :x title-x

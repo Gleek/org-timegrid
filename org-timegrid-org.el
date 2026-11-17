@@ -1556,7 +1556,7 @@ END is nil for a time without an explicit end."
               times))))
 
 (defun org-timegrid-org--diary-event (file headline element day text index)
-  "Build one occurrence of diary ELEMENT on DAY from evaluated TEXT.
+  "Build HEADLINE's diary ELEMENT occurrence in FILE on DAY from TEXT.
 INDEX distinguishes multiple results on the same date."
   (let* ((times (org-timegrid-org--diary-times text))
          (midnight (* day 1440))
@@ -1612,6 +1612,13 @@ FILE defaults to the variable `buffer-file-name'.  Optional QUERY-START and
 QUERY-END bound diary evaluation and exclude clocks outside the range.
 Other planned timestamps remain unbounded so repeaters can expand later."
   (let* ((file (or file buffer-file-name (buffer-name)))
+         ;; Org <9.7 does not recognize the optional time after a diary sexp.
+         (org-element--timestamp-regexp
+          (if (version< (org-version) "9.7")
+              (concat org-element--timestamp-regexp
+                      "\\|<%%([^>\n]+)[ \t]+[012]?[0-9]:[0-5][0-9]"
+                      "\\(?:-[012]?[0-9]:[0-5][0-9]\\)?>")
+            org-element--timestamp-regexp))
          (tree (org-element-parse-buffer))
          ;; Share Agenda's memoization within this query, never stale global values.
          (org--diary-sexp-entry-cache (make-hash-table :test #'equal))
