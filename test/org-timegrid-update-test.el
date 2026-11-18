@@ -245,4 +245,20 @@
                                  (org-timegrid--calendar-state-events org-timegrid--state))))
           (should (= full 1)))))))
 
+(ert-deftest org-timegrid-update-visit-keeps-calendar-rendering ()
+  "Opening a source must not rebuild the calendar with a hidden window width."
+  (save-window-excursion
+    (with-temp-buffer
+      (let ((source (current-buffer)))
+        (org-timegrid-update-test--calendar
+          (switch-to-buffer (current-buffer))
+          (setf (org-timegrid-backend-visit-function org-timegrid--backend)
+                (lambda (_) (pop-to-buffer-same-window source)))
+          (cl-letf (((symbol-function 'org-timegrid--window-width)
+                     (lambda () (if (get-buffer-window) 1200 900))))
+            (let ((org-timegrid--displayed-context (org-timegrid--capture-context)))
+              (org-timegrid-open-at-cursor)))
+          (should (eq (window-buffer) source))
+          (should (= full 0)))))))
+
 ;;; org-timegrid-update-test.el ends here

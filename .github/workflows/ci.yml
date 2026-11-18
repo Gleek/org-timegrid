@@ -43,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        emacs: ["29.4", "30.2", "31.1"]
+        emacs: ["29.4", "30.2", "31.1", "snapshot"]
     steps:
       - uses: actions/checkout@v4
       - uses: d12frosted/setup-emacs@v1

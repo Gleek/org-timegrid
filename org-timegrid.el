@@ -1950,18 +1950,18 @@ time-grid cells prompt for the timed duration as usual."
 (defun org-timegrid-open-at-cursor ()
   "Visit the block under the cursor, or create one when the slot is empty."
   (interactive)
-  (org-timegrid--with-update nil
-    (org-timegrid--reveal-cursor)
-    (let ((block (org-timegrid--block-at-cursor)))
-      (if (or (org-timegrid-region-active-p) (null block))
-          (org-timegrid-create-at-cursor)
-        (let ((event (org-timegrid-block-event block))
-              (visitor (and org-timegrid--backend
-                            (org-timegrid-backend-visit-function
-                             org-timegrid--backend))))
-          (if (and event (functionp visitor))
-              (funcall visitor event)
-            (message "No source to visit")))))))
+  (let ((block (org-timegrid--block-at-cursor)))
+    (if (or (org-timegrid-region-active-p) (null block))
+        (org-timegrid-create-at-cursor)
+      ;; Finish drawing while the calendar window is still available.
+      (org-timegrid--with-update nil (org-timegrid--reveal-cursor))
+      (let ((event (org-timegrid-block-event block))
+            (visitor (and org-timegrid--backend
+                          (org-timegrid-backend-visit-function
+                           org-timegrid--backend))))
+        (if (and event (functionp visitor))
+            (funcall visitor event)
+          (message "No source to visit"))))))
 
 ;;; Keyboard copy, cut, and yank
 

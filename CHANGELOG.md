@@ -7,6 +7,10 @@
 - Quick-add multiple tasks with comma-separated completion (`crm-separator`).
 - Show view only diary expressions on matching dates.
 
+### Bugfixes
+
+- Preserve calendar scroll when opening an Org entry and returning.
+
 ## v0.1.1 — 2026-11-16
 
 - Use the arrow pointer over the calendar and blocks, keeping resize cursors.
