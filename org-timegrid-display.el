@@ -170,17 +170,29 @@
 
 (defvar org-timegrid--cache-anchor nil)
 
+(defun org-timegrid--display-window ()
+  "Return a window displaying the current buffer, preferring a visible GUI."
+  ;; The `visible' argument would restrict the search to the current terminal.
+  (or (seq-find (lambda (window)
+                  (let ((frame (window-frame window)))
+                    (and (display-graphic-p frame) (eq (frame-visible-p frame) t))))
+                (get-buffer-window-list (current-buffer) 'no-minibuffer t))
+      (get-buffer-window (current-buffer) t)))
+
 (defun org-timegrid--capture-context ()
   "Capture every declared drawing input without retaining a window or buffer."
-  (let ((org-timegrid--render-context nil))
-    (org-timegrid--render-context-create
-     :settings (mapcar (lambda (name) (cons name (copy-tree (symbol-value name))))
-                       org-timegrid--style-variables)
-     :width (org-timegrid--canvas-width) :zoom (org-timegrid--zoom-factor)
-     :frame-scale (org-timegrid--frame-font-factor) :font (org-timegrid--font-family)
-     :palette (org-timegrid--palette) :today (calendar-current-date)
-     :header-offset (org-timegrid--header-left-offset (get-buffer-window (current-buffer) t))
-     :minute (floor (float-time) 60))))
+  (save-selected-window
+    (when-let* ((window (org-timegrid--display-window)))
+      (select-window window 'norecord))
+    (let ((org-timegrid--render-context nil))
+      (org-timegrid--render-context-create
+       :settings (mapcar (lambda (name) (cons name (copy-tree (symbol-value name))))
+                         org-timegrid--style-variables)
+       :width (org-timegrid--canvas-width) :zoom (org-timegrid--zoom-factor)
+       :frame-scale (org-timegrid--frame-font-factor) :font (org-timegrid--font-family)
+       :palette (org-timegrid--palette) :today (calendar-current-date)
+       :header-offset (org-timegrid--header-left-offset (get-buffer-window (current-buffer) t))
+       :minute (floor (float-time) 60)))))
 
 (defun org-timegrid-day-image (blocks start-minute end-minute width &optional now)
   "Return the read-only day strip for BLOCKS, sharing calendar drawing components."
@@ -805,7 +817,7 @@ ALIGNMENT defaults to `center'."
   (org-timegrid--ensure-state)
   (org-timegrid--with-render-context (or org-timegrid--render-context (org-timegrid--capture-context))
     (org-timegrid--sync-fringe-background)
-    (let* ((window (get-buffer-window (current-buffer) t))
+    (let* ((window (org-timegrid--display-window))
            (vscroll (and preserve-scroll window
                          (org-timegrid--window-scroll-pixels window)))
            (previewp (org-timegrid--calendar-state-preview org-timegrid--state)))
@@ -886,6 +898,7 @@ ALIGNMENT defaults to `center'."
         (factor (org-timegrid--zoom-factor window)))
     (with-current-buffer buffer
       (when (and (derived-mode-p 'org-timegrid-mode)
+                 (eq window (org-timegrid--display-window))
                  (or org-timegrid--stale
                      (/= width (or org-timegrid--last-width -1))
                      (/= factor org-timegrid--last-zoom-factor)))
@@ -1156,7 +1169,7 @@ drawn into rather than the frame's idea of the face."
 
 (defun org-timegrid--window-width ()
   "Return the calendar window's body width in pixels."
-  (if-let* ((window (get-buffer-window (current-buffer) t)))
+  (if-let* ((window (org-timegrid--display-window)))
       (window-body-width window t)
     900))
 
