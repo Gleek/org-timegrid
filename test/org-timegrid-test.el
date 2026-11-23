@@ -380,15 +380,30 @@
          (second (org-timegrid--operation-block
                   (org-timegrid--edit-proposal first -15 0 nil)))
          (day (org-timegrid--operation-block
-               (org-timegrid--edit-proposal block 0 1 nil)))
-         (resize (org-timegrid--operation-block
-                  (org-timegrid--edit-proposal block -15 0 'top))))
+               (org-timegrid--edit-proposal block 0 1 nil))))
     (should (equal (list (org-timegrid-block-start first)
                          (org-timegrid-block-end first))
                    '(975 1005)))
     (should (= (org-timegrid-block-start second) 960))
-    (should (= (org-timegrid-block-start day) 993))
-    (should (= (org-timegrid-block-start resize) 978))))
+    (should (= (org-timegrid-block-start day) 993))))
+
+(ert-deftest org-timegrid-test-keyboard-resize-snaps-edited-edge ()
+  (let ((org-timegrid-slot-minutes 15))
+    (pcase-dolist (`(,edge ,delta ,end ,range)
+                   '((top -15 1038 (990 1038))
+                     (top 15 1038 (1005 1038))
+                     (bottom -15 1038 (993 1035))
+                     (bottom 15 1038 (993 1050))
+                     (bottom 30 1038 (993 1065))
+                     (top 60 1038 (1020 1038))
+                     (bottom -60 1038 (993 1020))
+                     (top 15 1008 (993 1008))
+                     (bottom -15 1008 (993 1008))))
+      (let* ((block (org-timegrid--make-block 1 3 993 end "Event"))
+             (resized (org-timegrid--operation-block
+                       (org-timegrid--edit-proposal block delta 0 edge))))
+        (should (equal range (list (org-timegrid-block-start resized)
+                                  (org-timegrid-block-end resized))))))))
 
 (defun org-timegrid-test--svg-image-spec (svg &rest properties)
   "Return an image spec for SVG without invoking an image backend."

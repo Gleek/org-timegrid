@@ -1258,13 +1258,27 @@ visible week.  Timed ranges remain clamped to the visible week."
 
 (defun org-timegrid--edit-proposal (block minutes days edge)
   "Return one timed or all-day edit preview for BLOCK.
-MINUTES and DAYS form the interval delta; EDGE selects a resize endpoint."
-  (when (and (null edge) (/= minutes 0)
-             (not (org-timegrid-block-all-day-p block)))
-    (let ((start (org-timegrid-block-start block)))
-      (setq minutes (- (* org-timegrid-slot-minutes
-                          (round (+ start minutes) org-timegrid-slot-minutes))
-                       start))))
+MINUTES and DAYS form the interval delta; EDGE selects a resize endpoint.
+For a timed resize, count the first grid line in that direction as one slot."
+  (when (and (/= minutes 0) (not (org-timegrid-block-all-day-p block)))
+    (let* ((start (org-timegrid-block-start block))
+           (end (org-timegrid-block-end block))
+           (slot org-timegrid-slot-minutes)
+           (anchor (if (eq edge 'bottom) end start))
+           (target (+ anchor minutes))
+           (index (cond ((null edge) (round target slot))
+                        ((> minutes 0) (floor target slot))
+                        (t (ceiling target slot))))
+           ;; Clamp in slot units so a resize stops on a grid line.
+           (snapped (pcase edge
+                      ('top (min index (floor (- end slot) slot)))
+                      ('bottom (max index (ceiling (+ start slot) slot)))
+                      (_ index)))
+           (delta (- (* snapped slot) anchor)))
+      ;; A shrink must not grow a block that already meets the minimum.
+      (setq minutes (if (and edge (>= (- end start) slot)
+                             (< (* delta minutes) 0))
+                        0 delta))))
   (org-timegrid--operation-create
    :kind (if edge 'resize 'move) :edge edge
    :block (org-timegrid--transform-block-range

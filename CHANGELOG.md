@@ -10,6 +10,7 @@
 ### Bugfixes
 
 - Preserve calendar scroll when opening an Org entry and returning.
+- Snap timed block edges to calendar slots when resizing with the keyboard.
 
 ## v0.1.1 — 2026-11-16
 
