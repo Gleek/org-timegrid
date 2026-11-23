@@ -2,15 +2,15 @@
 
 ## Unreleased
 
-- Keep the timed grid's scroll position when selecting the day rail.
+- [NEW] Show view only diary expressions on matching dates.
 - Follow Emacs scrolling settings during keyboard navigation
 - Quick-add multiple tasks with comma-separated completion (`crm-separator`).
-- Show view only diary expressions on matching dates.
+- Snap timed block edges to calendar slots when resizing with the keyboard.
 
 ### Bugfixes
 
 - Preserve calendar scroll when opening an Org entry and returning.
-- Snap timed block edges to calendar slots when resizing with the keyboard.
+- Keep the timed grid's scroll position when selecting the day rail.
 
 ## v0.1.1 — 2026-11-16
 
